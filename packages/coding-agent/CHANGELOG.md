@@ -11,6 +11,7 @@
 - Added explicit `remember` retrieval and `save_note` durable-memory tools backed by the shared `~/.pi/memory.jsonl` store.
 - Changed session discovery and recent-session lookup to filter by `{channel, channelSessionId}`, with CLI legacy fallback to resolved cwd.
 - Changed persona loading to use editable `THEOSES.md` files through the existing context-file loader.
+- Changed `save_note` to require a model-supplied confidence of at least 0.85 and to describe the durable-signal promotion bar.
 
 ## [0.84.3] - 2026-08-24
 

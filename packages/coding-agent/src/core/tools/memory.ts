@@ -6,7 +6,12 @@ import type { MemoryStore } from "../memory-store.ts";
 
 const rememberSchema = Type.Object({ query: Type.String({ description: "What durable information to recall" }) });
 const saveNoteSchema = Type.Object({
-	note: Type.String({ description: "A durable fact or preference explicitly requested by the user" }),
+	note: Type.String({ description: "A present, durable fact about the user, people, projects, or preferences" }),
+	confidence: Type.Number({
+		minimum: 0.85,
+		maximum: 1,
+		description: "Confidence in this durable fact; must be at least 0.85",
+	}),
 });
 
 type RememberInput = Static<typeof rememberSchema>;
@@ -46,10 +51,12 @@ export function createMemoryToolDefinitions(store: MemoryStore): ToolDefinition[
 		{
 			name: "save_note",
 			label: "save_note",
-			description: "Save a durable fact or preference when the user explicitly asks you to remember it.",
-			promptSnippet: "Save an explicitly requested durable note",
+			description:
+				"Save a present, high-confidence durable fact worth remembering in a month. Use for recognized signals, not chit-chat or one-offs.",
+			promptSnippet: "Promote a high-confidence durable fact",
 			parameters: saveNoteSchema,
-			execute: async (_id, { note }: SaveNoteInput) => {
+			execute: async (_id, { note, confidence }: SaveNoteInput) => {
+				if (confidence < 0.85) throw new Error("Durable memory confidence must be at least 0.85");
 				store.saveNote(note);
 				return { content: [{ type: "text", text: "Durable note saved." }], details: undefined };
 			},
