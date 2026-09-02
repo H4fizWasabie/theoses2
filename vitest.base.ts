@@ -16,17 +16,17 @@ export const workspaceSourcePaths = {
 export default defineConfig({
 	resolve: {
 		alias: [
-			{ find: /^@earendil-works\/pi-telemetry$/, replacement: workspaceSourcePaths.telemetryIndex },
-			{ find: /^@earendil-works\/pi-telemetry\/testing$/, replacement: workspaceSourcePaths.telemetryTesting },
-			{ find: /^@earendil-works\/pi-ai$/, replacement: workspaceSourcePaths.aiIndex },
-			{ find: /^@earendil-works\/pi-ai\/compat$/, replacement: workspaceSourcePaths.aiCompat },
-			{ find: /^@earendil-works\/pi-ai\/oauth$/, replacement: workspaceSourcePaths.aiOAuth },
+			{ find: /^theoses-telemetry$/, replacement: workspaceSourcePaths.telemetryIndex },
+			{ find: /^theoses-telemetry\/testing$/, replacement: workspaceSourcePaths.telemetryTesting },
+			{ find: /^theoses-ai$/, replacement: workspaceSourcePaths.aiIndex },
+			{ find: /^theoses-ai\/compat$/, replacement: workspaceSourcePaths.aiCompat },
+			{ find: /^theoses-ai\/oauth$/, replacement: workspaceSourcePaths.aiOAuth },
 			{
-				find: /^@earendil-works\/pi-ai\/providers\/(.+)$/,
+				find: /^theoses-ai\/providers\/(.+)$/,
 				replacement: `${workspaceSourcePaths.aiProviders}/$1.ts`,
 			},
-			{ find: /^@earendil-works\/pi-agent-core$/, replacement: workspaceSourcePaths.agentIndex },
-			{ find: /^@earendil-works\/pi-tui$/, replacement: workspaceSourcePaths.tuiIndex },
+			{ find: /^theoses-agent-core$/, replacement: workspaceSourcePaths.agentIndex },
+			{ find: /^theoses-tui$/, replacement: workspaceSourcePaths.tuiIndex },
 		],
 	},
 });

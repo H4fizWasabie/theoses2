@@ -23,10 +23,10 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: [
-			{ find: /^@earendil-works\/pi-telemetry$/, replacement: telemetrySrcIndex },
-			{ find: /^@earendil-works\/pi-agent-core$/, replacement: agentSrcIndex },
-			{ find: /^@earendil-works\/pi-ai$/, replacement: aiSrcIndex },
-			{ find: /^@earendil-works\/pi-ai\/compat$/, replacement: aiSrcCompat },
+			{ find: /^theoses-telemetry$/, replacement: telemetrySrcIndex },
+			{ find: /^theoses-agent-core$/, replacement: agentSrcIndex },
+			{ find: /^theoses-ai$/, replacement: aiSrcIndex },
+			{ find: /^theoses-ai\/compat$/, replacement: aiSrcCompat },
 		],
 	},
 });
