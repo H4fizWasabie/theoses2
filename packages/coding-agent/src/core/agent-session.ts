@@ -262,6 +262,8 @@ export interface PromptOptions {
 }
 
 const REPLY_CONTEXT_CAP = 2000;
+const ABORT_NOTICE =
+	"[Abort Notice: The previous task was cancelled. Do not resume it unless the user explicitly asks you to.]";
 
 function normalizeImages(images: PromptOptions["images"]): ImageContent[] | undefined {
 	if (!images) return undefined;
@@ -1201,7 +1203,8 @@ export class AgentSession {
 				expandedText = this._expandSkillCommand(expandedText);
 				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 			}
-			const contextualText = addReplyContext(expandedText, options?.replyContext);
+			const abortNotice = this._findLastAssistantMessage()?.stopReason === "aborted" ? `${ABORT_NOTICE}\n\n` : "";
+			const contextualText = `${abortNotice}${addReplyContext(expandedText, options?.replyContext)}`;
 
 			// If streaming, queue via steer() or followUp() based on option
 			if (this.isStreaming) {
