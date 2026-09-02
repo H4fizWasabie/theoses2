@@ -38,7 +38,7 @@ import { formatVersionCheckError, getLatestPiRelease, isNewerPackageVersion } fr
 
 export type UpdateCommand = "update";
 
-type UpdateTarget = { type: "all" } | { type: "self" } | { type: "extensions"; source?: string } | { type: "models" };
+type UpdateTarget = { type: "self" } | { type: "models" };
 
 const DEFAULT_INSTALLER_API_BASE = "https://pi.dev/api/installer/releases";
 const MANAGED_INSTALL_MARKER = "managed-install.json";
@@ -233,7 +233,6 @@ const SELF_UPDATE_NOTE_MARKDOWN_THEME: MarkdownTheme = {
 interface UpdateCommandOptions {
 	command: UpdateCommand;
 	updateTarget?: UpdateTarget;
-	showExtensionsSkippedNote: boolean;
 	force: boolean;
 	projectTrustOverride?: boolean;
 	help: boolean;
@@ -287,7 +286,6 @@ function parseUpdateCommand(args: string[]): UpdateCommandOptions | undefined {
 	let invalidArgument: string | undefined;
 	let missingOptionValue: string | undefined;
 	let conflictingOptions: string | undefined;
-	let source: string | undefined;
 	let selfFlag = false;
 	let modelsFlag = false;
 
@@ -322,21 +320,15 @@ function parseUpdateCommand(args: string[]): UpdateCommandOptions | undefined {
 			continue;
 		}
 
-		if (!source) {
-			source = arg;
-		} else {
-			invalidArgument = invalidArgument ?? arg;
-		}
+		invalidArgument = invalidArgument ?? arg;
 	}
 
-	if (source) invalidArgument = source;
 	if (modelsFlag && (selfFlag || force)) conflictingOptions = "--models cannot be combined with --self or --force";
 	const updateTarget: UpdateTarget = modelsFlag ? { type: "models" } : { type: "self" };
 
 	return {
 		command,
 		updateTarget,
-		showExtensionsSkippedNote: false,
 		force,
 		projectTrustOverride,
 		help,
@@ -348,7 +340,7 @@ function parseUpdateCommand(args: string[]): UpdateCommandOptions | undefined {
 }
 
 function updateTargetIncludesSelf(target: UpdateTarget): boolean {
-	return target.type === "all" || target.type === "self";
+	return target.type === "self";
 }
 
 async function refreshModelCatalogs(agentDir: string): Promise<void> {
@@ -676,7 +668,7 @@ export async function handleUpdateCommand(
 					try {
 						await runSelfUpdate(selfUpdateCommand);
 					} catch (error: unknown) {
-						const message = error instanceof Error ? error.message : "Unknown package command error";
+						const message = error instanceof Error ? error.message : "Unknown update command error";
 						console.error(chalk.red(`Error: ${message}`));
 						if (installMethod === "pnpm") {
 							printPnpmSelfUpdateMetadataHint();
@@ -691,7 +683,7 @@ export async function handleUpdateCommand(
 			}
 		}
 	} catch (error: unknown) {
-		const message = error instanceof Error ? error.message : "Unknown package command error";
+		const message = error instanceof Error ? error.message : "Unknown update command error";
 		console.error(chalk.red(`Error: ${message}`));
 		process.exitCode = 1;
 		return true;
