@@ -42,6 +42,7 @@ export {
 	type LsToolInput,
 	type LsToolOptions,
 } from "./ls.ts";
+export { createMemoryToolDefinitions } from "./memory.ts";
 export {
 	createLocalPowerShellOperations,
 	createPowerShellTool,
@@ -82,11 +83,13 @@ export {
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ToolDefinition } from "../extensions/types.ts";
+import { FileMemoryStore, type MemoryStore } from "../memory-store.ts";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.ts";
 import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.ts";
 import { createFindTool, createFindToolDefinition, type FindToolOptions } from "./find.ts";
 import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.ts";
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.ts";
+import { createMemoryToolDefinitions } from "./memory.ts";
 import { createPowerShellTool, createPowerShellToolDefinition, type PowerShellToolOptions } from "./powershell.ts";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -95,7 +98,18 @@ import { createWriteTool, createWriteToolDefinition, type WriteToolOptions } fro
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
-export type ToolName = "read" | "bash" | "powershell" | "edit" | "write" | "grep" | "find" | "ls" | "working_note";
+export type ToolName =
+	| "read"
+	| "bash"
+	| "powershell"
+	| "edit"
+	| "write"
+	| "grep"
+	| "find"
+	| "ls"
+	| "working_note"
+	| "remember"
+	| "save_note";
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
 	"bash",
@@ -106,6 +120,8 @@ export const allToolNames: Set<ToolName> = new Set([
 	"find",
 	"ls",
 	"working_note",
+	"remember",
+	"save_note",
 ]);
 
 export interface ToolsOptions {
@@ -118,6 +134,7 @@ export interface ToolsOptions {
 	find?: FindToolOptions;
 	ls?: LsToolOptions;
 	workingNote?: (note: string) => void;
+	memory?: MemoryStore;
 }
 
 export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
@@ -140,6 +157,11 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			return createLsToolDefinition(cwd, options?.ls);
 		case "working_note":
 			return createWorkingNoteToolDefinition(options?.workingNote ?? (() => {}));
+		case "remember":
+		case "save_note": {
+			const definitions = createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore());
+			return definitions.find((definition) => definition.name === toolName)!;
+		}
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -165,6 +187,11 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			return createLsTool(cwd, options?.ls);
 		case "working_note":
 			return wrapToolDefinition(createWorkingNoteToolDefinition(options?.workingNote ?? (() => {})));
+		case "remember":
+		case "save_note": {
+			const definitions = createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore());
+			return wrapToolDefinition(definitions.find((definition) => definition.name === toolName)!);
+		}
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -199,6 +226,8 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		find: createFindToolDefinition(cwd, options?.find),
 		ls: createLsToolDefinition(cwd, options?.ls),
 		working_note: createWorkingNoteToolDefinition(options?.workingNote ?? (() => {})),
+		remember: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[0]!,
+		save_note: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[1]!,
 	};
 }
 
@@ -231,5 +260,7 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		find: createFindTool(cwd, options?.find),
 		ls: createLsTool(cwd, options?.ls),
 		working_note: wrapToolDefinition(createWorkingNoteToolDefinition(options?.workingNote ?? (() => {}))),
+		remember: wrapToolDefinition(createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[0]!),
+		save_note: wrapToolDefinition(createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[1]!),
 	};
 }

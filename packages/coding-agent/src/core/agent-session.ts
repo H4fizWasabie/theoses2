@@ -95,6 +95,7 @@ import {
 	wrapRegisteredTools,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
+import { FileMemoryStore } from "./memory-store.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -216,7 +217,7 @@ export interface AgentSessionConfig {
 	customTools?: ToolDefinition[];
 	/** Canonical model/auth runtime used by coding-agent internals. */
 	modelRuntime: ModelRuntime;
-	/** Initial active built-in tool names. Default: [read, bash, edit, write, working_note] */
+	/** Initial active built-in tool names. Default: [read, bash, edit, write, working_note, remember, save_note] */
 	initialActiveToolNames?: string[];
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
 	allowedToolNames?: string[];
@@ -264,8 +265,9 @@ const REPLY_CONTEXT_CAP = 2000;
 
 function normalizeImages(images: PromptOptions["images"]): ImageContent[] | undefined {
 	if (!images) return undefined;
-	if (images.length === 0 || typeof images[0] !== "string") return images as ImageContent[];
+	if (images.every((image): image is ImageContent => typeof image !== "string")) return images;
 	return images.map((dataUrl) => {
+		if (typeof dataUrl !== "string") throw new Error("Image attachments must use one consistent format");
 		const match = /^data:(image\/[a-z0-9.+-]+);base64,/i.exec(dataUrl);
 		if (!match) throw new Error("Image attachments must be base64 data URLs");
 		return { type: "image", data: dataUrl, mimeType: match[1] };
@@ -2727,6 +2729,7 @@ export class AgentSession {
 					read: { autoResizeImages },
 					bash: { commandPrefix: shellCommandPrefix, shellPath },
 					workingNote: (note) => this.sessionManager.appendWorkingNote(note),
+					memory: new FileMemoryStore(),
 				});
 
 		this._baseToolDefinitions = new Map(
@@ -2755,7 +2758,7 @@ export class AgentSession {
 
 		const defaultActiveToolNames = this._baseToolsOverride
 			? Object.keys(this._baseToolsOverride)
-			: ["read", "bash", "edit", "write", "working_note"];
+			: ["read", "bash", "edit", "write", "working_note", "remember", "save_note"];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,
