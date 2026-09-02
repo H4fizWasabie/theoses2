@@ -103,7 +103,6 @@ import { getUsageCostBreakdown } from "../../core/usage-totals.ts";
 import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.ts";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
-import { parseGitUrl } from "../../utils/git.ts";
 import { openBrowser } from "../../utils/open-browser.ts";
 import { getCwdRelativePath } from "../../utils/paths.ts";
 import { getPiUserAgent } from "../../utils/pi-user-agent.ts";
@@ -638,12 +637,6 @@ export class InteractiveMode {
 
 		if (source.startsWith("npm:")) {
 			return `${scopePrefix}:${source}`;
-		}
-
-		const gitSource = parseGitUrl(source);
-		if (gitSource) {
-			const ref = gitSource.ref ? `@${gitSource.ref}` : "";
-			return `${scopePrefix}:git:${gitSource.host}/${gitSource.path}${ref}`;
 		}
 
 		return scopePrefix;
@@ -1398,11 +1391,6 @@ export class InteractiveMode {
 		const source = sourceInfo?.source ?? "";
 		if (source.startsWith("npm:")) {
 			return source.slice("npm:".length) || source;
-		}
-
-		const gitSource = parseGitUrl(source);
-		if (gitSource) {
-			return gitSource.path || source;
 		}
 
 		return source;

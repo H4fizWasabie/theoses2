@@ -39,7 +39,7 @@ import { minimatch } from "minimatch";
 import { gt, maxSatisfying, rcompare, satisfies, valid, validRange } from "semver";
 import { CONFIG_DIR_NAME } from "../config.ts";
 import { spawnProcess, spawnProcessSync } from "../utils/child-process.ts";
-import { type GitSource, parseGitUrl } from "../utils/git.ts";
+import type { GitSource } from "../utils/git.ts";
 import { canonicalizePath, isLocalPath, markPathIgnoredByCloudSync, resolvePath } from "../utils/paths.ts";
 import { stripBom } from "../utils/text.ts";
 import { isStdoutTakenOver } from "./output-guard.ts";
@@ -1459,12 +1459,6 @@ export class DefaultPackageManager implements PackageManager {
 
 		if (isLocalPath(source)) {
 			return { type: "local", path: source };
-		}
-
-		// Try parsing as git URL
-		const gitParsed = parseGitUrl(source);
-		if (gitParsed) {
-			return gitParsed;
 		}
 
 		return { type: "local", path: source };
