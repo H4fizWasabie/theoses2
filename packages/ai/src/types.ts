@@ -515,6 +515,8 @@ export interface Tool<TParameters extends TSchema = TSchema> {
 	name: string;
 	description: string;
 	parameters: TParameters;
+	/** When true, capable providers may keep this tool out of the initial schema set. */
+	deferred?: boolean;
 	constrainedSampling?: false | ConstrainedSamplingConfig;
 }
 

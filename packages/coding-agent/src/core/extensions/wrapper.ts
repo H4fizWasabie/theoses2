@@ -14,11 +14,16 @@ import type { RegisteredTool } from "./types.ts";
  * Wrap a RegisteredTool into an AgentTool.
  * Uses the runner's createContext() for consistent context across tools and event handlers.
  */
-export function wrapRegisteredTool(registeredTool: RegisteredTool, runner: ExtensionRunner): AgentTool {
+export function wrapRegisteredTool(
+	registeredTool: RegisteredTool,
+	runner: ExtensionRunner,
+	deferred = true,
+): AgentTool {
 	const tool = wrapToolDefinition(registeredTool.definition, () => runner.createContext());
 	const execute = tool.execute;
 	return {
 		...tool,
+		deferred,
 		execute: async (toolCallId, params, signal, onUpdate) => {
 			const activeBefore = runner.getActiveTools();
 			const result = await execute(toolCallId, params, signal, onUpdate);
@@ -40,6 +45,10 @@ export function wrapRegisteredTool(registeredTool: RegisteredTool, runner: Exten
  * Wrap all registered tools into AgentTools.
  * Uses the runner's createContext() for consistent context across tools and event handlers.
  */
-export function wrapRegisteredTools(registeredTools: RegisteredTool[], runner: ExtensionRunner): AgentTool[] {
-	return registeredTools.map((tool) => wrapRegisteredTool(tool, runner));
+export function wrapRegisteredTools(
+	registeredTools: RegisteredTool[],
+	runner: ExtensionRunner,
+	deferred = true,
+): AgentTool[] {
+	return registeredTools.map((tool) => wrapRegisteredTool(tool, runner, deferred));
 }

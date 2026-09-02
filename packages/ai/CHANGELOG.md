@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Added deferred metadata for tools that capable providers may keep out of the initial schema set ([#16](https://github.com/H4fizWasabie/theoses2/issues/16)).
+
 ## [0.84.3] - 2026-08-24
 
 ### Breaking Changes

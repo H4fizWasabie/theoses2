@@ -32,7 +32,7 @@ export function splitDeferredTools(
 	const immediate: Tool[] = [];
 	const deferred = new Map<string, Tool>();
 	for (const [name, tool] of uniqueTools) {
-		if (deferredNames.has(name)) deferred.set(name, tool);
+		if (tool.deferred || deferredNames.has(name)) deferred.set(name, tool);
 		else immediate.push(tool);
 	}
 	return { immediate, deferred };

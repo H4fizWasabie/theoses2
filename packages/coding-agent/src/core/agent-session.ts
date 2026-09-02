@@ -117,6 +117,7 @@ import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
+import { createDeferredToolDefinitions } from "./tools/deferred-dispatch.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
@@ -408,6 +409,7 @@ export class AgentSession {
 	private _toolDefinitions: Map<string, ToolDefinitionEntry> = new Map();
 	private _toolPromptSnippets: Map<string, string> = new Map();
 	private _toolPromptGuidelines: Map<string, string[]> = new Map();
+	private _deferredToolUsage: Map<string, number> = new Map();
 
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
@@ -2709,6 +2711,19 @@ export class AgentSession {
 				sourceInfo: createSyntheticSourceInfo(`<sdk:${definition.name}>`, { source: "sdk" }),
 			})),
 		].filter((tool) => isAllowedTool(tool.definition.name));
+		const dispatcherDefinitions = createDeferredToolDefinitions(
+			() => new Map(allCustomTools.map((tool) => [tool.definition.name, tool.definition])),
+			(names, _context) => this.setActiveToolsByName([...this.getActiveToolNames(), ...names]),
+			{
+				get: (name) => this._deferredToolUsage.get(name) ?? 0,
+				record: (name) => this._deferredToolUsage.set(name, (this._deferredToolUsage.get(name) ?? 0) + 1),
+			},
+			(name, toolCallId, args, signal, onUpdate) => {
+				const tool = this._toolRegistry.get(name);
+				if (!tool) throw new Error(`Unknown deferred tool: ${name}`);
+				return tool.execute(toolCallId, args, signal, onUpdate);
+			},
+		);
 		const definitionRegistry = new Map<string, ToolDefinitionEntry>(
 			Array.from(this._baseToolDefinitions.entries())
 				.filter(([name]) => isAllowedTool(name))
@@ -2724,6 +2739,12 @@ export class AgentSession {
 			definitionRegistry.set(tool.definition.name, {
 				definition: tool.definition,
 				sourceInfo: tool.sourceInfo,
+			});
+		}
+		for (const definition of dispatcherDefinitions) {
+			definitionRegistry.set(definition.name, {
+				definition,
+				sourceInfo: createSyntheticSourceInfo(`<builtin:${definition.name}>`, { source: "builtin" }),
 			});
 		}
 		this._toolDefinitions = definitionRegistry;
@@ -2745,6 +2766,14 @@ export class AgentSession {
 		);
 		const runner = this._extensionRunner;
 		const wrappedExtensionTools = wrapRegisteredTools(allCustomTools, runner);
+		const wrappedDispatcherTools = wrapRegisteredTools(
+			dispatcherDefinitions.map((definition) => ({
+				definition,
+				sourceInfo: createSyntheticSourceInfo(`<builtin:${definition.name}>`, { source: "builtin" }),
+			})),
+			runner,
+			false,
+		);
 		const wrappedBuiltInTools = wrapRegisteredTools(
 			Array.from(this._baseToolDefinitions.values())
 				.filter((definition) => isAllowedTool(definition.name))
@@ -2753,9 +2782,11 @@ export class AgentSession {
 					sourceInfo: createSyntheticSourceInfo(`<builtin:${definition.name}>`, { source: "builtin" }),
 				})),
 			runner,
+			false,
 		);
 
 		const toolRegistry = new Map(wrappedBuiltInTools.map((tool) => [tool.name, tool]));
+		for (const tool of wrappedDispatcherTools) toolRegistry.set(tool.name, tool);
 		for (const tool of wrappedExtensionTools as AgentTool[]) {
 			toolRegistry.set(tool.name, tool);
 		}
@@ -2763,25 +2794,20 @@ export class AgentSession {
 
 		const nextActiveToolNames = (
 			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
-		).filter((name) => isAllowedTool(name));
+		).filter(
+			(name) =>
+				isAllowedTool(name) &&
+				(definitionRegistry.get(name)?.sourceInfo.source === "builtin" || previousActiveToolNames.includes(name)),
+		);
 
 		if (allowedToolNames) {
 			for (const toolName of this._toolRegistry.keys()) {
-				if (allowedToolNames.has(toolName)) {
-					nextActiveToolNames.push(toolName);
-				}
-			}
-		} else if (options?.includeAllExtensionTools) {
-			for (const tool of wrappedExtensionTools) {
-				nextActiveToolNames.push(tool.name);
-			}
-		} else if (!options?.activeToolNames) {
-			for (const toolName of this._toolRegistry.keys()) {
-				if (!previousRegistryNames.has(toolName)) {
+				if (allowedToolNames.has(toolName) && definitionRegistry.get(toolName)?.sourceInfo.source === "builtin") {
 					nextActiveToolNames.push(toolName);
 				}
 			}
 		}
+		nextActiveToolNames.push("tool_search", "tool_call");
 
 		this.setActiveToolsByName([...new Set(nextActiveToolNames)]);
 	}
