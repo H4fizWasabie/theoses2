@@ -722,7 +722,7 @@ export interface BeforeAgentStartEvent {
 	images?: ImageContent[];
 	/** The fully assembled system prompt string. */
 	systemPrompt: string;
-	/** Structured options used to build the system prompt. Extensions can inspect this to understand what Pi loaded without re-discovering resources. */
+	/** Structured options used to build the system prompt. Extensions can inspect this to understand what Theoses loaded without re-discovering resources. */
 	systemPromptOptions: BuildSystemPromptOptions;
 }
 
@@ -1329,7 +1329,7 @@ export interface ExtensionAPI {
 	/** Register a custom renderer for CustomMessageEntry. */
 	registerMessageRenderer<T = unknown>(customType: string, renderer: MessageRenderer<T>): void;
 
-	/** Register a transformer for user and assistant Markdown before Pi renders it in the interactive transcript. */
+	/** Register a transformer for user and assistant Markdown before Theoses renders it in the interactive transcript. */
 	registerMarkdownTransformer(transformer: MarkdownTransformer): void;
 
 	/** Register a custom renderer for CustomEntry. Custom entries do not participate in LLM context. */

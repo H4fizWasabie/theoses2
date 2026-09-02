@@ -1,12 +1,12 @@
 # Development
 
-See [AGENTS.md](https://github.com/earendil-works/pi-mono/blob/main/AGENTS.md) for additional guidelines.
+See [AGENTS.md](https://github.com/H4fizWasabie/theoses2/blob/main/AGENTS.md) for additional guidelines.
 
 ## Setup
 
 ```bash
-git clone https://github.com/earendil-works/pi-mono
-cd pi-mono
+git clone https://github.com/H4fizWasabie/theoses2
+cd theoses-mono
 npm install
 npm run build
 ```
@@ -14,10 +14,10 @@ npm run build
 Run from source:
 
 ```bash
-/path/to/pi-mono/pi-test.sh
+/path/to/theoses-mono/theoses-test.sh
 ```
 
-The script can be run from any directory. Pi keeps the caller's current working directory.
+The script can be run from any directory. Theoses keeps the caller's current working directory.
 
 ## Forking / Rebranding
 
@@ -26,7 +26,7 @@ Configure via `package.json`:
 ```json
 {
   "piConfig": {
-    "name": "pi",
+    "name": "theoses",
     "configDir": ".theoses"
   }
 }
@@ -48,7 +48,7 @@ Never use `__dirname` directly for package assets.
 
 ## Debug Command
 
-`/debug` (hidden) writes to `~/.theoses/agent/pi-debug.log`:
+`/debug` (hidden) writes to `~/.theoses/agent/theoses-debug.log`:
 - Rendered TUI lines with ANSI codes
 - Last messages sent to the LLM
 

@@ -10,9 +10,9 @@ import { migrateKeybindingsConfig } from "./core/keybindings.ts";
 import { stripBom } from "./utils/text.ts";
 
 const MIGRATION_GUIDE_URL =
-	"https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/CHANGELOG.md#extensions-migration";
+	"https://github.com/H4fizWasabie/theoses2/blob/main/packages/coding-agent/CHANGELOG.md#extensions-migration";
 const EXTENSIONS_DOC_URL =
-	"https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/docs/extensions.md";
+	"https://github.com/H4fizWasabie/theoses2/blob/main/packages/coding-agent/docs/extensions.md";
 
 /**
  * Migrate legacy oauth.json and settings.json apiKeys to auth.json.
@@ -80,7 +80,7 @@ export function migrateAuthToAuthJson(): string[] {
  * ~/.theoses/agent/sessions/<encoded-cwd>/. This migration moves them
  * to the correct location based on the cwd in their session header.
  *
- * See: https://github.com/earendil-works/pi-mono/issues/320
+ * See: https://github.com/H4fizWasabie/theoses2/issues/320
  */
 export function migrateSessionsFromAgentRoot(): void {
 	const agentDir = getAgentDir();
@@ -218,7 +218,7 @@ function migrateToolsToBin(): void {
 
 /**
  * Check for deprecated hooks/ and tools/ directories.
- * Note: tools/ may contain fd/rg binaries extracted by pi, so only warn if it has other files.
+ * Note: tools/ may contain fd/rg binaries extracted by Theoses, so only warn if it has other files.
  */
 function checkDeprecatedExtensionDirs(baseDir: string, label: string): string[] {
 	const hooksDir = join(baseDir, "hooks");

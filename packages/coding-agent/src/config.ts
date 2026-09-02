@@ -334,7 +334,7 @@ export function getSelfUpdateUnavailableInstruction(
 	const method = detectInstallMethod();
 	const target = normalizeSelfUpdatePackageTarget(updatePackageTarget);
 	if (method === "bun-binary") {
-		return `Download from: https://github.com/earendil-works/pi-mono/releases/latest`;
+		return `Download from: https://github.com/H4fizWasabie/theoses2/releases/latest`;
 	}
 	const command = getSelfUpdateCommandForMethod(method, packageName, target, npmCommand);
 	if (command) {
@@ -493,10 +493,10 @@ try {
 	if (err.code !== "ENOENT") throw e;
 }
 
-const piConfigName: string | undefined = pkg.piConfig?.name;
+const theosesConfigName: string | undefined = pkg.piConfig?.name;
 export const PACKAGE_NAME: string = pkg.name || "theoses-coding-agent";
-export const APP_NAME: string = piConfigName || "pi";
-export const APP_TITLE: string = piConfigName ? APP_NAME : "π";
+export const APP_NAME: string = theosesConfigName || "theoses";
+export const APP_TITLE: string = theosesConfigName ? APP_NAME : "Theoses";
 export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".theoses";
 export const VERSION: string = pkg.version || "0.0.0";
 

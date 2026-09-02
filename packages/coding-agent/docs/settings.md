@@ -1,6 +1,6 @@
 # Settings
 
-Pi uses JSON settings files with project settings overriding global settings.
+Theoses uses JSON settings files with project settings overriding global settings.
 
 | Location | Scope |
 |----------|-------|
@@ -11,15 +11,15 @@ Edit directly or use `/settings` for common options.
 
 ## Project Trust
 
-On interactive startup, pi asks before trusting a project folder that contains project-local settings, resources, or project `.agents/skills` and has no saved decision for the folder or a parent folder in `~/.theoses/agent/trust.json`. Trusting a project allows pi to load `.theoses/settings.json` and `.theoses` resources and execute project extensions.
+On interactive startup, theoses asks before trusting a project folder that contains project-local settings, resources, or project `.agents/skills` and has no saved decision for the folder or a parent folder in `~/.theoses/agent/trust.json`. Trusting a project allows theoses to load `.theoses/settings.json` and `.theoses` resources and execute project extensions.
 
 Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trust prompt. Without an applicable saved trust decision, they use `defaultProjectTrust` from global settings: `ask` (default) and `never` ignore those project resources, while `always` trusts them. Pass `--approve`/`-a` or `--no-approve`/`-na` to override project trust for one run.
 
 If no extension or saved decision applies, `defaultProjectTrust` controls the fallback behavior. Set it to `"ask"`, `"always"`, or `"never"` in `~/.theoses/agent/settings.json`, or change it with `/settings`.
 
-`pi update` never prompts for project trust. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
+`theoses update` refreshes provider model catalogs.
 
-Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.theoses/agent/trust.json` only; the current session is not reloaded, so restart pi for changes to take effect.
+Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.theoses/agent/trust.json` only; the current session is not reloaded, so restart theoses for changes to take effect.
 
 ## All Settings
 
@@ -56,7 +56,6 @@ Use `/trust` in interactive mode to save a project trust decision for future ses
 | `quietStartup` | boolean | `false` | Hide startup header |
 | `defaultProjectTrust` | string | `"ask"` | Fallback project trust behavior: `"ask"`, `"always"`, or `"never"`. Global setting only |
 | `collapseChangelog` | boolean | `false` | Show condensed changelog after updates |
-| `enableInstallTelemetry` | boolean | `true` | Send an anonymous install/update version ping after first install or changelog-detected updates. This does not control update checks |
 | `enableAnalytics` | boolean | `false` | Opt-in analytics data sharing. Currently only asked for during the experimental first-time setup (`THEOSES_EXPERIMENTAL=1`) |
 | `trackingId` | string | - | Analytics tracking identifier, generated when `enableAnalytics` is turned on |
 | `doubleEscapeAction` | string | `"tree"` | Action for double-escape: `"tree"`, `"fork"`, or `"none"` |
@@ -69,7 +68,7 @@ Use `/trust` in interactive mode to save a project trust decision for future ses
 | `fullscreenExitOutput` | string | `"transcript"` | Fullscreen exit output: `"transcript"` prints the final transcript and resume hint, while `"resume-hint"` restores the previous screen and prints only the resume hint. Has no effect in regular TUI mode |
 | `fullscreenScrollbar` | string | `"auto"` | Fullscreen transcript scrollbar: `"auto"` shows it temporarily while scrolling, `"always"` reserves the rightmost column and keeps it visible, and `"hidden"` hides it. Has no effect in regular TUI mode |
 
-For VS Code, include `--wait` so pi resumes after the editor exits:
+For VS Code, include `--wait` so theoses resumes after the editor exits:
 
 ```json
 {
@@ -77,11 +76,7 @@ For VS Code, include `--wait` so pi resumes after the editor exits:
 }
 ```
 
-### Telemetry and update checks
-
-`enableInstallTelemetry` only controls the anonymous install/update ping to `https://pi.dev/api/report-install`. Opting out of telemetry does not disable update checks; Pi can still fetch `https://pi.dev/api/latest-version` to look for the latest version.
-
-Set `THEOSES_SKIP_VERSION_CHECK=1` to disable the Pi version update check. Use `--offline` or `THEOSES_OFFLINE=1` to disable all startup network operations described here, including update checks and update telemetry.
+Use `--offline` or `THEOSES_OFFLINE=1` to disable startup network operations.
 
 ### Network
 
@@ -147,7 +142,7 @@ Set `THEOSES_SKIP_VERSION_CHECK=1` to disable the Pi version update check. Use `
 
 When a provider requests a retry delay longer than `retry.provider.maxRetryDelayMs`, the request fails immediately with an informative error instead of waiting silently. Set it to `0` to disable the limit.
 
-Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explicitly needed. Setting it above `0` can make SDK/provider retries handle out-of-usage-limit errors before Pi sees them, which may block the agent until the provider quota resets in some circumstances.
+Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explicitly needed. Setting it above `0` can make SDK/provider retries handle out-of-usage-limit errors before Theoses sees them, which may block the agent until the provider quota resets in some circumstances.
 
 ```json
 {
@@ -218,7 +213,7 @@ Windows paths in JSON must use forward slashes or escaped backslashes:
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `defaultTools` | string[] | - | Built-in tools enabled initially. When omitted, Pi uses its standard defaults |
+| `defaultTools` | string[] | - | Built-in tools enabled initially. When omitted, Theoses uses its standard defaults |
 
 `defaultTools` selects the built-in tools enabled at startup. Extension and SDK custom tools remain enabled. Available built-ins are `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls`:
 

@@ -265,7 +265,7 @@ ${chalk.bold("Usage:")}
   ${APP_NAME} [options] [--] [@files...] [messages...]
 
 ${chalk.bold("Commands:")}
-  ${APP_NAME} update [--self|--models]  Update pi or refresh model catalogs
+  ${APP_NAME} update                    Refresh model catalogs
   ${APP_NAME} auth <command>            Print credentials or check provider readiness
   ${APP_NAME} <command> --help          Show command help
 

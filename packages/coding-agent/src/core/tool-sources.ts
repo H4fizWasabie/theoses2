@@ -199,7 +199,7 @@ export class McpHttpToolSource implements ToolSource {
 			{
 				protocolVersion: "2025-06-18",
 				capabilities: {},
-				clientInfo: { name: "pi-coding-agent", version: VERSION },
+				clientInfo: { name: "theoses-coding-agent", version: VERSION },
 			},
 			signal,
 		);

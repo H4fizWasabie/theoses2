@@ -1,6 +1,6 @@
-# Pi Capability Inventory
+# Theoses Capability Inventory
 
-This is a factual, descriptive inventory of the capabilities currently implemented across `packages/` in the Pi coding-agent harness (v0.84.3), produced to unblock GitHub issue [#4](https://github.com/H4fizWasabie/theoses2/issues/4) ("Pi capability inventory"), a child of the Theoses2 engine map (issue [#1](https://github.com/H4fizWasabie/theoses2/issues/1)). It does not recommend what to keep, cut, or refactor for Theoses2 — it only records what exists, where it lives, and what it obviously assumes about a coding/terminal/git environment. All file paths are relative to `packages/` unless given in full; every capability was verified against source in this repo.
+This is a factual, descriptive inventory of the capabilities currently implemented across `packages/` in the Theoses coding-agent harness (v0.84.3), produced to unblock GitHub issue [#4](https://github.com/H4fizWasabie/theoses2/issues/4) ("Theoses capability inventory"), a child of the Theoses2 engine map (issue [#1](https://github.com/H4fizWasabie/theoses2/issues/1)). It does not recommend what to keep, cut, or refactor for Theoses2 — it only records what exists, where it lives, and what it obviously assumes about a coding/terminal/git environment. All file paths are relative to `packages/` unless given in full; every capability was verified against source in this repo.
 
 ---
 
@@ -29,23 +29,23 @@ Description (package.json): "General-purpose agent with transport abstraction, s
 
 ## packages/coding-agent (`theoses-coding-agent`)
 
-Description (package.json): "Coding agent CLI with read, bash, edit, write tools and session management." This is the flagship product package: the `pi` CLI, its four interaction modes (interactive/print/JSON/RPC), extension and package systems, and all coding-specific tools. It is the most heavily coding/terminal/git-coupled package in the monorepo.
+Description (package.json): "Coding agent CLI with read, bash, edit, write tools and session management." This is the flagship product package: the `theoses` CLI, its four interaction modes (interactive/print/JSON/RPC), extension and package systems, and all coding-specific tools. It is the most heavily coding/terminal/git-coupled package in the monorepo.
 
 | Capability | Location | Description | Coding-specific coupling |
 |---|---|---|---|
-| CLI entry & argument parsing | `coding-agent/src/cli/args.ts`, `cli/*.ts`, `bin` = `dist/bundle/cli.js` | Parses `pi [options] [@files...] [messages...]`; dispatches to interactive/print/json/rpc modes and package subcommands (`install`, `update`, `list`, `config`). | `@files` file-attachment syntax, `pi update --models`, and package commands assume a dev-tool CLI usage pattern. |
-| Four run modes | `coding-agent/src/modes/index.ts`, `modes/interactive/interactive-mode.ts` (221K, largest file), `modes/json-event.ts`, `modes/print-mode.ts`, `modes/rpc/rpc-mode.ts` | Interactive TUI mode, one-shot print mode (`-p`), JSON-event streaming mode, and RPC mode (stdin/stdout, LF-delimited JSONL) for embedding pi as a subprocess in other tools. | Interactive mode is a terminal UI (built on `pi-tui`); RPC/JSON modes are transport-neutral and reusable for a non-terminal assistant. |
-| Agent session runtime | `coding-agent/src/core/agent-session.ts` (114K, largest source file), `core/agent-session-runtime.ts`, `core/agent-session-services.ts` | Wraps `pi-agent-core`'s `Agent` with session persistence, model/thinking-level state, tool wiring, and lifecycle management; `createAgentSession()`/`createAgentSessionRuntime()` are the public SDK entry points (also exported for embedding). | Not inherently coding-specific at the API level, but composed almost entirely of coding tools/extensions by default. |
+| CLI entry & argument parsing | `coding-agent/src/cli/args.ts`, `cli/*.ts`, `bin` = `dist/bundle/cli.js` | Parses `theoses [options] [@files...] [messages...]`; dispatches to interactive/print/json/rpc modes and package subcommands (`install`, `update`, `list`, `config`). | `@files` file-attachment syntax, `theoses update --models`, and package commands assume a dev-tool CLI usage pattern. |
+| Four run modes | `coding-agent/src/modes/index.ts`, `modes/interactive/interactive-mode.ts` (221K, largest file), `modes/json-event.ts`, `modes/print-mode.ts`, `modes/rpc/rpc-mode.ts` | Interactive TUI mode, one-shot print mode (`-p`), JSON-event streaming mode, and RPC mode (stdin/stdout, LF-delimited JSONL) for embedding theoses as a subprocess in other tools. | Interactive mode is a terminal UI (built on `theoses-tui`); RPC/JSON modes are transport-neutral and reusable for a non-terminal assistant. |
+| Agent session runtime | `coding-agent/src/core/agent-session.ts` (114K, largest source file), `core/agent-session-runtime.ts`, `core/agent-session-services.ts` | Wraps `theoses-agent-core`'s `Agent` with session persistence, model/thinking-level state, tool wiring, and lifecycle management; `createAgentSession()`/`createAgentSessionRuntime()` are the public SDK entry points (also exported for embedding). | Not inherently coding-specific at the API level, but composed almost entirely of coding tools/extensions by default. |
 | Default coding tools (extended) | `coding-agent/src/core/tools/{bash,edit,edit-diff,find,grep,ls,powershell,read,write}.ts` | Superset of the agent-core tools: adds `find`, `grep`, `ls`, and a PowerShell variant of bash for Windows; unified-diff based edit tool; output truncation and rendering helpers. | Directly filesystem/shell-centric: assumes a local project directory tree, `grep`/`find`-style search, and a POSIX or PowerShell shell. |
 | Session management & storage | `coding-agent/src/core/session-manager.ts` (52K), `core/session-cwd.ts`, `core/session-export.ts` | Manages JSONL session files under `~/.theoses/agent/sessions/`, organized by working directory; `--continue`, `--session`, `--fork`, `--no-session`, export/import to HTML/JSONL. `session-cwd.ts` explicitly errors when a session's stored `cwd` no longer exists on disk. | Strongly coupled to "a session belongs to a filesystem project directory" — sessions are indexed and validated by working directory. |
-| Session branching / tree navigation | via `core/agent-session.ts`, interactive `/tree`, `/fork`, `/clone` commands (README: Sessions → Branching) | In-place branching session tree (entries have `id`/`parentId`); UI lets users jump to any point and continue from there. | UI-level (`/tree`) is terminal-specific, but the underlying tree model (in `pi-agent-core`) is not. |
-| Context compaction (product layer) | `coding-agent/src/core/compaction/` | Wraps `pi-agent-core` compaction with product-level triggers (`/compact`, automatic on overflow) and settings. | None beyond agent-core's coupling. |
+| Session branching / tree navigation | via `core/agent-session.ts`, interactive `/tree`, `/fork`, `/clone` commands (README: Sessions → Branching) | In-place branching session tree (entries have `id`/`parentId`); UI lets users jump to any point and continue from there. | UI-level (`/tree`) is terminal-specific, but the underlying tree model (in `theoses-agent-core`) is not. |
+| Context compaction (product layer) | `coding-agent/src/core/compaction/` | Wraps `theoses-agent-core` compaction with product-level triggers (`/compact`, automatic on overflow) and settings. | None beyond agent-core's coupling. |
 | Extension system | `coding-agent/src/core/extensions/{types.ts (61K), loader.ts, runner.ts (37K), wrapper.ts, index.ts}` | TypeScript-module extension API (`ExtensionAPI`): register tools, commands, keybindings, event handlers (`tool_call`, `message_end`, `tool_result`, `user_bash`, `project_trust`, session shutdown, etc.), and UI components/overlays. Loaded from `~/.theoses/agent/extensions/`, `.theoses/extensions/`, or packages. | Extension API types import TUI component types (`Component`, `EditorComponent`, `KeyId`, `Theme`) directly, coupling "extension" to "adds terminal UI," plus bash-result and git-trust concepts. |
-| Package manager (pi packages) | `coding-agent/src/core/package-manager.ts` (83K, largest core file), `core/pi-manifest.ts`, `utils/git.ts` | Installs/updates/removes shareable bundles of extensions/skills/prompts/themes from npm or git sources (`pi install npm:...`, `git:...`, `ssh://...`); resolves git URLs, runs `npm install --omit=dev` for git packages, tracks pinned refs. | Deeply coupled to npm/git-package distribution model — assumes packages are npm packages or git repos with `package.json`/`pi` manifest fields. |
+| Package manager (theoses packages) | `coding-agent/src/core/package-manager.ts` (83K, largest core file), `core/theoses-manifest.ts`, `utils/git.ts` | Installs/updates/removes shareable bundles of extensions/skills/prompts/themes from npm or git sources (`theoses install npm:...`, `git:...`, `ssh://...`); resolves git URLs, runs `npm install --omit=dev` for git packages, tracks pinned refs. | Deeply coupled to npm/git-package distribution model — assumes packages are npm packages or git repos with `package.json`/`theoses` manifest fields. |
 | Project trust | `coding-agent/src/core/project-trust.ts`, `core/trust-manager.ts` | Per-directory trust prompt/decision store (`~/.theoses/agent/trust.json`) gating whether `.theoses/settings.json`, project extensions, and project packages load; walks up parent directories. | Directly modeled around "project = a directory on disk," parallel to a git-repo trust model (e.g., VS Code workspace trust). |
-| Skills (product layer) | `coding-agent/src/core/skills.ts` | Product-level skill loading/invocation (`/skill:name`) built on `pi-agent-core`'s skill loader, with additional directory search paths (`.agents/skills`, `.theoses/skills`). | Filesystem-directory based, same as agent-core. |
+| Skills (product layer) | `coding-agent/src/core/skills.ts` | Product-level skill loading/invocation (`/skill:name`) built on `theoses-agent-core`'s skill loader, with additional directory search paths (`.agents/skills`, `.theoses/skills`). | Filesystem-directory based, same as agent-core. |
 | Prompt templates | `coding-agent/src/core/prompt-templates.ts` | Loads Markdown prompt templates from `~/.theoses/agent/prompts/` or `.theoses/prompts/`, expandable via `/name` with `{{variable}}` substitution. | Filesystem-based; not coding-specific in concept. |
-| Model runtime, resolver, registry, config | `coding-agent/src/core/model-runtime.ts` (28.5K), `core/model-resolver.ts` (25.7K), `core/model-registry.ts`, `core/model-config.ts`, `core/models-store.ts`, `core/remote-catalog-provider.ts` | Resolves and caches available models/providers from `pi-ai`, handles scoped-model cycling (`/scoped-models`, Ctrl+P), custom provider config via `~/.theoses/agent/models.json`. | None specific to coding; generic LLM provider/model management. |
+| Model runtime, resolver, registry, config | `coding-agent/src/core/model-runtime.ts` (28.5K), `core/model-resolver.ts` (25.7K), `core/model-registry.ts`, `core/model-config.ts`, `core/models-store.ts`, `core/remote-catalog-provider.ts` | Resolves and caches available models/providers from `theoses-ai`, handles scoped-model cycling (`/scoped-models`, Ctrl+P), custom provider config via `~/.theoses/agent/models.json`. | None specific to coding; generic LLM provider/model management. |
 | Auth & credential storage | `coding-agent/src/core/auth-storage.ts` (16K), `core/auth-guidance.ts`, `cli/auth-check.ts`, `cli/auth-command.ts`, `cli/credential-print.ts` | `/login`/`/logout` flows, OAuth and API-key storage for ~15 subscription/API providers, credential printing for debugging. | None. |
 | Settings & keybindings | `coding-agent/src/core/settings-manager.ts` (42K), `core/keybindings.ts` (12K), `core/resolve-config-value.ts`, `core/settings-diagnostics.ts` | Layered global (`~/.theoses/agent/settings.json`) + project (`.theoses/settings.json`) settings; fully remappable keybindings (`~/.theoses/agent/keybindings.json`). | Project-layer settings assume a project directory; keybindings are terminal-input-specific. |
 | Context files (AGENTS.md/CLAUDE.md loading) | `coding-agent/src/core/resource-loader.ts` (39K) | Loads and concatenates `AGENTS.md`/`CLAUDE.md`/`AGENTS.override.md` from global, parent-directory, and cwd locations into the system prompt; supports `.theoses/SYSTEM.md` overrides. | Directory-tree walk from cwd upward — assumes a nested project directory structure (git-repo-like). |
@@ -53,12 +53,12 @@ Description (package.json): "Coding agent CLI with read, bash, edit, write tools
 | Bash/PowerShell execution & shell utilities | `coding-agent/src/core/bash-executor.ts`, `core/exec.ts`, `utils/shell.ts`, `utils/child-process.ts` | Executes shell commands with capture, timeout, and streaming update support; platform-specific shell selection (bash vs PowerShell). | Terminal/OS-shell-specific by definition. |
 | HTML session export | `coding-agent/src/core/export-html/{index.ts, tool-renderer.ts, template.html/css/js, vendor/}` | Renders a session transcript (including tool calls/diffs) to a static, styled HTML file (`/export`) with syntax highlighting and diff rendering. | `tool-renderer.ts` renders coding-tool output (diffs, file paths) specifically. |
 | Session sharing | `coding-agent/src/modes/interactive/session-share.ts` | `/share` uploads a session as a private GitHub gist with a shareable HTML link. | Hard dependency on GitHub as the sharing target. |
-| RPC client/server protocol | `coding-agent/src/modes/rpc/{rpc-mode.ts (23K), rpc-client.ts (17K), rpc-types.ts, jsonl.ts}`, `src/client/{index.ts, remote-session.ts, transcript.ts}` | Newline-delimited JSON-RPC-like protocol for driving pi as a subprocess from another process/language; typed client for consuming it. | Transport itself is generic; message vocabulary mirrors coding-agent's tool/session model. |
-| Local session server bootstrap | `coding-agent/src/server/create-harness.ts` | Constructs an `AgentHarness`/session suitable for serving over `pi-server`'s protocol. | None beyond the underlying session model. |
+| RPC client/server protocol | `coding-agent/src/modes/rpc/{rpc-mode.ts (23K), rpc-client.ts (17K), rpc-types.ts, jsonl.ts}`, `src/client/{index.ts, remote-session.ts, transcript.ts}` | Newline-delimited JSON-RPC-like protocol for driving theoses as a subprocess from another process/language; typed client for consuming it. | Transport itself is generic; message vocabulary mirrors coding-agent's tool/session model. |
+| Local session server bootstrap | `coding-agent/src/server/create-harness.ts` | Constructs an `AgentHarness`/session suitable for serving over `theoses-server`'s protocol. | None beyond the underlying session model. |
 | Image handling (paste/clipboard/resize) | `coding-agent/src/utils/{clipboard.ts, clipboard-image.ts, clipboard-native.ts, image-*.ts, exif-orientation.ts}` | Captures clipboard images (Ctrl+V) or drag-and-drop, resizes/converts/orients them for LLM image input, uses a worker thread for resizing. | Terminal-clipboard and terminal-drop-target specific; also relevant to a chat-style personal assistant (image attachments) with adaptation. |
 | llama.cpp router integration | `coding-agent/src/extensions/llama/` | Built-in extension for `/llama` command: download/load/unload local llama.cpp-served models. | None coding-specific; local-inference-server integration. |
-| Windows self-update / version checks | `coding-agent/src/utils/{windows-self-update.ts, version-check.ts, changelog.ts}` | Checks `pi.dev/api/latest-version`, self-updates the Windows binary, displays `/changelog`. | CLI-binary distribution model, not coding-specific per se. |
-| Autocomplete / file reference in editor | `coding-agent/src/modes/interactive/components/` (via `pi-tui` `AutocompleteProvider`) | `@`-triggered fuzzy file search and Tab path completion in the prompt editor. | Directly assumes a filesystem workspace to search over. |
+| Windows self-update / version checks | `coding-agent/src/utils/changelog.ts` | Displays `/changelog`; self-update and version-check integrations were removed. | CLI-binary distribution model, not coding-specific per se. |
+| Autocomplete / file reference in editor | `coding-agent/src/modes/interactive/components/` (via `theoses-tui` `AutocompleteProvider`) | `@`-triggered fuzzy file search and Tab path completion in the prompt editor. | Directly assumes a filesystem workspace to search over. |
 
 ---
 
@@ -87,10 +87,10 @@ Description (README): "Node sqlite session backend for `theoses-agent-core` sess
 
 | Capability | Location | Description | Coding-specific coupling |
 |---|---|---|---|
-| SQLite session repository | `sqlite-node/src/sqlite/repo.ts`, `sqlite/index.ts` | Implements `pi-agent-core`'s `SessionStorage`/repository contract against SQLite instead of JSONL files; lazily owns a single shared DB connection. | None — generic append-only session log storage. |
+| SQLite session repository | `sqlite-node/src/sqlite/repo.ts`, `sqlite/index.ts` | Implements `theoses-agent-core`'s `SessionStorage`/repository contract against SQLite instead of JSONL files; lazily owns a single shared DB connection. | None — generic append-only session log storage. |
 | Schema migrations | `sqlite-node/src/sqlite/migrations.ts` | Versioned SQL migrations for the session database schema. | None. |
 | Branch materialization / caching | `sqlite-node/src/sqlite/branch-cache.ts` | Maintains materialized views/caches for efficient branch-bounds queries over the session tree. | None. |
-| Full-text search backend | `sqlite-node/src/sqlite/search-backend.ts` | Implements `pi-agent-core`'s `SessionSearch` via SQLite FTS tables, created lazily on first non-blank search and kept in sync by triggers. | None. |
+| Full-text search backend | `sqlite-node/src/sqlite/search-backend.ts` | Implements `theoses-agent-core`'s `SessionSearch` via SQLite FTS tables, created lazily on first non-blank search and kept in sync by triggers. | None. |
 | `node:sqlite` adapter | `sqlite-node/src/sqlite/types.ts`, `sqlite/sql.ts` | Adapts Node's built-in `node:sqlite` module to the `SqliteDatabase` interface expected by the repository, decoupling the schema/query layer from the runtime SQLite binding. | Node-runtime specific (not browser-portable), but not coding-specific. |
 
 ---
@@ -116,13 +116,13 @@ Description (package.json): "Unified LLM API with automatic model discovery and 
 
 ## packages/server (`theoses-server`)
 
-Description (README): "Experimental... Server package for pi." Provides a transport-neutral session server core plus a Unix-socket transport; does not itself provide a coding-agent CLI or service — callers supply a `PiServerService`.
+Description (README): "Experimental... Server package for theoses." Provides a transport-neutral session server core plus a Unix-socket transport; does not itself provide a coding-agent CLI or service — callers supply a `PiServerService`.
 
 | Capability | Location | Description | Coding-specific coupling |
 |---|---|---|---|
 | `PiServer` session-server core | `server/src/server.ts`, `connection.ts`, `sessions.ts`, `protocol.ts` | Composes `PiServerListener` transports, manages session lifecycle (list/create/open/acquire) over the wire protocol, snapshot broadcasting. | None — deliberately generic; the caller's `PiServerService` supplies the actual session/storage backend. |
-| Unix socket transport | `server/src/transports/unix/` | `createUnixListener()`/`createUnixServer()` presets using length-prefixed CBOR framing from `pi-protocol` over a Unix domain socket. | None coding-specific; assumes a Unix-like OS for the socket transport specifically (not for the protocol itself). |
-| `pi-ai` ↔ `pi-protocol` bridge | `server/src/types.ts` (adapters referenced in README: `toProtocolModelMetadata`, `toProtocolAssistantMessage`, `toProtocolUserMessage`, `toProtocolToolResultMessage`) | Owns the boundary between `pi-ai` domain objects and `pi-protocol` wire DTOs; validates tool inputs/ids/timestamps and rejects mismatched tool results. | Tool-call/tool-result vocabulary mirrors coding-agent's tool model but is not filesystem/git specific itself. |
+| Unix socket transport | `server/src/transports/unix/` | `createUnixListener()`/`createUnixServer()` presets using length-prefixed CBOR framing from `theoses-protocol` over a Unix domain socket. | None coding-specific; assumes a Unix-like OS for the socket transport specifically (not for the protocol itself). |
+| `theoses-ai` ↔ `theoses-protocol` bridge | `server/src/types.ts` (adapters referenced in README: `toProtocolModelMetadata`, `toProtocolAssistantMessage`, `toProtocolUserMessage`, `toProtocolToolResultMessage`) | Owns the boundary between `theoses-ai` domain objects and `theoses-protocol` wire DTOs; validates tool inputs/ids/timestamps and rejects mismatched tool results. | Tool-call/tool-result vocabulary mirrors coding-agent's tool model but is not filesystem/git specific itself. |
 | Transport conformance testing kit | `server/src/testing/` | `createTestServer()`, `TestServerService`, `ProtocolTestClient`, `WireChannel` contract, `connectUnixTestClient()` for deterministic protocol tests against custom transports. | None. |
 | Snapshot model | `server/src/snapshots.ts` | Defines authoritative session/server snapshot semantics (vs. transient progress events) shared with the protocol/client packages. | None. |
 
@@ -130,7 +130,7 @@ Description (README): "Experimental... Server package for pi." Provides a transp
 
 ## packages/protocol (`theoses-protocol`)
 
-Description (README): "Transport-neutral CBOR protocol for remote pi sessions." Pure wire-format package: schemas, CBOR codec, and byte-stream framing. No coding-specific concepts.
+Description (README): "Transport-neutral CBOR protocol for remote theoses sessions." Pure wire-format package: schemas, CBOR codec, and byte-stream framing. No coding-specific concepts.
 
 | Capability | Location | Description | Coding-specific coupling |
 |---|---|---|---|
@@ -143,21 +143,21 @@ Description (README): "Transport-neutral CBOR protocol for remote pi sessions." 
 
 ## packages/client (`theoses-client`)
 
-Description (README): "Transport-neutral client for remote pi sessions... The package has no Node-specific imports." Pure client-side session/connection state machine over `pi-protocol`.
+Description (README): "Transport-neutral client for remote theoses sessions... The package has no Node-specific imports." Pure client-side session/connection state machine over `theoses-protocol`.
 
 | Capability | Location | Description | Coding-specific coupling |
 |---|---|---|---|
-| `PiClient` connection management | `client/src/client.ts`, `connection.ts`, `transport.ts` | Manages a `ByteTransportFactory`-supplied transport (WebSocket, Unix socket, etc.), correlates requests by ID, exposes `connect()`/`reconnect()` (no auto-reconnect). | None — transport-neutral by design, directly reusable for a non-terminal channel (e.g., Telegram bot backend talking to a pi session server). |
+| `PiClient` connection management | `client/src/client.ts`, `connection.ts`, `transport.ts` | Manages a `ByteTransportFactory`-supplied transport (WebSocket, Unix socket, etc.), correlates requests by ID, exposes `connect()`/`reconnect()` (no auto-reconnect). | None — transport-neutral by design, directly reusable for a non-terminal channel (e.g., Telegram bot backend talking to a theoses session server). |
 | Session leasing (exclusive/shared) | `client/src/session-handle.ts`, `state.ts` | `acquireSession()` returns an `AsyncDisposable` `SessionLease`; exclusive vs shared acquisition modes with `PiSessionOwnershipError` on conflicting acquisition; `attachSession()` convenience for shared mode. | None. |
 | Snapshot/event subscription | `client/src/client.ts`, `promise.ts` | `subscribe()` for authoritative snapshots, `onEvent()` for transient protocol events; snapshots are the source of truth, progress events are not reduced into state. | None. |
 | Error taxonomy | `client/src/errors.ts` | Structured client-side errors: `PiServerError`, `PiDisconnectedError`, `PiSessionDetachedError`, `PiSessionOwnershipError`. | None. |
-| Unix transport convenience | `client/src/unix.ts` | Pre-built `ByteTransportFactory` for connecting over a Unix domain socket (pairs with `pi-server`'s Unix listener). | OS-specific (Unix sockets), not coding-specific. |
+| Unix transport convenience | `client/src/unix.ts` | Pre-built `ByteTransportFactory` for connecting over a Unix domain socket (pairs with `theoses-server`'s Unix listener). | OS-specific (Unix sockets), not coding-specific. |
 
 ---
 
 ## packages/telemetry (`theoses-telemetry`)
 
-Description (README): "Vendor-neutral telemetry contracts and typed schema utilities for pi packages... no exporter, global current-span state, or dependency on a telemetry backend." Fully generic observability layer.
+Description (README): "Vendor-neutral telemetry contracts and typed schema utilities for theoses packages... no exporter, global current-span state, or dependency on a telemetry backend." Fully generic observability layer.
 
 | Capability | Location | Description | Coding-specific coupling |
 |---|---|---|---|
@@ -170,14 +170,14 @@ Description (README): "Vendor-neutral telemetry contracts and typed schema utili
 
 ## packages/evals (`theoses-evals`, private)
 
-Description (package.json/README): "Behavioral, model-backed checks for Pi workflows... adapt a real `AgentSession` to `vitest-evals`." Internal, not published; used to evaluate the coding agent's behavior against real models.
+Description (package.json/README): "Behavioral, model-backed checks for Theoses workflows... adapt a real `AgentSession` to `vitest-evals`." Internal, not published; used to evaluate the coding agent's behavior against real models.
 
 | Capability | Location | Description | Coding-specific coupling |
 |---|---|---|---|
-| Pi coding-agent eval harness | `evals/src/pi-harness.ts` | `createPiCodingAgentHarness()` adapts a real `AgentSession` (from `pi-coding-agent`) to the `vitest-evals` `harness` contract, running in isolated temp project/agent directories and attaching native session JSONL artifacts. | Directly instantiates a full coding-agent session (tools, filesystem sandbox dirs) for every eval run. |
+| Theoses coding-agent eval harness | `evals/src/theoses-harness.ts` | `createPiCodingAgentHarness()` adapts a real `AgentSession` (from `theoses-coding-agent`) to the `vitest-evals` `harness` contract, running in isolated temp project/agent directories and attaching native session JSONL artifacts. | Directly instantiates a full coding-agent session (tools, filesystem sandbox dirs) for every eval run. |
 | Example eval suites | `evals/src/{smoke.eval.ts, extensions.eval.ts}` | Smoke test (factual Q&A) and an extensions-loading/behavior eval, using `describeEval()` from `vitest-evals`. | `extensions.eval.ts` specifically exercises the coding-agent extension system. |
-| Vitest-evals integration utilities | `evals/src/vitest-evals/{artifacts.ts, harness-table.ts, reporter.ts, setup.ts, summary.ts}` | Custom reporter, run-artifact capture (`.eval/runs.jsonl`, session JSONL under `.eval/sessions/`), and summary output for eval runs. | Artifact format is native Pi session JSONL — coupled to the coding-agent session format. |
-| Eval CLI runner | `evals/scripts/run-evals.mjs` (referenced by `npm run eval`) | Wires `--provider`/`--model` CLI args (or `THEOSES_PROVIDER`/`THEOSES_MODEL` env vars) through Pi's normal `ModelRuntime` auth (subscription credentials or API keys) into the eval run. | None beyond reusing coding-agent's auth/model resolution. |
+| Vitest-evals integration utilities | `evals/src/vitest-evals/{artifacts.ts, harness-table.ts, reporter.ts, setup.ts, summary.ts}` | Custom reporter, run-artifact capture (`.eval/runs.jsonl`, session JSONL under `.eval/sessions/`), and summary output for eval runs. | Artifact format is native Theoses session JSONL — coupled to the coding-agent session format. |
+| Eval CLI runner | `evals/scripts/run-evals.mjs` (referenced by `npm run eval`) | Wires `--provider`/`--model` CLI args (or `THEOSES_PROVIDER`/`THEOSES_MODEL` env vars) through Theoses's normal `ModelRuntime` auth (subscription credentials or API keys) into the eval run. | None beyond reusing coding-agent's auth/model resolution. |
 
 ---
 

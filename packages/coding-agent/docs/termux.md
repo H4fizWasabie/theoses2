@@ -1,6 +1,6 @@
 # Termux (Android) Setup
 
-Pi runs on Android via [Termux](https://termux.dev/), a terminal emulator and Linux environment for Android.
+Theoses runs on Android via [Termux](https://termux.dev/), a terminal emulator and Linux environment for Android.
 
 ## Prerequisites
 
@@ -16,14 +16,14 @@ pkg update && pkg upgrade
 # Install dependencies
 pkg install nodejs termux-api git
 
-# Install pi
+# Install theoses
 npm install -g --ignore-scripts theoses-coding-agent
 
 # Create config directory
 mkdir -p ~/.theoses/agent
 
-# Run pi
-pi
+# Run theoses
+theoses
 ```
 
 ## Clipboard Support

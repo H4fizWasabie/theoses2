@@ -1,10 +1,10 @@
-> pi can create TUI components. Ask it to build one for your use case.
+> theoses can create TUI components. Ask it to build one for your use case.
 
 # TUI Components
 
 Extensions and custom tools can render custom TUI components for interactive user interfaces. This page covers the component system and available building blocks.
 
-**Source:** [`theoses-tui`](https://github.com/earendil-works/pi-mono/tree/main/packages/tui)
+**Source:** [`theoses-tui`](https://github.com/H4fizWasabie/theoses2/tree/main/packages/tui)
 
 ## Component Interface
 
@@ -89,7 +89,7 @@ Without this propagation, typing with an IME (Chinese, Japanese, Korean, etc.) w
 **In extensions** via `ctx.ui.custom()`:
 
 ```typescript
-pi.on("session_start", async (_event, ctx) => {
+theoses.on("session_start", async (_event, ctx) => {
   const result = await ctx.ui.custom<string | null>((tui, theme, keybindings, done) =>
     new MyComponent({
       theme,
@@ -385,7 +385,7 @@ class MySelector {
 Usage in an extension:
 
 ```typescript
-pi.registerCommand("pick", {
+theoses.registerCommand("pick", {
   description: "Pick an item",
   handler: async (_args, ctx) => {
     const items = ["Option A", "Option B", "Option C"];
@@ -618,7 +618,7 @@ import type { ExtensionAPI } from "theoses-coding-agent";
 import { DynamicBorder } from "theoses-coding-agent";
 import { Container, type SelectItem, SelectList, Text } from "theoses-tui";
 
-pi.registerCommand("pick", {
+theoses.registerCommand("pick", {
   handler: async (_args, ctx) => {
     const items: SelectItem[] = [
       { value: "opt1", label: "Option 1", description: "First option" },
@@ -676,7 +676,7 @@ For operations that take time and should be cancellable. `BorderedLoader` shows 
 ```typescript
 import { BorderedLoader } from "theoses-coding-agent";
 
-pi.registerCommand("fetch", {
+theoses.registerCommand("fetch", {
   handler: async (_args, ctx) => {
     const result = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
       const loader = new BorderedLoader(tui, theme, "Fetching data...");
@@ -709,7 +709,7 @@ For toggling multiple settings. Use `SettingsList` from `theoses-tui` with `getS
 import { getSettingsListTheme } from "theoses-coding-agent";
 import { Container, type SettingItem, SettingsList, Text } from "theoses-tui";
 
-pi.registerCommand("settings", {
+theoses.registerCommand("settings", {
   handler: async (_args, ctx) => {
     const items: SettingItem[] = [
       { id: "verbose", label: "Verbose mode", currentValue: "off", values: ["on", "off"] },
@@ -761,7 +761,7 @@ ctx.ui.setStatus("my-ext", undefined);
 
 ### Pattern 4b: Working Indicator Customization
 
-Customize the inline working indicator shown while pi is streaming a response.
+Customize the inline working indicator shown while theoses is streaming a response.
 
 ```typescript
 // Static indicator
@@ -781,7 +781,7 @@ ctx.ui.setWorkingIndicator({
 // Hide the indicator entirely
 ctx.ui.setWorkingIndicator({ frames: [] });
 
-// Restore pi's default spinner
+// Restore theoses's default spinner
 ctx.ui.setWorkingIndicator();
 ```
 
@@ -898,8 +898,8 @@ class VimEditor extends CustomEditor {
   }
 }
 
-export default function (pi: ExtensionAPI) {
-  pi.on("session_start", (_event, ctx) => {
+export default function (theoses: ExtensionAPI) {
+  theoses.on("session_start", (_event, ctx) => {
     // Factory receives the TUI, theme, and keybindings from the app
     ctx.ui.setEditorComponent((tui, theme, keybindings) =>
       new VimEditor(tui, theme, keybindings)

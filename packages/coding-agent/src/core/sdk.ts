@@ -39,7 +39,7 @@ import {
 
 // Preserve the pre-0.81 fallback for extensions that construct Agent instances
 // or invoke low-level agent loops without supplying streamFn. Agent core remains
-// provider-agnostic and does not import pi-ai/compat itself.
+// provider-agnostic and does not import theoses-ai/compat itself.
 setDefaultStreamFn(streamSimple);
 
 export interface CreateAgentSessionOptions {
@@ -69,7 +69,7 @@ export interface CreateAgentSessionOptions {
 	/**
 	 * Optional allowlist of tool names.
 	 *
-	 * When omitted, pi uses the `defaultTools` setting for the initial built-in
+	 * When omitted, Theoses uses the `defaultTools` setting for the initial built-in
 	 * selection when configured. Otherwise it enables the default built-in tools
 	 * (read, bash, edit, write). Extension/custom tools remain enabled unless
 	 * `noTools` changes that default. When provided, only the listed tool names are

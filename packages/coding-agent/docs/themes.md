@@ -1,4 +1,4 @@
-> pi can create themes. Ask it to build one for your setup.
+> theoses can create themes. Ask it to build one for your setup.
 
 # Themes
 
@@ -16,7 +16,7 @@ Themes are JSON files that define colors for the TUI.
 
 ## Locations
 
-Pi loads themes from:
+Theoses loads themes from:
 
 - Built-in: `dark`, `light`
 - Global: `~/.theoses/agent/themes/*.json`
@@ -36,20 +36,20 @@ Select a theme via `/settings` or in `settings.json`:
 }
 ```
 
-On first run, pi detects your terminal background and defaults to `dark` or `light`.
+On first run, theoses detects your terminal background and defaults to `dark` or `light`.
 
 ### Initial Theme
 
 Start an interactive run with a theme without changing the saved setting:
 
 ```bash
-pi --use-theme light
+theoses --use-theme light
 ```
 
 To follow terminal appearance, use `lightTheme/darkTheme` syntax:
 
 ```bash
-pi --use-theme light/dark
+theoses --use-theme light/dark
 ```
 
 The CLI value is the initial theme for that run. Choosing another theme later in `/settings` applies it immediately
@@ -68,7 +68,7 @@ vim ~/.theoses/agent/themes/my-theme.json
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
+  "$schema": "https://raw.githubusercontent.com/H4fizWasabie/theoses2/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
   "name": "my-theme",
   "vars": {
     "primary": "#00aaff",
@@ -136,13 +136,13 @@ vim ~/.theoses/agent/themes/my-theme.json
 
 3. Select the theme via `/settings`.
 
-**Hot reload:** When you edit the currently active custom theme file, pi reloads it automatically for immediate visual feedback.
+**Hot reload:** When you edit the currently active custom theme file, theoses reloads it automatically for immediate visual feedback.
 
 ## Theme Format
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
+  "$schema": "https://raw.githubusercontent.com/H4fizWasabie/theoses2/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
   "name": "my-theme",
   "vars": {
     "blue": "#0066cc",
@@ -292,7 +292,7 @@ Four formats are supported:
 
 ### Terminal Compatibility
 
-Pi uses 24-bit RGB colors. Most modern terminals support this (iTerm2, Kitty, WezTerm, Windows Terminal, VS Code). For older terminals with only 256-color support, pi falls back to the nearest approximation.
+Theoses uses 24-bit RGB colors. Most modern terminals support this (iTerm2, Kitty, WezTerm, Windows Terminal, VS Code). For older terminals with only 256-color support, theoses falls back to the nearest approximation.
 
 Check truecolor support:
 

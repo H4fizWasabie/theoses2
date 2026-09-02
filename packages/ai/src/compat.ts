@@ -1,5 +1,5 @@
 /**
- * Temporary compatibility entrypoint preserving the old global pi-ai API
+ * Compatibility entrypoint for the legacy API surface
  * surface: api-dispatch `stream()`/`complete()` with env API key injection,
  * the api-registry, generated catalog reads (`getModel`/`getModels`/
  * `getProviders`), per-API lazy stream wrappers, and image generation.

@@ -1,8 +1,8 @@
-> pi can help you use the SDK. Ask it to build an integration for your use case.
+> theoses can help you use the SDK. Ask it to build an integration for your use case.
 
 # SDK
 
-The SDK provides programmatic access to pi's agent capabilities. Use it to embed pi in other applications, build custom interfaces, or integrate with automated workflows.
+The SDK provides programmatic access to theoses's agent capabilities. Use it to embed theoses in other applications, build custom interfaces, or integrate with automated workflows.
 
 **Example use cases:**
 - Build a custom UI (web, desktop, mobile)
@@ -215,7 +215,7 @@ await session.prompt("After you're done, also check X", { streamingBehavior: "fo
 ```
 
 **Behavior:**
-- **Extension commands** (e.g., `/mycommand`): Execute immediately, even during streaming. They manage their own LLM interaction via `pi.sendMessage()`.
+- **Extension commands** (e.g., `/mycommand`): Execute immediately, even during streaming. They manage their own LLM interaction via `theoses.sendMessage()`.
 - **File-based prompt templates** (from `.md` files): Expanded to their content before sending or queueing.
 - **During streaming without `streamingBehavior`**: Throws an error. Use `steer()` or `followUp()` directly, or specify the option.
 - **`preflightResult(true)`**: Means the prompt was accepted, queued, or handled immediately.
@@ -372,7 +372,7 @@ import { ModelRuntime } from "theoses-coding-agent";
 
 const modelRuntime = await ModelRuntime.create();
 
-// create() restores cached catalogs but does not refresh them from pi.dev by default.
+// create() restores cached catalogs but does not refresh them from providers by default.
 // Opt in to a create-time network refresh and bound how long it may take:
 const refreshedRuntime = await ModelRuntime.create({
   allowModelNetwork: true,
@@ -469,7 +469,7 @@ const customRuntime = await ModelRuntime.create({
   modelsPath: "/my/app/models.json",
 });
 
-// Or inject any pi-ai CredentialStore
+// Or inject any theoses-ai CredentialStore
 const credentials = new InMemoryCredentialStore();
 const inMemoryRuntime = await ModelRuntime.create({ credentials });
 
@@ -525,7 +525,7 @@ Specify which built-in tools to enable:
 - `noTools: "builtin"` disables default built-ins while keeping extension and custom tools enabled
 - `excludeTools` disables specific built-in, extension, or custom tool names after any `tools` allowlist is applied
 
-The `edit` tool returns `details.diff` for Pi's TUI display and `details.patch` as a standard unified patch for SDK consumers.
+The `edit` tool returns `details.diff` for Theoses's TUI display and `details.patch` as a standard unified patch for SDK consumers.
 
 ```typescript
 import { createAgentSession } from "theoses-coding-agent";
@@ -602,9 +602,9 @@ const { session } = await createAgentSession({
 });
 ```
 
-Use `defineTool()` for standalone definitions and arrays like `customTools: [myTool]`. Inline `pi.registerTool({ ... })` already infers parameter types correctly.
+Use `defineTool()` for standalone definitions and arrays like `customTools: [myTool]`. Inline `theoses.registerTool({ ... })` already infers parameter types correctly.
 
-Custom tools passed via `customTools` are combined with extension-registered tools. Extensions loaded by the ResourceLoader can also register tools via `pi.registerTool()`.
+Custom tools passed via `customTools` are combined with extension-registered tools. Extensions loaded by the ResourceLoader can also register tools via `theoses.registerTool()`.
 
 If you pass `tools`, include each custom or extension tool name you want enabled, for example `tools: ["read", "bash", "my_tool"]`.
 
@@ -620,8 +620,8 @@ import { createAgentSession, DefaultResourceLoader } from "theoses-coding-agent"
 const loader = new DefaultResourceLoader({
   additionalExtensionPaths: ["/path/to/my-extension.ts"],
   extensionFactories: [
-    (pi) => {
-      pi.on("agent_start", () => {
+    (theoses) => {
+      theoses.on("agent_start", () => {
         console.log("[Inline Extension] Agent starting");
       });
     },
@@ -641,8 +641,8 @@ import type { InlineExtension } from "theoses-coding-agent";
 
 const myProvider: InlineExtension = {
   name: "my-provider",
-  factory: (pi) => {
-    pi.on("agent_start", () => {
+  factory: (theoses) => {
+    theoses.on("agent_start", () => {
       console.log("[my-provider] Agent starting");
     });
   },
@@ -655,7 +655,7 @@ const loader = new DefaultResourceLoader({
 
 This displays as `<inline:my-provider>` instead of `<inline:1>`. Bare factory functions are still accepted for backward compatibility.
 
-**Event Bus:** Extensions can communicate via `pi.events`. Pass a shared `eventBus` to `DefaultResourceLoader` if you need to emit or listen from outside:
+**Event Bus:** Extensions can communicate via `theoses.events`. Pass a shared `eventBus` to `DefaultResourceLoader` if you need to emit or listen from outside:
 
 ```typescript
 import { createEventBus, DefaultResourceLoader } from "theoses-coding-agent";
@@ -1147,7 +1147,7 @@ See [RPC documentation](rpc.md) for the JSON protocol.
 For subprocess-based integration without building with the SDK, use the CLI directly:
 
 ```bash
-pi --mode rpc --no-session
+theoses --mode rpc --no-session
 ```
 
 See [RPC documentation](rpc.md) for the JSON protocol.
@@ -1174,7 +1174,7 @@ createAgentSessionRuntime
 AgentSessionRuntime
 
 // Auth and Models
-ModelRuntime // implements pi-ai Models and owns credential storage
+ModelRuntime // implements theoses-ai Models and owns credential storage
 ModelRegistry // synchronous extension compatibility facade
 CredentialSynchronizationError
 resolveCliModel

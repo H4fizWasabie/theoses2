@@ -1,6 +1,6 @@
 # Windows Setup
 
-Pi uses Git Bash by default on Windows. Checked locations (in order):
+Theoses uses Git Bash by default on Windows. Checked locations (in order):
 
 1. Custom path from `~/.theoses/agent/settings.json`
 2. Git Bash (`C:\Program Files\Git\bin\bash.exe`)

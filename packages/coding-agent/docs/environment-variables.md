@@ -1,9 +1,9 @@
 # Environment Variables
 
-Pi uses environment variables in three ways:
+Theoses uses environment variables in three ways:
 
-- Variables such as `THEOSES_OFFLINE` configure the Pi process.
-- Pi sets process markers so child processes can identify Pi as the launching agent.
+- Variables such as `THEOSES_OFFLINE` configure the Theoses process.
+- Theoses sets process markers so child processes can identify Theoses as the launching agent.
 - Commands run by the LLM-callable shell tools receive `THEOSES_*` variables describing the current session.
 
 Provider API-key variables are documented separately in [Providers](providers.md#environment-variables-or-auth-file).
@@ -12,14 +12,14 @@ Provider API-key variables are documented separately in [Providers](providers.md
 
 The CLI and RPC entry points set two process markers:
 
-- `AI_AGENT=pi` is a generic marker that lets tooling identify Pi as the agent that launched the process.
-- `THEOSES_CODING_AGENT=true` is Pi-specific and lets child processes detect that they run inside Pi.
+- `AI_AGENT=theoses` is a generic marker that lets tooling identify Theoses as the agent that launched the process.
+- `THEOSES_CODING_AGENT=true` is Theoses-specific and lets child processes detect that they run inside Theoses.
 
-Child processes inherit both markers. They are not session-specific and are not set automatically when Pi is embedded through the SDK.
+Child processes inherit both markers. They are not session-specific and are not set automatically when Theoses is embedded through the SDK.
 
 ## Shell Tool Session Environment
 
-Commands run by the `bash` and `powershell` tools receive the current Pi session state:
+Commands run by the `bash` and `powershell` tools receive the current Theoses session state:
 
 | Variable | Description |
 |----------|-------------|
@@ -29,7 +29,7 @@ Commands run by the `bash` and `powershell` tools receive the current Pi session
 | `THEOSES_MODEL` | Currently selected model ID |
 | `THEOSES_REASONING_LEVEL` | Current effective reasoning level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` |
 
-The values are resolved when each command starts. Switching models or changing the reasoning level therefore affects the next shell command without restarting Pi. `THEOSES_PROVIDER` and `THEOSES_MODEL` identify the selected Pi model, not a different upstream model that a router may choose internally.
+The values are resolved when each command starts. Switching models or changing the reasoning level therefore affects the next shell command without restarting Theoses. `THEOSES_PROVIDER` and `THEOSES_MODEL` identify the selected Theoses model, not a different upstream model that a router may choose internally.
 
 When asked which model or provider is running, inspect these variables instead of inferring the answer from the system prompt:
 
@@ -50,7 +50,7 @@ These variables are injected into the LLM-callable `bash` and `powershell` tools
 
 ### Custom Shell Tools
 
-Tools created with `createBashTool()` or `createPowerShellTool()` expose the session environment by default when registered with Pi. Injection happens before `spawnHook`, so a hook receives the variables in `ctx.env`:
+Tools created with `createBashTool()` or `createPowerShellTool()` expose the session environment by default when registered with Theoses. Injection happens before `spawnHook`, so a hook receives the variables in `ctx.env`:
 
 ```typescript
 const bashTool = createBashTool(cwd, {
@@ -70,11 +70,11 @@ const powershellTool = createPowerShellTool(cwd, {
 });
 ```
 
-When disabled, Pi removes inherited values for these variables so nested Pi processes do not expose stale parent-session metadata.
+When disabled, Theoses removes inherited values for these variables so nested Theoses processes do not expose stale parent-session metadata.
 
-## Pi Process Configuration
+## Theoses Process Configuration
 
-These variables are read by Pi itself:
+These variables are read by Theoses itself:
 
 | Variable | Description |
 |----------|-------------|
@@ -82,8 +82,6 @@ These variables are read by Pi itself:
 | `THEOSES_CODING_AGENT_SESSION_DIR` | Override session storage; overridden by `--session-dir` |
 | `THEOSES_PACKAGE_DIR` | Override the package directory, useful for Nix/Guix store paths |
 | `THEOSES_OFFLINE` | Disable startup network operations, including update checks and update telemetry |
-| `THEOSES_SKIP_VERSION_CHECK` | Disable the `pi.dev` latest-version request |
-| `THEOSES_TELEMETRY` | Override install/update telemetry and provider attribution headers: `1`/`true`/`yes` or `0`/`false`/`no` |
 | `THEOSES_CACHE_RETENTION` | Set to `long` for extended provider prompt caching where supported |
 | `THEOSES_HARDWARE_CURSOR` | Set to `1` to show the hardware cursor; see [Terminal setup](terminal-setup.md) |
 | `THEOSES_TUI_ESC_TIMEOUT` | How long to wait after a lone ESC before treating it as Escape, in milliseconds; defaults to `100` over SSH and `10` otherwise. Increase if Alt-key input is misread as Escape |

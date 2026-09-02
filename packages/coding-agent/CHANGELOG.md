@@ -26,6 +26,10 @@
 - Fixed abort-notice detection to read the latest persisted operation outcome record.
 - Added model-backed durable-memory distillation for messages dropped by manual and automatic compaction, with confidence filtering and promoted-range deduplication.
 
+### Changed
+
+- Renamed the coding-agent package and executable to `theoses-coding-agent` and `theoses`, and moved the default configuration directory to `~/.theoses/agent` ([#19](https://github.com/H4fizWasabie/theoses2/issues/19)).
+
 ## [0.84.3] - 2026-08-24
 
 ### New Features

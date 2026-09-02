@@ -1,6 +1,6 @@
 # theoses-client
 
-Transport-neutral client for remote pi sessions. `PiClient` exchanges length-prefixed CBOR messages through a small `ByteTransport` interface. The package has no Node-specific imports.
+Transport-neutral client for remote theoses sessions. `PiClient` exchanges length-prefixed CBOR messages through a small `ByteTransport` interface. The package has no Node-specific imports.
 
 ```ts
 import { PiClient, type ByteTransportFactory } from "theoses-client";
@@ -51,7 +51,7 @@ import { createUnixTransportFactory } from "theoses-client/unix";
 
 const client = new PiClient({
   transportFactory: createUnixTransportFactory({
-    path: "/tmp/pi.sock",
+    path: "/tmp/theoses.sock",
   }),
 });
 

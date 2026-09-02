@@ -1,9 +1,4 @@
 <p align="center">
-  <a href="https://pi.dev">
-    <img alt="pi logo" src="https://pi.dev/logo-auto.svg" width="128">
-  </a>
-</p>
-<p align="center">
   <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
   <a href="https://www.npmjs.com/package/theoses-coding-agent"><img alt="npm" src="https://img.shields.io/npm/v/theoses-coding-agent?style=flat-square" /></a>
 </p>
@@ -12,27 +7,27 @@
 
 ---
 
-Pi is a minimal terminal coding harness. Adapt pi to your workflows, not the other way around, without having to fork and modify pi internals. Extend it with TypeScript [Extensions](#extensions), [Skills](#skills), [Prompt Templates](#prompt-templates), and [Themes](#themes).
+Theoses is a minimal terminal coding harness. Adapt theoses to your workflows, not the other way around, without having to fork and modify theoses internals. Extend it with TypeScript [Extensions](#extensions), [Skills](#skills), [Prompt Templates](#prompt-templates), and [Themes](#themes).
 
-Pi ships with powerful defaults but skips features like sub agents and plan mode. Instead, you can ask pi to build what you want or extend it with local resources.
+Theoses ships with powerful defaults but skips features like sub agents and plan mode. Instead, you can ask theoses to build what you want or extend it with local resources.
 
-Pi runs in four modes: interactive, print or JSON, RPC for process integration, and an SDK for embedding in your own apps.
+Theoses runs in four modes: interactive, print or JSON, RPC for process integration, and an SDK for embedding in your own apps.
 
 ## Share your OSS coding agent sessions
 
-If you use pi for open source work, please share your coding agent sessions.
+If you use theoses for open source work, please share your coding agent sessions.
 
 Public OSS session data helps improve models, prompts, tools, and evaluations using real development workflows.
 
 For the full explanation, see [this post on X](https://x.com/badlogicgames/status/2037811643774652911).
 
-To publish sessions, use [`badlogic/pi-share-hf`](https://github.com/badlogic/pi-share-hf). Read its README.md for setup instructions. All you need is a Hugging Face account, the Hugging Face CLI, and `pi-share-hf`.
+To publish sessions, use [`badlogic/theoses-share-hf`](https://github.com/badlogic/theoses-share-hf). Read its README.md for setup instructions. All you need is a Hugging Face account, the Hugging Face CLI, and `theoses-share-hf`.
 
-You can also watch [this video](https://x.com/badlogicgames/status/2041151967695634619), where I show how I publish my `pi-mono` sessions.
+You can also watch [this video](https://x.com/badlogicgames/status/2041151967695634619), where I show how I publish my `theoses-mono` sessions.
 
-I regularly publish my own `pi-mono` work sessions here:
+I regularly publish my own `theoses-mono` work sessions here:
 
-- [badlogicgames/pi-mono on Hugging Face](https://huggingface.co/datasets/badlogicgames/pi-mono)
+- [badlogicgames/theoses-mono on Hugging Face](https://huggingface.co/datasets/badlogicgames/theoses-mono)
 
 ## Table of Contents
 
@@ -65,29 +60,29 @@ I regularly publish my own `pi-mono` work sessions here:
 npm install -g --ignore-scripts theoses-coding-agent
 ```
 
-`--ignore-scripts` disables dependency lifecycle scripts during install. Pi does not require install scripts for normal npm installs.
+`--ignore-scripts` disables dependency lifecycle scripts during install. Theoses does not require install scripts for normal npm installs.
 
 Installer alternative:
 
 ```bash
-curl -fsSL https://pi.dev/install.sh | sh
+npm install -g --ignore-scripts theoses-coding-agent
 ```
 
 Authenticate with an API key:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-pi
+theoses
 ```
 
 Or use your existing subscription:
 
 ```bash
-pi
+theoses
 /login  # Then select provider
 ```
 
-Then just talk to pi. By default, pi gives the model four tools: `read`, `write`, `edit`, and `bash`. The model uses these to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), or [extensions](#extensions).
+Then just talk to theoses. By default, theoses gives the model four tools: `read`, `write`, `edit`, and `bash`. The model uses these to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), or [extensions](#extensions).
 
 **Platform notes:** [Windows](docs/windows.md) | [Termux (Android)](docs/termux.md) | [tmux](docs/tmux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
 
@@ -95,7 +90,7 @@ Then just talk to pi. By default, pi gives the model four tools: `read`, `write`
 
 ## Providers & Models
 
-For each built-in provider, pi maintains a list of tool-capable models. Configured provider catalogs refresh automatically; run `pi update --models` to force an immediate refresh. Authenticate via subscription (`/login`) or API key, then select any model from that provider via `/model` (or Ctrl+L).
+For each built-in provider, theoses maintains a list of tool-capable models. Configured provider catalogs refresh automatically; run `theoses update` to force an immediate refresh. Authenticate via subscription (`/login`) or API key, then select any model from that provider via `/model` (or Ctrl+L).
 
 **Subscriptions:**
 - Anthropic Claude Pro/Max
@@ -135,7 +130,7 @@ For each built-in provider, pi maintains a list of tool-capable models. Configur
 - Xiaomi MiMo Token Plan (Amsterdam)
 - Xiaomi MiMo Token Plan (Singapore)
 
-Pi also supports the llama.cpp router server. Configure it with `/login llama.cpp`, manage downloads and loaded models with `/llama`, then select a loaded model with `/model`. See [docs/llama-cpp.md](docs/llama-cpp.md) for setup and usage.
+Theoses also supports the llama.cpp router server. Configure it with `/login llama.cpp`, manage downloads and loaded models with `/llama`, then select a loaded model with `/model`. See [docs/llama-cpp.md](docs/llama-cpp.md) for setup and usage.
 
 See [docs/providers.md](docs/providers.md) for other provider setup instructions.
 
@@ -195,7 +190,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/reload` | Reload keybindings, extensions, skills, prompts, themes, and context files |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
-| `/quit` | Quit pi |
+| `/quit` | Quit theoses |
 
 ### Keyboard Shortcuts
 
@@ -225,7 +220,7 @@ Submit messages while the agent is working:
 - **Escape** aborts and restores queued messages to editor
 - **Alt+Up** retrieves queued messages back to editor
 
-On Windows Terminal, `Alt+Enter` is fullscreen by default. Remap it in [docs/terminal-setup.md](docs/terminal-setup.md) so pi can receive the follow-up shortcut.
+On Windows Terminal, `Alt+Enter` is fullscreen by default. Remap it in [docs/terminal-setup.md](docs/terminal-setup.md) so theoses can receive the follow-up shortcut.
 
 Configure delivery in [settings](docs/settings.md): `steeringMode` and `followUpMode` can be `"one-at-a-time"` (default, waits for response) or `"all"` (delivers all queued at once). `transport` selects provider transport preference (`"sse"`, `"websocket"`, or `"auto"`) for providers that support multiple transports.
 
@@ -240,12 +235,12 @@ Sessions are stored as JSONL files with a tree structure. Each entry has an `id`
 Sessions auto-save to `~/.theoses/agent/sessions/` organized by working directory.
 
 ```bash
-pi -c                  # Continue most recent session
-pi -r                  # Browse and select from past sessions
-pi --no-session        # Ephemeral mode (don't save)
-pi --name "my task"    # Set session display name at startup
-pi --session <path|id> # Use specific session file or ID
-pi --fork <path|id>    # Fork specific session file or ID into a new session
+theoses -c                  # Continue most recent session
+theoses -r                  # Browse and select from past sessions
+theoses --no-session        # Ephemeral mode (don't save)
+theoses --name "my task"    # Set session display name at startup
+theoses --session <path|id> # Use specific session file or ID
+theoses --fork <path|id>    # Fork specific session file or ID into a new session
 ```
 
 Use `/session` in interactive mode to see the current session ID before reusing it with `--session <id>` or `--fork <id>`.
@@ -292,24 +287,23 @@ See [docs/settings.md](docs/settings.md) for all options.
 
 ### Project Trust
 
-On interactive startup, pi asks before trusting a project folder that contains project-local settings, resources, or project `.agents/skills` and has no saved decision for the folder or a parent folder in `~/.theoses/agent/trust.json`. Trusting a project allows pi to load `.theoses/settings.json` and `.theoses` resources and execute project extensions.
+On interactive startup, theoses asks before trusting a project folder that contains project-local settings, resources, or project `.agents/skills` and has no saved decision for the folder or a parent folder in `~/.theoses/agent/trust.json`. Trusting a project allows theoses to load `.theoses/settings.json` and `.theoses` resources and execute project extensions.
 
-Before the trust decision, pi loads only context files, user/global extensions, and CLI `-e` extensions so they can handle the `project_trust` event. Project-local extensions and project settings are loaded only after the project is trusted. This split also applies when switching to a session from a different cwd whose trust has not been resolved in the current process.
+Before the trust decision, theoses loads only context files, user/global extensions, and CLI `-e` extensions so they can handle the `project_trust` event. Project-local extensions and project settings are loaded only after the project is trusted. This split also applies when switching to a session from a different cwd whose trust has not been resolved in the current process.
 
 Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trust prompt. Without an applicable saved trust decision, they use `defaultProjectTrust` from global settings: `ask` (default) and `never` ignore those project resources, while `always` trusts them. Pass `--approve`/`-a` or `--no-approve`/`-na` to override project trust for one run.
 
 If no extension or saved decision applies, `defaultProjectTrust` controls the fallback behavior. Set it to `"ask"`, `"always"`, or `"never"` in `~/.theoses/agent/settings.json`, or change it with `/settings`.
 
-`pi update` never prompts for project trust. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
+`theoses update` never prompts for project trust. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
 
-Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.theoses/agent/trust.json` only; the current session is not reloaded, so restart pi for changes to take effect.
+Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.theoses/agent/trust.json` only; the current session is not reloaded, so restart theoses for changes to take effect.
 
 ### Telemetry and update checks
 
-Pi has two separate startup features:
+Theoses has two separate startup features:
 
-- **Update check:** fetches `https://pi.dev/api/latest-version` to check whether a newer Pi version exists. Disable it with `THEOSES_SKIP_VERSION_CHECK=1`. Disabling update checks only turns off this check.
-- **Install/update telemetry:** after first install or a changelog-detected update, sends an anonymous version ping to `https://pi.dev/api/report-install`. This setting also controls optional provider attribution headers for OpenRouter, Cloudflare, and direct NVIDIA NIM requests. Opt out by setting `enableInstallTelemetry` to `false` in `settings.json`, or by setting `THEOSES_TELEMETRY=0`. This does not disable update checks; Pi may still contact `pi.dev` for the latest version unless update checks are disabled or offline mode is enabled.
+Use `--offline` or `THEOSES_OFFLINE=1` to disable startup network operations.
 
 Use `--offline` or `THEOSES_OFFLINE=1` to disable all startup network operations described here, including update checks and update telemetry.
 
@@ -317,12 +311,12 @@ Use `--offline` or `THEOSES_OFFLINE=1` to disable all startup network operations
 
 ## Context Files
 
-Pi loads `AGENTS.md` (or `CLAUDE.md`) at startup from:
+Theoses loads `AGENTS.md` (or `CLAUDE.md`) at startup from:
 - `~/.theoses/agent/AGENTS.md` (global)
 - Parent directories (walking up from cwd)
 - Current directory
 
-If a directory contains `AGENTS.override.md`, Pi loads it instead of `AGENTS.md` or `CLAUDE.md` from that directory. Context files from other directories are still concatenated.
+If a directory contains `AGENTS.override.md`, Theoses loads it instead of `AGENTS.md` or `CLAUDE.md` from that directory. Context files from other directories are still concatenated.
 
 Use for project instructions (`AGENTS.md`/`CLAUDE.md`), conventions, common commands. All matching files are concatenated.
 
@@ -368,17 +362,17 @@ Place in `~/.theoses/agent/skills/`, `~/.agents/skills/`, `.theoses/skills/`, or
 
 <p align="center"><img src="docs/images/doom-extension.png" alt="Doom Extension" width="600"></p>
 
-TypeScript modules that extend pi with custom tools, commands, keyboard shortcuts, event handlers, and UI components.
+TypeScript modules that extend theoses with custom tools, commands, keyboard shortcuts, event handlers, and UI components.
 
 ```typescript
-export default function (pi: ExtensionAPI) {
-  pi.registerTool({ name: "deploy", ... });
-  pi.registerCommand("stats", { ... });
-  pi.on("tool_call", async (event, ctx) => { ... });
+export default function (theoses: ExtensionAPI) {
+  theoses.registerTool({ name: "deploy", ... });
+  theoses.registerCommand("stats", { ... });
+  theoses.on("tool_call", async (event, ctx) => { ... });
 }
 ```
 
-The default export can also be `async`. pi waits for async extension factories before startup continues, which is useful for one-time initialization such as fetching remote model lists before calling `pi.registerProvider()`.
+The default export can also be `async`. theoses waits for async extension factories before startup continues, which is useful for one-time initialization such as fetching remote model lists before calling `theoses.registerProvider()`.
 
 **What's possible:**
 - Custom tools (or replace built-in tools entirely)
@@ -390,7 +384,7 @@ The default export can also be `async`. pi waits for async extension factories b
 - Git checkpointing and auto-commit
 - SSH and sandbox execution
 - MCP server integration
-- Make pi look like Claude Code
+- Make theoses look like Claude Code
 - Games while waiting (yes, Doom runs)
 - ...anything you can dream up
 
@@ -398,7 +392,7 @@ Place in `~/.theoses/agent/extensions/` or `.theoses/extensions/`. See [docs/ext
 
 ### Themes
 
-Built-in: `dark`, `light`. Themes hot-reload: modify the active theme file and pi immediately applies changes.
+Built-in: `dark`, `light`. Themes hot-reload: modify the active theme file and theoses immediately applies changes.
 
 Place in `~/.theoses/agent/themes/` or `.theoses/themes/`. See [docs/themes.md](docs/themes.md).
 
@@ -429,7 +423,7 @@ See [docs/sdk.md](docs/sdk.md) and [examples/sdk/](examples/sdk/).
 For non-Node.js integrations, use RPC mode over stdin/stdout:
 
 ```bash
-pi --mode rpc
+theoses --mode rpc
 ```
 
 RPC mode uses strict LF-delimited JSONL framing. Clients must split records on `\n` only. Do not use generic line readers like Node `readline`, which also split on Unicode separators inside JSON payloads.
@@ -440,11 +434,11 @@ See [docs/rpc.md](docs/rpc.md) for the protocol.
 
 ## Philosophy
 
-Pi is aggressively extensible so it doesn't have to dictate your workflow. Features that other tools bake in can be built with [extensions](#extensions) and [skills](#skills). This keeps the core minimal while letting you shape pi to fit how you work.
+Theoses is aggressively extensible so it doesn't have to dictate your workflow. Features that other tools bake in can be built with [extensions](#extensions) and [skills](#skills). This keeps the core minimal while letting you shape theoses to fit how you work.
 
 **No MCP.** Build CLI tools with READMEs (see [Skills](#skills)), or build an extension that adds MCP support. [Why?](https://mariozechner.at/posts/2025-11-02-what-if-you-dont-need-mcp/)
 
-**No sub-agents.** There's many ways to do this. Spawn pi instances via tmux, or build your own with [extensions](#extensions).
+**No sub-agents.** There's many ways to do this. Spawn theoses instances via tmux, or build your own with [extensions](#extensions).
 
 **No permission popups.** Run in a container, or build your own confirmation flow with [extensions](#extensions) inline with your environment and security requirements.
 
@@ -454,25 +448,23 @@ Pi is aggressively extensible so it doesn't have to dictate your workflow. Featu
 
 **No background bash.** Use tmux. Full observability, direct interaction.
 
-Read the [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/) for the full rationale.
+Read the [blog post](https://mariozechner.at/posts/2025-11-30-theoses-coding-agent/) for the full rationale.
 
 ---
 
 ## CLI Reference
 
 ```bash
-pi [options] [--] [@files...] [messages...]
+theoses [options] [--] [@files...] [messages...]
 ```
 
 ### Update Command
 
 ```bash
-pi update --models           # Refresh model catalogs only
-pi update --self             # Update pi only
-pi update --self --force     # Reinstall pi even if current
+theoses update                    # Refresh model catalogs
 ```
 
-`pi update` never prompts for project trust.
+`theoses update` never prompts for project trust.
 
 ### Modes
 
@@ -484,10 +476,10 @@ pi update --self --force     # Reinstall pi even if current
 | `--mode rpc` | RPC mode for process integration (see [docs/rpc.md](docs/rpc.md)) |
 | `--export <in> [out]` | Export session to HTML |
 
-In print mode, pi also reads piped stdin and merges it into the initial prompt:
+In print mode, theoses also reads piped stdin and merges it into the initial prompt:
 
 ```bash
-cat README.md | pi -p "Summarize this text"
+cat README.md | theoses -p "Summarize this text"
 ```
 
 ### Model Options
@@ -560,63 +552,61 @@ Combine `--no-*` with explicit flags to load exactly what you need, ignoring set
 Prefix files with `@` to include in the message:
 
 ```bash
-pi @prompt.md "Answer this"
-pi -p @screenshot.png "What's in this image?"
-pi @code.ts @test.ts "Review these files"
+theoses @prompt.md "Answer this"
+theoses -p @screenshot.png "What's in this image?"
+theoses @code.ts @test.ts "Review these files"
 ```
 
 ### Examples
 
 ```bash
 # Interactive with initial prompt
-pi "List all .ts files in src/"
+theoses "List all .ts files in src/"
 
 # Non-interactive
-pi -p "Summarize this codebase"
+theoses -p "Summarize this codebase"
 
 # Prompt beginning with a dash
-pi -p -- "- Summarize these points"
+theoses -p -- "- Summarize these points"
 
 # Non-interactive with piped stdin
-cat README.md | pi -p "Summarize this text"
+cat README.md | theoses -p "Summarize this text"
 
 # Named one-shot session
-pi --name "release audit" -p "Audit this repository"
+theoses --name "release audit" -p "Audit this repository"
 
 # Different model
-pi --provider openai --model gpt-4o "Help me refactor"
+theoses --provider openai --model gpt-4o "Help me refactor"
 
 # Model with provider prefix (no --provider needed)
-pi --model openai/gpt-4o "Help me refactor"
+theoses --model openai/gpt-4o "Help me refactor"
 
 # Model with thinking level shorthand
-pi --model sonnet:high "Solve this complex problem"
+theoses --model sonnet:high "Solve this complex problem"
 
 # Limit model cycling
-pi --models "claude-*,gpt-4o"
+theoses --models "claude-*,gpt-4o"
 
 # Read-only mode
-pi --tools read,grep,find,ls -p "Review the code"
+theoses --tools read,grep,find,ls -p "Review the code"
 
 # Disable one extension or built-in tool while keeping the rest available
-pi --exclude-tools ask_question
+theoses --exclude-tools ask_question
 
 # High thinking level
-pi --thinking high "Solve this complex problem"
+theoses --thinking high "Solve this complex problem"
 ```
 
 ### Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `AI_AGENT` | Set to `pi` by the CLI and RPC entry points so generic tooling can attribute child processes to Pi |
-| `THEOSES_CODING_AGENT` | Set to `true` by the CLI and RPC entry points so child processes can detect that they run inside Pi |
+| `AI_AGENT` | Set to `theoses` by the CLI and RPC entry points so generic tooling can attribute child processes to Theoses |
+| `THEOSES_CODING_AGENT` | Set to `true` by the CLI and RPC entry points so child processes can detect that they run inside Theoses |
 | `THEOSES_CODING_AGENT_DIR` | Override config directory (default: `~/.theoses/agent`) |
 | `THEOSES_CODING_AGENT_SESSION_DIR` | Override session storage directory (overridden by `--session-dir`) |
 | `THEOSES_PACKAGE_DIR` | Override package directory (useful for Nix/Guix where store paths tokenize poorly) |
 | `THEOSES_OFFLINE` | Disable startup network operations, including update checks and update telemetry |
-| `THEOSES_SKIP_VERSION_CHECK` | Skip the Pi version update check at startup. This prevents the `pi.dev` latest-version request |
-| `THEOSES_TELEMETRY` | Override install/update telemetry and provider attribution headers. Use `1`/`true`/`yes` to enable or `0`/`false`/`no` to disable. This does not disable update checks |
 | `THEOSES_CACHE_RETENTION` | Set to `long` for extended prompt cache (Anthropic: 1h, OpenAI: 24h) |
 | `VISUAL`, `EDITOR` | Fallback external editor for Ctrl+G when `externalEditor` is unset; defaults to Notepad on Windows and `nano` elsewhere |
 
@@ -647,9 +637,3 @@ MIT
 - [theoses-ai](https://www.npmjs.com/package/theoses-ai): Core LLM toolkit
 - [theoses-agent-core](https://www.npmjs.com/package/theoses-agent-core): Agent framework
 - [theoses-tui](https://www.npmjs.com/package/theoses-tui): Terminal UI components
-
-<p align="center">
-  <a href="https://pi.dev">pi.dev</a> domain graciously donated by
-  <br /><br />
-  <a href="https://exe.dev"><img src="docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
-</p>

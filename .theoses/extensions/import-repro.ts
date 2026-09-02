@@ -9,10 +9,9 @@
  * Usage:
  *   /ir b4d100022aefb12f25dd2d8485e0a82a
  *   /ir https://gist.github.com/mitsuhiko/b4d100022aefb12f25dd2d8485e0a82a
- *   /ir https://pi.dev/session/#b4d100022aefb12f25dd2d8485e0a82a
- *   /ir https://github.com/earendil-works/pi/issues/123
+ *   /ir https://github.com/H4fizWasabie/theoses2/issues/123
  *
- *   pi "/ir <gist-id>"
+ *   theoses "/ir <gist-id>"
  */
 
 import { Buffer } from "node:buffer";
@@ -22,7 +21,6 @@ import type { ExtensionAPI, ExtensionCommandContext } from "theoses-coding-agent
 
 const GIST_ID_RE = /^[0-9a-fA-F]{20,}$/;
 const GIST_URL_RE = /^https:\/\/gist\.github\.com\/(?:[^/]+\/)?([0-9a-fA-F]{20,})(?:[/#?].*)?$/;
-const SHARE_URL_RE = /^https:\/\/pi\.dev\/session\/#([0-9a-fA-F]{20,})(?:[/#?].*)?$/;
 const ISSUE_URL_RE = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)(?:[/#?].*)?$/;
 const GIST_URL_IN_TEXT_RE = /https:\/\/gist\.github\.com\/(?:[^/\s]+\/)?([0-9a-fA-F]{20,})\b/g;
 const SESSION_DATA_RE = /<script id="session-data" type="application\/json">([^<]+)<\/script>/;
@@ -63,9 +61,6 @@ function parseRef(
 		return { type: "file", path: isAbsolute(ref) ? ref : resolve(cwd, ref) };
 	}
 
-	const shareMatch = ref.match(SHARE_URL_RE);
-	if (shareMatch) return { type: "gist", id: shareMatch[1] };
-
 	const gistMatch = ref.match(GIST_URL_RE);
 	if (gistMatch) return { type: "gist", id: gistMatch[1] };
 
@@ -74,7 +69,7 @@ function parseRef(
 
 	if (GIST_ID_RE.test(ref)) return { type: "gist", id: ref };
 
-	throw new Error(`expected a gist ID, gist URL, pi.dev share URL, issue URL, .html file, or .jsonl file: ${ref}`);
+	throw new Error(`expected a gist ID, gist URL, issue URL, .html file, or .jsonl file: ${ref}`);
 }
 
 function parseSessionJsonl(raw: string): { header: SessionHeader; jsonl: string } {
@@ -286,7 +281,7 @@ export default function (pi: ExtensionAPI) {
 		handler: async (args: string, ctx: ExtensionCommandContext) => {
 			const ref = args.trim();
 			if (!ref) {
-				ctx.ui.notify("Usage: /ir <gist-id | gist-url | pi.dev/session URL | issue URL>", "error");
+				ctx.ui.notify("Usage: /ir <gist-id | gist-url | issue URL>", "error");
 				return;
 			}
 

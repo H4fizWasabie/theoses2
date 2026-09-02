@@ -1,4 +1,4 @@
-# Using Pi
+# Using Theoses
 
 This page collects day-to-day usage details that do not fit on the quickstart page.
 
@@ -56,7 +56,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/reload` | Reload keybindings, extensions, skills, prompts, themes, and context files |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
-| `/quit` | Quit pi |
+| `/quit` | Quit theoses |
 
 ## Message Queue
 
@@ -67,7 +67,7 @@ You can submit messages while the agent is still working:
 - **Escape** aborts and restores queued messages to the editor.
 - **Alt+Up** retrieves queued messages back to the editor.
 
-On Windows Terminal, Alt+Enter is fullscreen by default. Remap it as described in [Terminal setup](terminal-setup.md) if you want pi to receive the shortcut.
+On Windows Terminal, Alt+Enter is fullscreen by default. Remap it as described in [Terminal setup](terminal-setup.md) if you want theoses to receive the shortcut.
 
 Configure delivery in [Settings](settings.md) with `steeringMode` and `followUpMode`.
 
@@ -76,12 +76,12 @@ Configure delivery in [Settings](settings.md) with `steeringMode` and `followUpM
 Sessions are saved automatically to `~/.theoses/agent/sessions/`, organized by working directory.
 
 ```bash
-pi -c                  # Continue most recent session
-pi -r                  # Browse and select a session
-pi --no-session        # Ephemeral mode; do not save
-pi --name "my task"    # Set session display name at startup
-pi --session <path|id> # Use a specific session file or session ID
-pi --fork <path|id>    # Fork a session into a new session file
+theoses -c                  # Continue most recent session
+theoses -r                  # Browse and select a session
+theoses --no-session        # Ephemeral mode; do not save
+theoses --name "my task"    # Set session display name at startup
+theoses --session <path|id> # Use a specific session file or session ID
+theoses --fork <path|id>    # Fork a session into a new session file
 ```
 
 Useful session commands:
@@ -96,13 +96,13 @@ See [Sessions](sessions.md) and [Compaction](compaction.md) for details.
 
 ## Context Files
 
-Pi loads `AGENTS.md` or `CLAUDE.md` at startup from:
+Theoses loads `AGENTS.md` or `CLAUDE.md` at startup from:
 
 - `~/.theoses/agent/AGENTS.md` for global instructions
 - parent directories, walking up from the current working directory
 - the current directory
 
-If a directory contains `AGENTS.override.md`, Pi loads it instead of `AGENTS.md` or `CLAUDE.md` from that directory. Context files from other directories still layer normally.
+If a directory contains `AGENTS.override.md`, Theoses loads it instead of `AGENTS.md` or `CLAUDE.md` from that directory. Context files from other directories still layer normally.
 
 Use context files for project conventions, commands, safety rules, and preferences. Disable loading with `--no-context-files` or `-nc`.
 
@@ -117,39 +117,38 @@ Append to the default prompt without replacing it with `APPEND_SYSTEM.md` in eit
 
 ### Project Trust
 
-On interactive startup, pi asks before trusting a project folder that contains project-local settings, resources, or project `.agents/skills` and has no saved decision for the folder or a parent folder in `~/.theoses/agent/trust.json`. Trusting a project allows pi to load `.theoses/settings.json` and `.theoses` resources and execute project extensions.
+On interactive startup, theoses asks before trusting a project folder that contains project-local settings, resources, or project `.agents/skills` and has no saved decision for the folder or a parent folder in `~/.theoses/agent/trust.json`. Trusting a project allows theoses to load `.theoses/settings.json` and `.theoses` resources and execute project extensions.
 
-Before the trust decision, pi loads only context files, user/global extensions, and CLI `-e` extensions so they can handle the `project_trust` event. Project-local extensions and project settings are loaded only after the project is trusted. This split also applies when switching to a session from a different cwd whose trust has not been resolved in the current process.
+Before the trust decision, theoses loads only context files, user/global extensions, and CLI `-e` extensions so they can handle the `project_trust` event. Project-local extensions and project settings are loaded only after the project is trusted. This split also applies when switching to a session from a different cwd whose trust has not been resolved in the current process.
 
 Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trust prompt. Without an applicable saved trust decision, they use `defaultProjectTrust` from global settings: `ask` (default) and `never` ignore those project resources, while `always` trusts them. Pass `--approve`/`-a` or `--no-approve`/`-na` to override project trust for one run.
 
 If no extension or saved decision applies, `defaultProjectTrust` controls the fallback behavior. Set it to `"ask"`, `"always"`, or `"never"` in `~/.theoses/agent/settings.json`, or change it with `/settings`.
 
-`pi update` never prompts for project trust. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
+`theoses update` never prompts for project trust. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
 
-Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.theoses/agent/trust.json` only; the current session is not reloaded, so restart pi for changes to take effect.
+Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.theoses/agent/trust.json` only; the current session is not reloaded, so restart theoses for changes to take effect.
 
 
 ## Exporting and Sharing Sessions
 
 Use `/export [file]` to write a session to HTML.
 
-If you use pi for open source work and want to publish sessions for model, prompt, tool, and evaluation research, see [`badlogic/pi-share-hf`](https://github.com/badlogic/pi-share-hf). It publishes sessions to Hugging Face datasets.
+If you use theoses for open source work and want to publish sessions for model, prompt, tool, and evaluation research, see [`badlogic/theoses-share-hf`](https://github.com/badlogic/theoses-share-hf). It publishes sessions to Hugging Face datasets.
 
 ## CLI Reference
 
 ```bash
-pi [options] [--] [@files...] [messages...]
+theoses [options] [--] [@files...] [messages...]
 ```
 
 ### Update Command
 
 ```bash
-pi update --self             # Update pi itself
-pi update --models           # Refresh model catalogs only
+theoses update                    # Refresh model catalogs
 ```
 
-`pi update` updates the CLI or refreshes model catalogs. To uninstall pi itself, see [Quickstart](quickstart.md#uninstall).
+`theoses update` updates the CLI or refreshes model catalogs. To uninstall theoses itself, see [Quickstart](quickstart.md#uninstall).
 
 ### Modes
 
@@ -161,10 +160,10 @@ pi update --models           # Refresh model catalogs only
 | `--mode rpc` | RPC mode over stdin/stdout; see [RPC mode](rpc.md) |
 | `--export <in> [out]` | Export a session to HTML |
 
-In print mode, pi also reads piped stdin and merges it into the initial prompt:
+In print mode, theoses also reads piped stdin and merges it into the initial prompt:
 
 ```bash
-cat README.md | pi -p "Summarize this text"
+cat README.md | theoses -p "Summarize this text"
 ```
 
 ### Model Options
@@ -218,7 +217,7 @@ Built-in tools: `read`, `bash`, `powershell` (Windows), `edit`, `write`, `grep`,
 Combine `--no-*` with explicit flags to load exactly what you need, ignoring settings. Example:
 
 ```bash
-pi --no-extensions -e ./my-extension.ts
+theoses --no-extensions -e ./my-extension.ts
 ```
 
 ### Other Options
@@ -236,7 +235,7 @@ pi --no-extensions -e ./my-extension.ts
 | `-h`, `--help` | Show help |
 | `-v`, `--version` | Show version |
 
-In `fullscreen` mode, the transcript scrolls inside the terminal viewport while queued messages, working status, extension widgets, editor, and footer remain fixed at the bottom. Mouse/trackpad input scrolls the region under the pointer; keyboard viewport actions always remain available. Inline images work in terminals that support the Kitty graphics protocol, including Kitty and Ghostty. In iTerm2 they render as text placeholders because its inline-image protocol cannot delete or crop placements during application-owned scrolling. In `regular` mode, pi uses the main screen and terminal-owned scrollback, and iTerm2 inline images continue to render normally. See [Terminal setup](terminal-setup.md) for terminal-specific settings and workarounds.
+In `fullscreen` mode, the transcript scrolls inside the terminal viewport while queued messages, working status, extension widgets, editor, and footer remain fixed at the bottom. Mouse/trackpad input scrolls the region under the pointer; keyboard viewport actions always remain available. Inline images work in terminals that support the Kitty graphics protocol, including Kitty and Ghostty. In iTerm2 they render as text placeholders because its inline-image protocol cannot delete or crop placements during application-owned scrolling. In `regular` mode, theoses uses the main screen and terminal-owned scrollback, and iTerm2 inline images continue to render normally. See [Terminal setup](terminal-setup.md) for terminal-specific settings and workarounds.
 
 Set **TUI mode** in `/settings` to switch between `regular` and `fullscreen` immediately and choose the default for future sessions. **Fullscreen exit output** controls whether exiting fullscreen prints the final transcript or restores the previous screen and prints only the session resume hint.
 
@@ -245,52 +244,52 @@ Set **TUI mode** in `/settings` to switch between `regular` and `fullscreen` imm
 Prefix files with `@` to include them in the message:
 
 ```bash
-pi @prompt.md "Answer this"
-pi -p @screenshot.png "What's in this image?"
-pi @code.ts @test.ts "Review these files"
+theoses @prompt.md "Answer this"
+theoses -p @screenshot.png "What's in this image?"
+theoses @code.ts @test.ts "Review these files"
 ```
 
 ### Examples
 
 ```bash
 # Interactive with initial prompt
-pi "List all .ts files in src/"
+theoses "List all .ts files in src/"
 
 # Non-interactive
-pi -p "Summarize this codebase"
+theoses -p "Summarize this codebase"
 
 # Prompt beginning with a dash
-pi -p -- "- Summarize these points"
+theoses -p -- "- Summarize these points"
 
 # Non-interactive with piped stdin
-cat README.md | pi -p "Summarize this text"
+cat README.md | theoses -p "Summarize this text"
 
 # Named one-shot session
-pi --name "release audit" -p "Audit this repository"
+theoses --name "release audit" -p "Audit this repository"
 
 # Different model
-pi --provider openai --model gpt-4o "Help me refactor"
+theoses --provider openai --model gpt-4o "Help me refactor"
 
 # Model with provider prefix
-pi --model openai/gpt-4o "Help me refactor"
+theoses --model openai/gpt-4o "Help me refactor"
 
 # Model with thinking level shorthand
-pi --model sonnet:high "Solve this complex problem"
+theoses --model sonnet:high "Solve this complex problem"
 
 # Limit model cycling
-pi --models "claude-*,gpt-4o"
+theoses --models "claude-*,gpt-4o"
 
 # Read-only mode
-pi --tools read,grep,find,ls -p "Review the code"
+theoses --tools read,grep,find,ls -p "Review the code"
 
 # Disable one extension or built-in tool while keeping the rest available
-pi --exclude-tools ask_question
+theoses --exclude-tools ask_question
 ```
 
 ## Design Principles
 
-Pi keeps the core small and pushes workflow-specific behavior into extensions, skills, and prompt templates.
+Theoses keeps the core small and pushes workflow-specific behavior into extensions, skills, and prompt templates.
 
 It intentionally does not include built-in MCP, sub-agents, permission popups, plan mode, to-dos, or background bash. You can build those workflows as extensions, or use external tools such as containers and tmux.
 
-For the full rationale, read the [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/).
+For the full rationale, read the [blog post](https://mariozechner.at/posts/2025-11-30-theoses-coding-agent/).
