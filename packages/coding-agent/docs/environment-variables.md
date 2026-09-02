@@ -2,9 +2,9 @@
 
 Pi uses environment variables in three ways:
 
-- Variables such as `PI_OFFLINE` configure the Pi process.
+- Variables such as `THEOSES_OFFLINE` configure the Pi process.
 - Pi sets process markers so child processes can identify Pi as the launching agent.
-- Commands run by the LLM-callable shell tools receive `PI_*` variables describing the current session.
+- Commands run by the LLM-callable shell tools receive `THEOSES_*` variables describing the current session.
 
 Provider API-key variables are documented separately in [Providers](providers.md#environment-variables-or-auth-file).
 
@@ -13,7 +13,7 @@ Provider API-key variables are documented separately in [Providers](providers.md
 The CLI and RPC entry points set two process markers:
 
 - `AI_AGENT=pi` is a generic marker that lets tooling identify Pi as the agent that launched the process.
-- `PI_CODING_AGENT=true` is Pi-specific and lets child processes detect that they run inside Pi.
+- `THEOSES_CODING_AGENT=true` is Pi-specific and lets child processes detect that they run inside Pi.
 
 Child processes inherit both markers. They are not session-specific and are not set automatically when Pi is embedded through the SDK.
 
@@ -23,26 +23,26 @@ Commands run by the `bash` and `powershell` tools receive the current Pi session
 
 | Variable | Description |
 |----------|-------------|
-| `PI_SESSION_ID` | Current session ID |
-| `PI_SESSION_FILE` | Absolute path to the current session JSONL file; unset for ephemeral sessions |
-| `PI_PROVIDER` | Currently selected model provider |
-| `PI_MODEL` | Currently selected model ID |
-| `PI_REASONING_LEVEL` | Current effective reasoning level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` |
+| `THEOSES_SESSION_ID` | Current session ID |
+| `THEOSES_SESSION_FILE` | Absolute path to the current session JSONL file; unset for ephemeral sessions |
+| `THEOSES_PROVIDER` | Currently selected model provider |
+| `THEOSES_MODEL` | Currently selected model ID |
+| `THEOSES_REASONING_LEVEL` | Current effective reasoning level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` |
 
-The values are resolved when each command starts. Switching models or changing the reasoning level therefore affects the next shell command without restarting Pi. `PI_PROVIDER` and `PI_MODEL` identify the selected Pi model, not a different upstream model that a router may choose internally.
+The values are resolved when each command starts. Switching models or changing the reasoning level therefore affects the next shell command without restarting Pi. `THEOSES_PROVIDER` and `THEOSES_MODEL` identify the selected Pi model, not a different upstream model that a router may choose internally.
 
 When asked which model or provider is running, inspect these variables instead of inferring the answer from the system prompt:
 
 ```bash
-printf '%s/%s\n' "$PI_PROVIDER" "$PI_MODEL"
-printf 'reasoning=%s session=%s\n' "$PI_REASONING_LEVEL" "$PI_SESSION_ID"
+printf '%s/%s\n' "$THEOSES_PROVIDER" "$THEOSES_MODEL"
+printf 'reasoning=%s session=%s\n' "$THEOSES_REASONING_LEVEL" "$THEOSES_SESSION_ID"
 ```
 
 The session file can be inspected directly when the session is persistent:
 
 ```bash
-if [ -n "$PI_SESSION_FILE" ]; then
-  tail -n 1 "$PI_SESSION_FILE"
+if [ -n "$THEOSES_SESSION_FILE" ]; then
+  tail -n 1 "$THEOSES_SESSION_FILE"
 fi
 ```
 
@@ -78,15 +78,15 @@ These variables are read by Pi itself:
 
 | Variable | Description |
 |----------|-------------|
-| `PI_CODING_AGENT_DIR` | Override the config directory; default is `~/.pi/agent` |
-| `PI_CODING_AGENT_SESSION_DIR` | Override session storage; overridden by `--session-dir` |
-| `PI_PACKAGE_DIR` | Override the package directory, useful for Nix/Guix store paths |
-| `PI_OFFLINE` | Disable startup network operations, including update checks and update telemetry |
-| `PI_SKIP_VERSION_CHECK` | Disable the `pi.dev` latest-version request |
-| `PI_TELEMETRY` | Override install/update telemetry and provider attribution headers: `1`/`true`/`yes` or `0`/`false`/`no` |
-| `PI_CACHE_RETENTION` | Set to `long` for extended provider prompt caching where supported |
-| `PI_HARDWARE_CURSOR` | Set to `1` to show the hardware cursor; see [Terminal setup](terminal-setup.md) |
-| `PI_TUI_ESC_TIMEOUT` | How long to wait after a lone ESC before treating it as Escape, in milliseconds; defaults to `100` over SSH and `10` otherwise. Increase if Alt-key input is misread as Escape |
+| `THEOSES_CODING_AGENT_DIR` | Override the config directory; default is `~/.theoses/agent` |
+| `THEOSES_CODING_AGENT_SESSION_DIR` | Override session storage; overridden by `--session-dir` |
+| `THEOSES_PACKAGE_DIR` | Override the package directory, useful for Nix/Guix store paths |
+| `THEOSES_OFFLINE` | Disable startup network operations, including update checks and update telemetry |
+| `THEOSES_SKIP_VERSION_CHECK` | Disable the `pi.dev` latest-version request |
+| `THEOSES_TELEMETRY` | Override install/update telemetry and provider attribution headers: `1`/`true`/`yes` or `0`/`false`/`no` |
+| `THEOSES_CACHE_RETENTION` | Set to `long` for extended provider prompt caching where supported |
+| `THEOSES_HARDWARE_CURSOR` | Set to `1` to show the hardware cursor; see [Terminal setup](terminal-setup.md) |
+| `THEOSES_TUI_ESC_TIMEOUT` | How long to wait after a lone ESC before treating it as Escape, in milliseconds; defaults to `100` over SSH and `10` otherwise. Increase if Alt-key input is misread as Escape |
 | `VISUAL`, `EDITOR` | External editor fallback when `externalEditor` is unset |
 | `HTTP_PROXY`, `HTTPS_PROXY` | Proxy outbound HTTP requests |
 

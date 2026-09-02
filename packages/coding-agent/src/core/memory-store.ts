@@ -16,7 +16,7 @@ export interface MemoryStore {
 }
 
 function defaultMemoryPath(): string {
-	return process.env.PI_MEMORY_FILE ?? join(homedir(), CONFIG_DIR_NAME, "memory.jsonl");
+	return process.env.THEOSES_MEMORY_FILE ?? join(homedir(), CONFIG_DIR_NAME, "memory.jsonl");
 }
 
 export class FileMemoryStore implements MemoryStore {

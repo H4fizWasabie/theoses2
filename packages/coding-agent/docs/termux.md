@@ -20,7 +20,7 @@ pkg install nodejs termux-api git
 npm install -g --ignore-scripts theoses-coding-agent
 
 # Create config directory
-mkdir -p ~/.pi/agent
+mkdir -p ~/.theoses/agent
 
 # Run pi
 pi
@@ -34,7 +34,7 @@ Image clipboard is not supported on Termux (the `ctrl+v` image paste feature wil
 
 ## Example AGENTS.md for Termux
 
-Create `~/.pi/agent/AGENTS.md` to help the agent understand the Termux environment:
+Create `~/.theoses/agent/AGENTS.md` to help the agent understand the Termux environment:
 
 ````markdown
 # Agent Environment: Termux on Android
