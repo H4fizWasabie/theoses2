@@ -1,4 +1,4 @@
-import type { AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
+import type { AgentToolResult, AgentToolUpdateCallback } from "theoses-agent-core";
 import type { TSchema } from "typebox";
 import { VERSION } from "../config.ts";
 import type { RegisteredTool, ToolDefinition } from "./extensions/types.ts";

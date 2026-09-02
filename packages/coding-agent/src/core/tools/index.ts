@@ -83,7 +83,7 @@ export {
 	type WriteToolOptions,
 } from "./write.ts";
 
-import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { AgentTool } from "theoses-agent-core";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { FileMemoryStore, type MemoryStore } from "../memory-store.ts";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.ts";

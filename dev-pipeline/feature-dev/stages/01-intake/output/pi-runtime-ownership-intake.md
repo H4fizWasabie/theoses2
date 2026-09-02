@@ -41,7 +41,7 @@ redesign context, convert the agent into a personal assistant, or remove runtime
 2. A provenance record identifies the upstream repository, tag, commit, license, and owned
    package set.
 3. Theoses resolves its Pi runtime imports from the tracked source, not from the published
-   `@earendil-works/pi-*` packages.
+   `theoses-*` packages.
 4. Existing typecheck, lint, and test commands pass against the owned source.
 5. The existing live-safe runtime behaviour remains unchanged; context redesign and feature
    trimming are explicitly deferred to later pipeline runs.

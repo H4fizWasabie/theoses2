@@ -1,6 +1,6 @@
-import { Agent } from "@earendil-works/pi-agent-core";
-import { createModels } from "@earendil-works/pi-ai";
-import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
+import { Agent } from "theoses-agent-core";
+import { createModels } from "theoses-ai";
+import { anthropicProvider } from "theoses-ai/providers/anthropic";
 
 const models = createModels();
 models.setProvider(anthropicProvider());

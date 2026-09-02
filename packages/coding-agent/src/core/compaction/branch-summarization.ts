@@ -5,10 +5,10 @@
  * a summary of the branch being left so context isn't lost.
  */
 
-import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
-import type { RetryCallbacks, RetryPolicy } from "@earendil-works/pi-ai";
-import { contentText } from "@earendil-works/pi-ai";
-import type { Model, SimpleStreamOptions, Usage } from "@earendil-works/pi-ai/compat";
+import type { AgentMessage, StreamFn } from "theoses-agent-core";
+import type { RetryCallbacks, RetryPolicy } from "theoses-ai";
+import { contentText } from "theoses-ai";
+import type { Model, SimpleStreamOptions, Usage } from "theoses-ai/compat";
 import {
 	convertToLlm,
 	createBranchSummaryMessage,

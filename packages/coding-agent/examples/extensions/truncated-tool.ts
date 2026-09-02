@@ -15,7 +15,10 @@
  */
 
 import { mkdtemp, writeFile } from "node:fs/promises";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { execSync } from "child_process";
+import { tmpdir } from "os";
+import { join } from "path";
+import type { ExtensionAPI } from "theoses-coding-agent";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -23,11 +26,8 @@ import {
 	type TruncationResult,
 	truncateHead,
 	withFileMutationQueue,
-} from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
-import { execSync } from "child_process";
-import { tmpdir } from "os";
-import { join } from "path";
+} from "theoses-coding-agent";
+import { Text } from "theoses-tui";
 import { Type } from "typebox";
 
 const RgParams = Type.Object({

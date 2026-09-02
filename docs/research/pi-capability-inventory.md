@@ -4,7 +4,7 @@ This is a factual, descriptive inventory of the capabilities currently implement
 
 ---
 
-## packages/agent (`@earendil-works/pi-agent-core`)
+## packages/agent (`theoses-agent-core`)
 
 Description (package.json): "General-purpose agent with transport abstraction, state management, and attachment support." This package is the most domain-neutral of the monorepo — it defines the agent loop, message/event model, and session persistence abstractions, with only a thin set of default tools that happen to be coding-oriented.
 
@@ -22,12 +22,12 @@ Description (package.json): "General-purpose agent with transport abstraction, s
 | Default coding tools | `agent/src/harness/tools/{bash,read,write,edit,edit-diff}.ts`, `tools/file-mutation-queue.ts`, `tools/image.ts` | Bash shell-execution tool, file read/write/edit tools with unified-diff-based edit application (`edit-diff.ts`), an image tool, and a mutation queue to serialize concurrent file writes. | Directly coding/filesystem-centric: assumes a local filesystem workspace, a shell, and diff/patch-style file editing. |
 | Node execution environment adapter | `agent/src/harness/env/nodejs.ts`, `agent/src/node.ts` | `NodeExecutionEnv` implements `ExecutionEnv` (file I/O, process spawn, path resolution) on top of Node's `fs`/`child_process`; separates env from tool logic so tools can run against other backends. | Node/filesystem/process-specific, but cleanly abstracted behind `ExecutionEnv`. |
 | Output truncation & shell-output capture utilities | `agent/src/harness/utils/truncate.ts`, `utils/shell-output.ts` | Caps tool output size/line count for LLM context budgets; captures and formats shell stdout/stderr. | Shell-output capture assumes a subprocess/terminal execution model. |
-| Telemetry instrumentation hooks | `agent/src/harness/telemetry.ts` | Emits structured telemetry spans/attributes (turn start/end, tool timings, tokens) via the `@earendil-works/pi-telemetry` contract. | None. |
+| Telemetry instrumentation hooks | `agent/src/harness/telemetry.ts` | Emits structured telemetry spans/attributes (turn start/end, tool timings, tokens) via the `theoses-telemetry` contract. | None. |
 | LLM streaming proxy | `agent/src/proxy.ts`, `agent/src/stream-fn.ts` | `streamProxy()` lets a browser/thin client proxy LLM calls through a backend server rather than calling providers directly. | None. |
 
 ---
 
-## packages/coding-agent (`@earendil-works/pi-coding-agent`)
+## packages/coding-agent (`theoses-coding-agent`)
 
 Description (package.json): "Coding agent CLI with read, bash, edit, write tools and session management." This is the flagship product package: the `pi` CLI, its four interaction modes (interactive/print/JSON/RPC), extension and package systems, and all coding-specific tools. It is the most heavily coding/terminal/git-coupled package in the monorepo.
 
@@ -62,7 +62,7 @@ Description (package.json): "Coding agent CLI with read, bash, edit, write tools
 
 ---
 
-## packages/tui (`@earendil-works/pi-tui`)
+## packages/tui (`theoses-tui`)
 
 Description (package.json): "Terminal User Interface library with differential rendering for efficient text-based applications." Fully generic terminal UI toolkit — no coding-specific concepts live here, but by construction it only targets terminal (TTY) output.
 
@@ -81,9 +81,9 @@ Description (package.json): "Terminal User Interface library with differential r
 
 ---
 
-## packages/session-backends/sqlite-node (`@earendil-works/pi-session-backend-sqlite-node`)
+## packages/session-backends/sqlite-node (`theoses-session-backend-sqlite-node`)
 
-Description (README): "Node sqlite session backend for `@earendil-works/pi-agent-core` sessions. Provides the `node:sqlite` adapter, SQLite session repository, migrations, materialized views, and optional FTS search."
+Description (README): "Node sqlite session backend for `theoses-agent-core` sessions. Provides the `node:sqlite` adapter, SQLite session repository, migrations, materialized views, and optional FTS search."
 
 | Capability | Location | Description | Coding-specific coupling |
 |---|---|---|---|
@@ -95,7 +95,7 @@ Description (README): "Node sqlite session backend for `@earendil-works/pi-agent
 
 ---
 
-## packages/ai (`@earendil-works/pi-ai`)
+## packages/ai (`theoses-ai`)
 
 Description (package.json): "Unified LLM API with automatic model discovery and provider configuration." Entirely provider/model-layer; no coding-specific concepts.
 
@@ -114,7 +114,7 @@ Description (package.json): "Unified LLM API with automatic model discovery and 
 
 ---
 
-## packages/server (`@earendil-works/pi-server`)
+## packages/server (`theoses-server`)
 
 Description (README): "Experimental... Server package for pi." Provides a transport-neutral session server core plus a Unix-socket transport; does not itself provide a coding-agent CLI or service — callers supply a `PiServerService`.
 
@@ -128,7 +128,7 @@ Description (README): "Experimental... Server package for pi." Provides a transp
 
 ---
 
-## packages/protocol (`@earendil-works/pi-protocol`)
+## packages/protocol (`theoses-protocol`)
 
 Description (README): "Transport-neutral CBOR protocol for remote pi sessions." Pure wire-format package: schemas, CBOR codec, and byte-stream framing. No coding-specific concepts.
 
@@ -141,7 +141,7 @@ Description (README): "Transport-neutral CBOR protocol for remote pi sessions." 
 
 ---
 
-## packages/client (`@earendil-works/pi-client`)
+## packages/client (`theoses-client`)
 
 Description (README): "Transport-neutral client for remote pi sessions... The package has no Node-specific imports." Pure client-side session/connection state machine over `pi-protocol`.
 
@@ -155,7 +155,7 @@ Description (README): "Transport-neutral client for remote pi sessions... The pa
 
 ---
 
-## packages/telemetry (`@earendil-works/pi-telemetry`)
+## packages/telemetry (`theoses-telemetry`)
 
 Description (README): "Vendor-neutral telemetry contracts and typed schema utilities for pi packages... no exporter, global current-span state, or dependency on a telemetry backend." Fully generic observability layer.
 
@@ -168,7 +168,7 @@ Description (README): "Vendor-neutral telemetry contracts and typed schema utili
 
 ---
 
-## packages/evals (`@earendil-works/pi-evals`, private)
+## packages/evals (`theoses-evals`, private)
 
 Description (package.json/README): "Behavioral, model-backed checks for Pi workflows... adapt a real `AgentSession` to `vitest-evals`." Internal, not published; used to evaluate the coding agent's behavior against real models.
 

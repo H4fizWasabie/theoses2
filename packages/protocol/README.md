@@ -1,4 +1,4 @@
-# @earendil-works/pi-protocol
+# theoses-protocol
 
 Runtime-neutral schemas, types, CBOR encoding, and byte-stream framing for the experimental pi protocol.
 
@@ -21,7 +21,7 @@ import {
   createServerMessageDecoder,
   encodeClientMessage,
   type ClientHello,
-} from "@earendil-works/pi-protocol";
+} from "theoses-protocol";
 
 const hello: ClientHello = {
   type: "hello",
