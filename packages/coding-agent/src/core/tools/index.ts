@@ -135,6 +135,7 @@ export interface ToolsOptions {
 	ls?: LsToolOptions;
 	workingNote?: (note: string) => void;
 	memory?: MemoryStore;
+	onMemorySaved?: () => void;
 }
 
 export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
@@ -226,8 +227,8 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		find: createFindToolDefinition(cwd, options?.find),
 		ls: createLsToolDefinition(cwd, options?.ls),
 		working_note: createWorkingNoteToolDefinition(options?.workingNote ?? (() => {})),
-		remember: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[0]!,
-		save_note: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[1]!,
+		remember: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore(), options?.onMemorySaved)[0]!,
+		save_note: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore(), options?.onMemorySaved)[1]!,
 	};
 }
 

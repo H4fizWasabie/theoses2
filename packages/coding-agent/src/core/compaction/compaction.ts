@@ -538,6 +538,13 @@ const UPDATE_SUMMARIZATION_PROMPT = `The messages above are NEW conversation mes
 
 ${UPDATE_SUMMARIZATION_INSTRUCTIONS}`;
 
+const DISTILLATION_PROMPT = `Extract durable memory from the conversation above.
+
+Return ONLY a JSON array with this shape:
+[{"fact":"one durable fact","confidence":0.0},{"episode":"one sentence describing this batch"}]
+
+Keep only facts about the user, their people, projects, or preferences that are worth remembering in a month. Skip chit-chat, routine work, and one-offs. Confidence must be at least 0.85. The episode is a single concise description of what this batch was about, not a new fact or explanation.`;
+
 function createSummarizationOptions(
 	model: Model<any>,
 	maxTokens: number,
@@ -711,6 +718,86 @@ export async function generateSummaryWithUsage(
 	return { text: textContent, usage: response.usage };
 }
 
+export interface DistilledMemoryFact {
+	fact: string;
+	confidence: number;
+}
+
+export interface DistilledMemoryResult {
+	facts: DistilledMemoryFact[];
+	episode?: string;
+}
+
+/** Extract durable facts from messages about to leave active context. */
+export async function distillMemory(
+	currentMessages: AgentMessage[],
+	model: Model<any>,
+	reserveTokens: number,
+	apiKey: string | undefined,
+	headers?: Record<string, string>,
+	signal?: AbortSignal,
+	thinkingLevel?: ThinkingLevel,
+	streamFn?: StreamFn,
+	env?: Record<string, string>,
+	retry?: RetryPolicy,
+	callbacks?: RetryCallbacks,
+	sessionId?: string,
+): Promise<DistilledMemoryResult> {
+	const conversationText = serializeConversation(convertToLlm(currentMessages));
+	const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${DISTILLATION_PROMPT}`;
+	const response = await completeSummarization(
+		model,
+		buildSummarizationContext(promptText),
+		createSummarizationOptions(
+			model,
+			Math.min(Math.floor(0.8 * reserveTokens), model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY),
+			apiKey,
+			headers,
+			env,
+			signal,
+			thinkingLevel,
+			sessionId,
+		),
+		streamFn,
+		retry,
+		callbacks,
+	);
+	if (response.stopReason === "error" || response.stopReason === "aborted") return { facts: [] };
+	try {
+		const parsed: unknown = JSON.parse(
+			contentText(response.content)
+				.trim()
+				.replace(/^```json\s*|\s*```$/g, ""),
+		);
+		const values = Array.isArray(parsed)
+			? parsed
+			: typeof parsed === "object" && parsed !== null && Array.isArray((parsed as { facts?: unknown }).facts)
+				? (parsed as { facts: unknown[] }).facts
+				: [];
+		const facts = values.filter(
+			(value): value is DistilledMemoryFact =>
+				typeof value === "object" &&
+				value !== null &&
+				typeof (value as { fact?: unknown }).fact === "string" &&
+				typeof (value as { confidence?: unknown }).confidence === "number" &&
+				(value as { confidence: number }).confidence >= 0.85,
+		);
+		const episodeValue = Array.isArray(parsed)
+			? parsed.find((value) => typeof value === "object" && value !== null && "episode" in value)
+			: parsed;
+		const episode =
+			typeof episodeValue === "object" &&
+			episodeValue !== null &&
+			typeof (episodeValue as { episode?: unknown }).episode === "string"
+				? (episodeValue as { episode: string }).episode.trim()
+				: undefined;
+		return { facts, ...(episode ? { episode } : {}) };
+	} catch {
+		console.warn("Memory distillation returned invalid JSON; skipping this pass.");
+		return { facts: [] };
+	}
+}
+
 // ============================================================================
 // Compaction Preparation (for extensions)
 // ============================================================================
@@ -720,6 +807,8 @@ export interface CompactionPreparation {
 	firstKeptEntryId: string;
 	/** Messages that will be summarized and discarded */
 	messagesToSummarize: AgentMessage[];
+	/** Session entry IDs corresponding to messagesToSummarize */
+	messagesToSummarizeEntryIds: string[];
 	/** Messages that will be turned into turn prefix summary (if splitting) */
 	turnPrefixMessages: AgentMessage[];
 	/** Whether this is a split turn (cut point in middle of turn) */
@@ -774,9 +863,13 @@ export function prepareCompaction(
 
 	// Messages to summarize (will be discarded after summary)
 	const messagesToSummarize: AgentMessage[] = [];
+	const messagesToSummarizeEntryIds: string[] = [];
 	for (let i = boundaryStart; i < historyEnd; i++) {
 		const msg = getMessageFromEntryForCompaction(pathEntries[i]);
-		if (msg) messagesToSummarize.push(msg);
+		if (msg) {
+			messagesToSummarize.push(msg);
+			messagesToSummarizeEntryIds.push(pathEntries[i].id);
+		}
 	}
 
 	// Messages for turn prefix summary (if splitting a turn)
@@ -805,6 +898,7 @@ export function prepareCompaction(
 	return {
 		firstKeptEntryId,
 		messagesToSummarize,
+		messagesToSummarizeEntryIds,
 		turnPrefixMessages,
 		isSplitTurn: cutPoint.isSplitTurn,
 		tokensBefore,

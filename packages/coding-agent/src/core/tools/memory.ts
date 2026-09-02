@@ -17,7 +17,7 @@ const saveNoteSchema = Type.Object({
 type RememberInput = Static<typeof rememberSchema>;
 type SaveNoteInput = Static<typeof saveNoteSchema>;
 
-export function createMemoryToolDefinitions(store: MemoryStore): ToolDefinition[] {
+export function createMemoryToolDefinitions(store: MemoryStore, onMemorySaved?: () => void): ToolDefinition[] {
 	return [
 		{
 			name: "remember",
@@ -58,6 +58,7 @@ export function createMemoryToolDefinitions(store: MemoryStore): ToolDefinition[
 			execute: async (_id, { note, confidence }: SaveNoteInput) => {
 				if (confidence < 0.85) throw new Error("Durable memory confidence must be at least 0.85");
 				store.saveNote(note);
+				onMemorySaved?.();
 				return { content: [{ type: "text", text: "Durable note saved." }], details: undefined };
 			},
 			renderCall: (_args, theme: Theme) => new Text(theme.fg("toolTitle", theme.bold("save_note")), 0, 0),

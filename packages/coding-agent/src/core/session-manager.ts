@@ -143,6 +143,12 @@ export interface OperationFinishedEntry extends SessionEntryBase {
 	outcome: "completed" | "aborted" | "failed";
 }
 
+export interface PromotedRangeEntry extends SessionEntryBase {
+	type: "promoted_range";
+	firstEntryId: string;
+	lastEntryId: string;
+}
+
 /**
  * Custom message entry for extensions to inject messages into LLM context.
  * Use customType to identify your extension's entries.
@@ -175,7 +181,8 @@ export type SessionEntry =
 	| LabelEntry
 	| SessionInfoEntry
 	| WorkingNoteEntry
-	| OperationFinishedEntry;
+	| OperationFinishedEntry
+	| PromotedRangeEntry;
 
 /** Raw file entry (includes header) */
 export type FileEntry = SessionHeader | SessionEntry;
@@ -223,6 +230,8 @@ export type ReadonlySessionManager = Pick<
 	| "getChannelSessionKey"
 	| "getWorkingNote"
 	| "getLastOperationOutcome"
+	| "appendPromotedRange"
+	| "hasPromotedRange"
 	| "getLeafId"
 	| "getLeafEntry"
 	| "getEntry"
@@ -1102,7 +1111,7 @@ export class SessionManager {
 	}
 
 	getLastOperationOutcome(): OperationFinishedEntry["outcome"] | undefined {
-		for (const entry of this.getBranch().toReversed()) {
+		for (const entry of [...this.getBranch()].reverse()) {
 			if (entry.type === "operation_finished") return entry.outcome;
 		}
 		return undefined;
@@ -1118,6 +1127,38 @@ export class SessionManager {
 		};
 		this._appendEntry(entry);
 		return entry.id;
+	}
+
+	appendPromotedRange(firstEntryId: string, lastEntryId: string): string {
+		const entry: PromotedRangeEntry = {
+			type: "promoted_range",
+			id: generateId(this.byId),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
+			firstEntryId,
+			lastEntryId,
+		};
+		this._appendEntry(entry);
+		return entry.id;
+	}
+
+	isEntryPromoted(entryId: string): boolean {
+		return this.hasPromotedRange([entryId]);
+	}
+
+	hasPromotedRange(entryIds: string[]): boolean {
+		const branch = this.getBranch();
+		const positions = new Map(branch.map((entry, index) => [entry.id, index]));
+		return branch.some((entry) => {
+			if (entry.type !== "promoted_range") return false;
+			const first = positions.get(entry.firstEntryId);
+			const last = positions.get(entry.lastEntryId);
+			if (first === undefined || last === undefined) return false;
+			return entryIds.some((id) => {
+				const position = positions.get(id);
+				return position !== undefined && position >= first && position <= last;
+			});
+		});
 	}
 
 	getSessionFile(): string | undefined {

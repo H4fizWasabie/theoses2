@@ -58,6 +58,7 @@ import {
 	calculateContextTokens,
 	collectEntriesForBranchSummary,
 	compact,
+	distillMemory,
 	estimateContextTokens,
 	estimateTokens,
 	generateBranchSummary,
@@ -396,6 +397,7 @@ export class AgentSession {
 	private _extensionErrorUnsubscriber?: () => void;
 
 	private _modelRuntime: ModelRuntime;
+	private readonly _memoryStore = new FileMemoryStore();
 
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
@@ -1893,6 +1895,42 @@ export class AgentSession {
 		);
 	}
 
+	private _distillDroppedMemory(
+		messages: AgentMessage[],
+		messageEntryIds: string[],
+		requestModel: Model<any>,
+		apiKey: string | undefined,
+		headers: Record<string, string> | undefined,
+		signal: AbortSignal,
+		env: Record<string, string> | undefined,
+	): void {
+		const unpromotedMessages = messages.filter(
+			(_message, index) => !this.sessionManager.isEntryPromoted(messageEntryIds[index]!),
+		);
+		if (unpromotedMessages.length === 0) return;
+		void distillMemory(
+			unpromotedMessages,
+			requestModel,
+			this.settingsManager.getCompactionSettings().reserveTokens,
+			apiKey,
+			headers,
+			signal,
+			this.thinkingLevel,
+			this.agent.streamFunction,
+			env,
+			this.settingsManager.getRetrySettings(),
+			this._summarizationRetryCallbacks({ source: "compaction", reason: "manual" }),
+		)
+			.then(({ facts, episode }) => {
+				for (const fact of facts) this._memoryStore.saveNote(fact.fact);
+				if (episode) this._memoryStore.saveNote(`Episode: ${episode}`);
+			})
+			.catch((error: unknown) => {
+				console.warn("Memory distillation failed; continuing compaction.", error);
+				// Distillation is a safety net; a failed pass must not fail compaction.
+			});
+	}
+
 	/**
 	 * Manually compact the session context.
 	 *
@@ -1933,6 +1971,15 @@ export class AgentSession {
 				}
 				throw new Error("Nothing to compact (session too small)");
 			}
+			this._distillDroppedMemory(
+				preparation.messagesToSummarize,
+				preparation.messagesToSummarizeEntryIds,
+				requestModel,
+				apiKey,
+				headers,
+				this._compactionAbortController.signal,
+				env,
+			);
 
 			let extensionCompaction: CompactionResult | undefined;
 
@@ -2228,9 +2275,17 @@ export class AgentSession {
 			if (!preparation) {
 				return false;
 			}
-
 			this._emit({ type: "compaction_start", reason });
 			this._autoCompactionAbortController = new AbortController();
+			this._distillDroppedMemory(
+				preparation.messagesToSummarize,
+				preparation.messagesToSummarizeEntryIds,
+				requestModel,
+				apiKey,
+				headers,
+				this._autoCompactionAbortController.signal,
+				env,
+			);
 			started = true;
 
 			let extensionCompaction: CompactionResult | undefined;
@@ -2744,7 +2799,14 @@ export class AgentSession {
 					read: { autoResizeImages },
 					bash: { commandPrefix: shellCommandPrefix, shellPath },
 					workingNote: (note) => this.sessionManager.appendWorkingNote(note),
-					memory: new FileMemoryStore(),
+					memory: this._memoryStore,
+					onMemorySaved: () => {
+						const entries = this.sessionManager.getBranch();
+						// ponytail: coarse last-20 range; replace with exact source attribution when tool context exposes it.
+						const first = entries[Math.max(0, entries.length - 20)];
+						const last = entries[entries.length - 1];
+						if (first && last) this.sessionManager.appendPromotedRange(first.id, last.id);
+					},
 				});
 
 		this._baseToolDefinitions = new Map(

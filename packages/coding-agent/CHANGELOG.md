@@ -14,6 +14,7 @@
 - Changed `save_note` to require a model-supplied confidence of at least 0.85 and to describe the durable-signal promotion bar.
 - Fixed the next prompt after an aborted assistant operation to include an explicit do-not-resume notice.
 - Fixed abort-notice detection to read the latest persisted operation outcome record.
+- Added model-backed durable-memory distillation for messages dropped by manual and automatic compaction, with confidence filtering and promoted-range deduplication.
 
 ## [0.84.3] - 2026-08-24
 
