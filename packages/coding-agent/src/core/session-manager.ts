@@ -26,6 +26,7 @@ import {
 	createCompactionSummaryMessage,
 	createCustomMessage,
 } from "./messages.ts";
+import { type SessionLookupKey, sessionLookupKey } from "./session-cwd.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
 
@@ -194,6 +195,8 @@ export interface SessionInfo {
 	id: string;
 	/** Working directory where the session was started. Empty string for old sessions. */
 	cwd: string;
+	channel?: string;
+	channelSessionId?: string;
 	/** User-defined display name from session_info entries. */
 	name?: string;
 	/** Path to the parent session (if this session was forked). */
@@ -668,8 +671,18 @@ function sessionCwdMatches(cwd: string | undefined, resolvedCwd: string): boolea
 	return cwd !== undefined && cwd !== "" && resolvePath(cwd) === resolvedCwd;
 }
 
+function sessionKeyMatches(header: SessionHeader, key: SessionLookupKey): boolean {
+	if (header.channel !== undefined && header.channelSessionId !== undefined) {
+		return (
+			sessionLookupKey({ channel: header.channel, channelSessionId: header.channelSessionId }) ===
+			sessionLookupKey(key)
+		);
+	}
+	return key.channel === "cli" && key.channelSessionId === resolvePath(header.cwd);
+}
+
 /** Exported for testing */
-export function findMostRecentSession(sessionDir: string, cwd?: string): string | null {
+export function findMostRecentSession(sessionDir: string, cwd?: string, key?: SessionLookupKey): string | null {
 	const resolvedSessionDir = normalizePath(sessionDir);
 	const resolvedCwd = cwd ? resolvePath(cwd) : undefined;
 	try {
@@ -680,7 +693,9 @@ export function findMostRecentSession(sessionDir: string, cwd?: string): string 
 			.filter(
 				(file): file is { path: string; header: SessionHeader } =>
 					file.header !== null &&
-					(!resolvedCwd || sessionCwdMatches(getSessionHeaderCwd(file.header), resolvedCwd)),
+					(key
+						? sessionKeyMatches(file.header, key)
+						: !resolvedCwd || sessionCwdMatches(getSessionHeaderCwd(file.header), resolvedCwd)),
 			)
 			.map(({ path }) => ({ path, mtime: statSync(path).mtime }))
 			.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
@@ -788,6 +803,8 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 			path: filePath,
 			id: header.id,
 			cwd,
+			channel: header.channel,
+			channelSessionId: header.channelSessionId,
 			name,
 			parentSessionPath,
 			created: new Date(header.timestamp),
@@ -1627,7 +1644,10 @@ export class SessionManager {
 	static continueRecent(cwd: string, sessionDir?: string): SessionManager {
 		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
 		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath(cwd);
-		const mostRecent = findMostRecentSession(dir, filterCwd ? cwd : undefined);
+		const mostRecent = findMostRecentSession(dir, filterCwd ? cwd : undefined, {
+			channel: "cli",
+			channelSessionId: resolvePath(cwd),
+		});
 		if (mostRecent) {
 			return new SessionManager(cwd, dir, mostRecent, true);
 		}
@@ -1705,12 +1725,24 @@ export class SessionManager {
 	 * @param sessionDir Optional session directory. If omitted, uses default (~/.pi/agent/sessions/<encoded-cwd>/).
 	 * @param onProgress Optional callback for progress updates (loaded, total)
 	 */
-	static async list(cwd: string, sessionDir?: string, onProgress?: SessionListProgress): Promise<SessionInfo[]> {
+	static async list(
+		cwd: string,
+		sessionDir?: string,
+		onProgress?: SessionListProgress,
+		key: SessionLookupKey = { channel: "cli", channelSessionId: resolvePath(cwd) },
+	): Promise<SessionInfo[]> {
 		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
 		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath(cwd);
 		const resolvedCwd = resolvePath(cwd);
 		const sessions = (await listSessionsFromDir(dir, onProgress)).filter(
-			(session) => !filterCwd || sessionCwdMatches(session.cwd, resolvedCwd),
+			(session) =>
+				(session.channel !== undefined && session.channelSessionId !== undefined
+					? sessionLookupKey({ channel: session.channel, channelSessionId: session.channelSessionId }) ===
+						sessionLookupKey(key)
+					: key.channel === "cli" &&
+						key.channelSessionId === resolvedCwd &&
+						sessionCwdMatches(session.cwd, resolvedCwd)) &&
+				(!filterCwd || sessionCwdMatches(session.cwd, resolvedCwd)),
 		);
 		sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
 		return sessions;

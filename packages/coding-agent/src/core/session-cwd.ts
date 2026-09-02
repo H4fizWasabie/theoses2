@@ -6,6 +6,15 @@ export interface SessionCwdIssue {
 	fallbackCwd: string;
 }
 
+export interface SessionLookupKey {
+	channel: string;
+	channelSessionId: string;
+}
+
+export function sessionLookupKey(key: SessionLookupKey): string {
+	return JSON.stringify([key.channel, key.channelSessionId]);
+}
+
 interface SessionCwdSource {
 	getCwd(): string;
 	getSessionFile(): string | undefined;
