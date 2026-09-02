@@ -36,7 +36,6 @@
 		"cbor",
 		"binary"
 	],
-	"author": "Earendil Works",
 	"license": "MIT",
 	"repository": {
 		"type": "git",

@@ -28,7 +28,6 @@
 		"binary",
 		"framing"
 	],
-	"author": "Earendil Works",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
