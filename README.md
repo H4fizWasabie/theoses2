@@ -77,22 +77,6 @@ We treat npm dependency changes as reviewed code changes.
 - CI installs with `npm ci --ignore-scripts`, and a scheduled GitHub workflow runs `npm audit --omit=dev` plus `npm audit signatures --omit=dev`.
 - Shrinkwrap generation has an explicit allowlist for dependency lifecycle scripts; new lifecycle-script deps fail checks until reviewed.
 
-## Share your OSS coding agent sessions
-
-If you use Theoses or other coding agents for open source work, please share your sessions.
-
-Public OSS session data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks.
-
-For the full explanation, see [this post on X](https://x.com/badlogicgames/status/2037811643774652911).
-
-To publish sessions, use [`badlogic/theoses-share-hf`](https://github.com/badlogic/theoses-share-hf). Read its README.md for setup instructions. All you need is a Hugging Face account, the Hugging Face CLI, and `theoses-share-hf`.
-
-You can also watch [this video](https://x.com/badlogicgames/status/2041151967695634619), where I show how I publish my `theoses-mono` sessions.
-
-I regularly publish my own `theoses-mono` work sessions here:
-
-- [badlogicgames/theoses-mono on Hugging Face](https://huggingface.co/datasets/badlogicgames/theoses-mono)
-
 ## License
 
 MIT

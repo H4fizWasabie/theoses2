@@ -130,11 +130,9 @@ If no extension or saved decision applies, `defaultProjectTrust` controls the fa
 Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.theoses/agent/trust.json` only; the current session is not reloaded, so restart theoses for changes to take effect.
 
 
-## Exporting and Sharing Sessions
+## Exporting Sessions
 
 Use `/export [file]` to write a session to HTML.
-
-If you use theoses for open source work and want to publish sessions for model, prompt, tool, and evaluation research, see [`badlogic/theoses-share-hf`](https://github.com/badlogic/theoses-share-hf). It publishes sessions to Hugging Face datasets.
 
 ## CLI Reference
 
