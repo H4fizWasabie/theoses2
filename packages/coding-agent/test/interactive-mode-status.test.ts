@@ -731,7 +731,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
 "[Extensions]
-  @scope/pi-scoped, answer.ts, cli-extension.ts, HazAT/pi-interactive-subagents, HazAT/pi-interactive-subagents:subagents, local-index, pi-markdown-preview, user-index"`);
+  answer.ts, cli-extension.ts, local-index, user-index"`);
 	});
 
 	test("adds more parent folders until local extension labels are unique", () => {
@@ -992,13 +992,6 @@ describe("InteractiveMode.showLoadedResources", () => {
   project
     /tmp/project/.theoses/extensions/answer.ts
     /tmp/project/.theoses/extensions/local-index
-    git:github.com/HazAT/pi-interactive-subagents
-      extensions
-      extensions/subagents
-    npm:@scope/pi-scoped
-      extensions
-    npm:pi-markdown-preview
-      extensions
   user
     /tmp/agent/extensions/user-index
   path
