@@ -1,0 +1,26 @@
+{
+	"name": "theoses-telegram",
+	"version": "0.84.3",
+	"description": "Telegram channel for Theoses",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": ["dist", "CHANGELOG.md"],
+	"scripts": {
+		"build": "tsgo -p tsconfig.json",
+		"start": "node dist/index.js"
+	},
+	"dependencies": {
+		"grammy": "1.38.3",
+		"theoses-coding-agent": "^0.84.3"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	}
+}

@@ -21,7 +21,7 @@ import { DefaultResourceLoader } from "./resource-loader.ts";
 import { getDefaultSessionDir, limitActiveContextMessages, SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { time } from "./timings.ts";
-import type { ToolSource } from "./tool-sources.ts";
+import { HttpSidecarToolSource, McpHttpToolSource, type ToolSource } from "./tool-sources.ts";
 import {
 	createBashTool,
 	createCodingTools,
@@ -198,8 +198,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		time("resourceLoader.reload");
 	}
 
+	const configuredToolSources = settingsManager
+		.getToolSources()
+		.map(({ kind, ...source }) =>
+			kind === "sidecar" ? new HttpSidecarToolSource(source) : new McpHttpToolSource(source),
+		);
 	const externalTools: RegisteredTool[] = [];
-	for (const source of options.toolSources ?? []) {
+	for (const source of [...configuredToolSources, ...(options.toolSources ?? [])]) {
 		try {
 			externalTools.push(...(await source.load()));
 		} catch (error) {
