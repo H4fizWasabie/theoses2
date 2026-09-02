@@ -222,7 +222,7 @@ export interface AgentSessionConfig {
 	externalTools?: RegisteredTool[];
 	/** Canonical model/auth runtime used by coding-agent internals. */
 	modelRuntime: ModelRuntime;
-	/** Initial active built-in tool names. Default: [read, bash, edit, write, working_note, remember, save_note] */
+	/** Initial active built-in tool names. Default: [read, bash, edit, write, working_note, remember, save_note, convert_doc] */
 	initialActiveToolNames?: string[];
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
 	allowedToolNames?: string[];
@@ -1114,6 +1114,7 @@ export class AgentSession {
 			toolSnippets,
 			promptGuidelines,
 			workingNote: this.sessionManager.getWorkingNote(),
+			artifactCatalog: this.sessionManager.getArtifactCatalog(),
 		};
 		return buildSystemPrompt(this._baseSystemPromptOptions);
 	}
@@ -1125,6 +1126,9 @@ export class AgentSession {
 	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
 		this._isAgentRunActive = true;
 		try {
+			this._baseSystemPromptOptions.artifactCatalog = this.sessionManager.getArtifactCatalog();
+			this._baseSystemPrompt = buildSystemPrompt(this._baseSystemPromptOptions);
+			this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
 			await this.agent.prompt(messages);
 			while (await this._handlePostAgentRun()) {
 				await this.agent.continue();
@@ -2695,7 +2699,6 @@ export class AgentSession {
 	}
 
 	private _refreshToolRegistry(options?: { activeToolNames?: string[]; includeAllExtensionTools?: boolean }): void {
-		const previousRegistryNames = new Set(this._toolRegistry.keys());
 		const previousActiveToolNames = this.getActiveToolNames();
 		const allowedToolNames = this._allowedToolNames;
 		const excludedToolNames = this._excludedToolNames;
@@ -2867,7 +2870,7 @@ export class AgentSession {
 
 		const defaultActiveToolNames = this._baseToolsOverride
 			? Object.keys(this._baseToolsOverride)
-			: ["read", "bash", "edit", "write", "working_note", "remember", "save_note"];
+			: ["read", "bash", "edit", "write", "working_note", "remember", "save_note", "convert_doc"];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,

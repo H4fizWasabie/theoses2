@@ -9,6 +9,8 @@ export {
 	createBashToolDefinition,
 	createLocalBashOperations,
 } from "./bash.ts";
+export { type ConvertDocInput, type ConvertDocOperations, createConvertDocToolDefinition } from "./convert-doc.ts";
+export { createDeferredToolDefinitions } from "./deferred-dispatch.ts";
 export {
 	createEditTool,
 	createEditToolDefinition,
@@ -85,6 +87,8 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { FileMemoryStore, type MemoryStore } from "../memory-store.ts";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.ts";
+import type { ConvertDocOperations } from "./convert-doc.ts";
+import { createConvertDocToolDefinition } from "./convert-doc.ts";
 import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.ts";
 import { createFindTool, createFindToolDefinition, type FindToolOptions } from "./find.ts";
 import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.ts";
@@ -109,7 +113,8 @@ export type ToolName =
 	| "ls"
 	| "working_note"
 	| "remember"
-	| "save_note";
+	| "save_note"
+	| "convert_doc";
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
 	"bash",
@@ -122,6 +127,7 @@ export const allToolNames: Set<ToolName> = new Set([
 	"working_note",
 	"remember",
 	"save_note",
+	"convert_doc",
 ]);
 
 export interface ToolsOptions {
@@ -136,6 +142,7 @@ export interface ToolsOptions {
 	workingNote?: (note: string) => void;
 	memory?: MemoryStore;
 	onMemorySaved?: () => void;
+	convertDoc?: { operations?: ConvertDocOperations };
 }
 
 export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
@@ -163,6 +170,8 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			const definitions = createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore());
 			return definitions.find((definition) => definition.name === toolName)!;
 		}
+		case "convert_doc":
+			return createConvertDocToolDefinition(cwd, options?.convertDoc);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -193,6 +202,8 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			const definitions = createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore());
 			return wrapToolDefinition(definitions.find((definition) => definition.name === toolName)!);
 		}
+		case "convert_doc":
+			return wrapToolDefinition(createConvertDocToolDefinition(cwd, options?.convertDoc));
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -204,6 +215,7 @@ export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions)
 		createBashToolDefinition(cwd, options?.bash),
 		createEditToolDefinition(cwd, options?.edit),
 		createWriteToolDefinition(cwd, options?.write),
+		createConvertDocToolDefinition(cwd, options?.convertDoc),
 	];
 }
 
@@ -213,6 +225,7 @@ export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOption
 		createGrepToolDefinition(cwd, options?.grep),
 		createFindToolDefinition(cwd, options?.find),
 		createLsToolDefinition(cwd, options?.ls),
+		createConvertDocToolDefinition(cwd, options?.convertDoc),
 	];
 }
 
@@ -229,6 +242,7 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		working_note: createWorkingNoteToolDefinition(options?.workingNote ?? (() => {})),
 		remember: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore(), options?.onMemorySaved)[0]!,
 		save_note: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore(), options?.onMemorySaved)[1]!,
+		convert_doc: createConvertDocToolDefinition(cwd, options?.convertDoc),
 	};
 }
 
@@ -238,6 +252,7 @@ export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
 		createBashTool(cwd, options?.bash),
 		createEditTool(cwd, options?.edit),
 		createWriteTool(cwd, options?.write),
+		wrapToolDefinition(createConvertDocToolDefinition(cwd, options?.convertDoc)),
 	];
 }
 
@@ -247,6 +262,7 @@ export function createReadOnlyTools(cwd: string, options?: ToolsOptions): Tool[]
 		createGrepTool(cwd, options?.grep),
 		createFindTool(cwd, options?.find),
 		createLsTool(cwd, options?.ls),
+		wrapToolDefinition(createConvertDocToolDefinition(cwd, options?.convertDoc)),
 	];
 }
 
@@ -263,5 +279,6 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		working_note: wrapToolDefinition(createWorkingNoteToolDefinition(options?.workingNote ?? (() => {}))),
 		remember: wrapToolDefinition(createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[0]!),
 		save_note: wrapToolDefinition(createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[1]!),
+		convert_doc: wrapToolDefinition(createConvertDocToolDefinition(cwd, options?.convertDoc)),
 	};
 }

@@ -225,6 +225,7 @@ export {
 	type PromptTemplate,
 } from "./core/sdk.ts";
 export {
+	type ArtifactEntry,
 	type BranchSummaryEntry,
 	buildContextEntries,
 	buildSessionContext,
@@ -287,7 +288,11 @@ export {
 	type BashToolDetails,
 	type BashToolInput,
 	type BashToolOptions,
+	type ConvertDocInput,
+	type ConvertDocOperations,
 	createBashToolDefinition,
+	createConvertDocToolDefinition,
+	createDeferredToolDefinitions,
 	createEditToolDefinition,
 	createFindToolDefinition,
 	createGrepToolDefinition,

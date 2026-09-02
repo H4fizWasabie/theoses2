@@ -14,7 +14,7 @@ import {
 	writeFileSync,
 } from "fs";
 import { readdir, stat } from "fs/promises";
-import { join, resolve } from "path";
+import { basename, join, resolve } from "path";
 import { createInterface } from "readline";
 import { StringDecoder } from "string_decoder";
 import { APP_NAME, getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
@@ -149,6 +149,13 @@ export interface PromotedRangeEntry extends SessionEntryBase {
 	lastEntryId: string;
 }
 
+export interface ArtifactEntry extends SessionEntryBase {
+	type: "artifact";
+	label: string;
+	path: string;
+	size: number;
+}
+
 /**
  * Custom message entry for extensions to inject messages into LLM context.
  * Use customType to identify your extension's entries.
@@ -182,7 +189,8 @@ export type SessionEntry =
 	| SessionInfoEntry
 	| WorkingNoteEntry
 	| OperationFinishedEntry
-	| PromotedRangeEntry;
+	| PromotedRangeEntry
+	| ArtifactEntry;
 
 /** Raw file entry (includes header) */
 export type FileEntry = SessionHeader | SessionEntry;
@@ -231,6 +239,10 @@ export type ReadonlySessionManager = Pick<
 	| "getWorkingNote"
 	| "getLastOperationOutcome"
 	| "appendPromotedRange"
+	| "appendArtifact"
+	| "storeArtifact"
+	| "getArtifactDirectory"
+	| "getArtifactCatalog"
 	| "hasPromotedRange"
 	| "getLeafId"
 	| "getLeafEntry"
@@ -1140,6 +1152,46 @@ export class SessionManager {
 		};
 		this._appendEntry(entry);
 		return entry.id;
+	}
+
+	getArtifactDirectory(): string {
+		const directory = join(this.sessionDir, "artifacts", this.sessionId);
+		if (this.persist) mkdirSync(directory, { recursive: true, mode: 0o700 });
+		return directory;
+	}
+
+	appendArtifact(label: string, path: string, size: number): string {
+		if (!path || size <= 0) throw new Error("Artifact path and positive size are required");
+		const entry: ArtifactEntry = {
+			type: "artifact",
+			id: generateId(this.byId),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
+			label: label.trim() || "document",
+			path,
+			size,
+		};
+		this._appendEntry(entry);
+		return entry.id;
+	}
+
+	storeArtifact(label: string, fileName: string, data: Uint8Array): string {
+		if (data.byteLength === 0) throw new Error("Artifact cannot be empty");
+		const path = join(this.getArtifactDirectory(), basename(fileName));
+		writeFileSync(path, data, { mode: 0o600 });
+		return this.appendArtifact(label, path, data.byteLength);
+	}
+
+	getArtifactCatalog(maxChars = 2000): string {
+		const lines: string[] = [];
+		for (const entry of [...this.getBranch()].reverse()) {
+			if (entry.type !== "artifact" || lines.some((line) => line.endsWith(` ${entry.path}`))) continue;
+			if (!existsSync(entry.path)) continue;
+			const line = `- ${entry.label} (${entry.size} bytes): ${entry.path}`;
+			if (lines.join("\n").length + line.length + 1 > maxChars) break;
+			lines.unshift(line);
+		}
+		return lines.length > 0 ? `Live document artifacts:\n${lines.join("\n")}` : "";
 	}
 
 	isEntryPromoted(entryId: string): boolean {

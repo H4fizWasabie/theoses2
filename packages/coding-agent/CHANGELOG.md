@@ -5,6 +5,7 @@
 ### Added
 
 - Added model-agnostic `tool_search`/`tool_call` dispatch for deferred extension and sidecar tools ([#16](https://github.com/H4fizWasabie/theoses2/issues/16)).
+- Added markitdown-backed document conversion, persisted session artifact records, and a capped live artifact catalog ([#20](https://github.com/H4fizWasabie/theoses2/issues/20)).
 - Added channel-neutral HTTP sidecar and MCP tool sources while retaining in-process extensions for CLI use ([#14](https://github.com/H4fizWasabie/theoses2/issues/14)).
 - Removed Windows native-dependency self-update quarantine handling ([#7](https://github.com/H4fizWasabie/theoses2/issues/7)).
 - Removed gist-based `/share` session publishing and its share-viewer configuration ([#7](https://github.com/H4fizWasabie/theoses2/issues/7)).

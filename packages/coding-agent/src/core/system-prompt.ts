@@ -25,6 +25,8 @@ export interface BuildSystemPromptOptions {
 	skills?: Skill[];
 	/** Bounded per-channel-session Working Note. */
 	workingNote?: string;
+	/** Capped live document artifact catalog for this channel session. */
+	artifactCatalog?: string;
 }
 
 function injectWorkingNote(note: string | undefined): string {
@@ -61,6 +63,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		contextFiles: providedContextFiles,
 		skills: providedSkills,
 		workingNote,
+		artifactCatalog,
 	} = options;
 	const promptCwd = cwd.replace(/\\/g, "/");
 
@@ -70,6 +73,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const skills = providedSkills ?? [];
 	const workingNoteSection = workingNote
 		? `\n\n<working_note>\nEstablished by earlier turns; verify this note if it contradicts current evidence.\n${injectWorkingNote(workingNote)}\n</working_note>`
+		: "";
+	const artifactSection = artifactCatalog
+		? `\n\n<document_artifacts>\n${artifactCatalog}\nUse convert_doc on a document path when you need its contents.\n</document_artifacts>`
 		: "";
 	const personaSection = getPersona(contextFiles);
 	const structuralSections = `\n\n${STRUCTURAL_SECTIONS}`;
@@ -83,6 +89,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 			prompt += appendSection;
 		}
 		prompt += workingNoteSection;
+		prompt += artifactSection;
 
 		// Append project context files
 		if (contextFiles.length > 0) {
@@ -184,6 +191,7 @@ Pi documentation (read only when the user asks about pi itself, its SDK, extensi
 	if (personaSection) prompt += `\n\n${personaSection}`;
 	prompt += structuralSections;
 	prompt += workingNoteSection;
+	prompt += artifactSection;
 
 	// Append project context files
 	if (contextFiles.length > 0) {
