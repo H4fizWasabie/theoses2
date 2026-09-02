@@ -3016,6 +3016,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/working-note") {
+				this.handleWorkingNoteCommand();
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/changelog") {
 				this.handleChangelogCommand();
 				this.editor.setText("");
@@ -6200,6 +6205,14 @@ export class InteractiveMode {
 			}
 		}
 
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(info, 1, 0));
+		this.ui.requestRender();
+	}
+
+	private handleWorkingNoteCommand(): void {
+		const note = this.sessionManager.getWorkingNote();
+		const info = note ? `${theme.bold("Working Note")}\n\n${note}` : "Working Note is empty";
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(info, 1, 0));
 		this.ui.requestRender();

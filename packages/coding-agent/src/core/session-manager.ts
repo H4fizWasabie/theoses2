@@ -29,6 +29,14 @@ import {
 
 export const CURRENT_SESSION_VERSION = 3;
 
+export const WORKING_NOTE_WRITE_CAP = 4000;
+export const WORKING_NOTE_INJECTION_CAP = 2000;
+
+export interface ChannelSessionKey {
+	channel: string;
+	channelSessionId: string;
+}
+
 export interface SessionHeader {
 	type: "session";
 	version?: number; // v1 sessions don't have this
@@ -36,11 +44,15 @@ export interface SessionHeader {
 	timestamp: string;
 	cwd: string;
 	parentSession?: string;
+	channel?: string;
+	channelSessionId?: string;
 }
 
 export interface NewSessionOptions {
 	id?: string;
 	parentSession?: string;
+	channel?: string;
+	channelSessionId?: string;
 }
 
 export interface SessionEntryBase {
@@ -120,6 +132,11 @@ export interface SessionInfoEntry extends SessionEntryBase {
 	name?: string;
 }
 
+export interface WorkingNoteEntry extends SessionEntryBase {
+	type: "working_note";
+	note: string;
+}
+
 /**
  * Custom message entry for extensions to inject messages into LLM context.
  * Use customType to identify your extension's entries.
@@ -150,7 +167,8 @@ export type SessionEntry =
 	| CustomEntry
 	| CustomMessageEntry
 	| LabelEntry
-	| SessionInfoEntry;
+	| SessionInfoEntry
+	| WorkingNoteEntry;
 
 /** Raw file entry (includes header) */
 export type FileEntry = SessionHeader | SessionEntry;
@@ -193,6 +211,8 @@ export type ReadonlySessionManager = Pick<
 	| "getSessionDir"
 	| "getSessionId"
 	| "getSessionFile"
+	| "getChannelSessionKey"
+	| "getWorkingNote"
 	| "getLeafId"
 	| "getLeafEntry"
 	| "getEntry"
@@ -405,6 +425,23 @@ export function sessionEntryToContextMessages(entry: SessionEntry): AgentMessage
 		return [createCompactionSummaryMessage(entry.summary, entry.tokensBefore, entry.timestamp)];
 	}
 	return [];
+}
+
+/** Keep the last five user turns while retaining their assistant/tool messages. */
+export function limitActiveContextMessages(messages: AgentMessage[], maxTurns = 5): AgentMessage[] {
+	if (maxTurns <= 0) return [];
+	let userMessages = 0;
+	let start = 0;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		if (messages[i]?.role === "user") {
+			userMessages++;
+			if (userMessages === maxTurns) {
+				start = i;
+				break;
+			}
+		}
+	}
+	return messages.slice(start);
 }
 
 /**
@@ -940,6 +977,8 @@ export class SessionManager {
 			timestamp,
 			cwd: this.cwd,
 			parentSession: options?.parentSession,
+			channel: options?.channel ?? "cli",
+			channelSessionId: options?.channelSessionId ?? this.cwd,
 		};
 		this.fileEntries = [header];
 		this.byId.clear();
@@ -1006,6 +1045,36 @@ export class SessionManager {
 
 	getSessionId(): string {
 		return this.sessionId;
+	}
+
+	getChannelSessionKey(): ChannelSessionKey {
+		const header = this.getHeader();
+		return {
+			channel: header?.channel ?? "cli",
+			channelSessionId: header?.channelSessionId ?? this.cwd,
+		};
+	}
+
+	getWorkingNote(): string {
+		let note = "";
+		for (const entry of this.getBranch()) {
+			if (entry.type === "working_note") note = entry.note;
+		}
+		return note;
+	}
+
+	appendWorkingNote(note: string): string {
+		const bounded = note.trim().slice(0, WORKING_NOTE_WRITE_CAP);
+		if (!bounded) throw new Error("Working Note cannot be empty");
+		const entry: WorkingNoteEntry = {
+			type: "working_note",
+			id: generateId(this.byId),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
+			note: bounded,
+		};
+		this._appendEntry(entry);
+		return entry.id;
 	}
 
 	getSessionFile(): string | undefined {

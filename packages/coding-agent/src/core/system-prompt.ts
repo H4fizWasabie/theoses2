@@ -22,6 +22,15 @@ export interface BuildSystemPromptOptions {
 	contextFiles?: Array<{ path: string; content: string }>;
 	/** Pre-loaded skills. */
 	skills?: Skill[];
+	/** Bounded per-channel-session Working Note. */
+	workingNote?: string;
+}
+
+function injectWorkingNote(note: string | undefined): string {
+	if (!note) return "";
+	if (note.length <= 2000) return note;
+	const head = 1000;
+	return `${note.slice(0, head)}\n...\n${note.slice(-1000)}`;
 }
 
 /** Build the system prompt with tools, guidelines, and context */
@@ -35,6 +44,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		cwd,
 		contextFiles: providedContextFiles,
 		skills: providedSkills,
+		workingNote,
 	} = options;
 	const promptCwd = cwd.replace(/\\/g, "/");
 
@@ -42,6 +52,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	const contextFiles = providedContextFiles ?? [];
 	const skills = providedSkills ?? [];
+	const workingNoteSection = workingNote
+		? `\n\n<working_note>\nEstablished by earlier turns; verify this note if it contradicts current evidence.\n${injectWorkingNote(workingNote)}\n</working_note>`
+		: "";
 
 	if (customPrompt) {
 		let prompt = customPrompt;
@@ -49,6 +62,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		if (appendSection) {
 			prompt += appendSection;
 		}
+		prompt += workingNoteSection;
 
 		// Append project context files
 		if (contextFiles.length > 0) {
@@ -147,6 +161,7 @@ Pi documentation (read only when the user asks about pi itself, its SDK, extensi
 	if (appendSection) {
 		prompt += appendSection;
 	}
+	prompt += workingNoteSection;
 
 	// Append project context files
 	if (contextFiles.length > 0) {

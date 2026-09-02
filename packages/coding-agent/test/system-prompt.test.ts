@@ -126,4 +126,17 @@ describe("buildSystemPrompt", () => {
 			expect(prompt.match(/- Use dynamic_tool for summaries\./g)).toHaveLength(1);
 		});
 	});
+
+	test("injects a bounded non-authoritative Working Note", () => {
+		const prompt = buildSystemPrompt({
+			workingNote: "x".repeat(3000),
+			contextFiles: [],
+			skills: [],
+			cwd: process.cwd(),
+		});
+
+		expect(prompt).toContain("Established by earlier turns; verify this note if it contradicts current evidence.");
+		expect(prompt).toContain("x".repeat(1000));
+		expect(prompt).not.toContain("x".repeat(1001));
+	});
 });

@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Added channel session metadata, a five-turn active context window, and the model-written Working Note record with `/working-note` inspection.
+
 ## [0.84.3] - 2026-08-24
 
 ### New Features

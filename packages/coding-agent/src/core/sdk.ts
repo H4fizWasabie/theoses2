@@ -13,7 +13,7 @@ import { ModelRuntime } from "./model-runtime.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
-import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
+import { getDefaultSessionDir, limitActiveContextMessages, SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { time } from "./timings.ts";
 import {
@@ -56,7 +56,7 @@ export interface CreateAgentSessionOptions {
 	 * Optional default tool suppression mode when no explicit allowlist is provided.
 	 *
 	 * - "all": start with no tools enabled
-	 * - "builtin": disable the default built-in tools (read, bash, edit, write)
+	 * - "builtin": disable the default built-in tools (read, bash, edit, write, working_note)
 	 *   but keep extension/custom tools enabled
 	 */
 	noTools?: "all" | "builtin";
@@ -253,7 +253,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
 	}
 
-	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write"];
+	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write", "working_note"];
 	const configuredDefaultToolNames = settingsManager.getDefaultTools();
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const excludedToolNames = options.excludeTools;
@@ -373,7 +373,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	// Restore messages if session has existing data
 	if (hasExistingSession) {
-		agent.state.messages = existingSession.messages;
+		agent.state.messages = limitActiveContextMessages(existingSession.messages);
 		if (!hasThinkingEntry) {
 			sessionManager.appendThinkingLevelChange(thinkingLevel);
 		}

@@ -101,8 +101,14 @@ import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import { exportSessionToJsonl } from "./session-export.ts";
-import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
-import { getLatestCompactionEntry } from "./session-manager.ts";
+import {
+	type BranchSummaryEntry,
+	type CompactionEntry,
+	getLatestCompactionEntry,
+	limitActiveContextMessages,
+	type SessionEntry,
+	type SessionManager,
+} from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
@@ -210,7 +216,7 @@ export interface AgentSessionConfig {
 	customTools?: ToolDefinition[];
 	/** Canonical model/auth runtime used by coding-agent internals. */
 	modelRuntime: ModelRuntime;
-	/** Initial active built-in tool names. Default: [read, bash, edit, write] */
+	/** Initial active built-in tool names. Default: [read, bash, edit, write, working_note] */
 	initialActiveToolNames?: string[];
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
 	allowedToolNames?: string[];
@@ -1063,6 +1069,7 @@ export class AgentSession {
 			selectedTools: validToolNames,
 			toolSnippets,
 			promptGuidelines,
+			workingNote: this.sessionManager.getWorkingNote(),
 		};
 		return buildSystemPrompt(this._baseSystemPromptOptions);
 	}
@@ -1219,6 +1226,9 @@ export class AgentSession {
 			if (lastAssistant) {
 				await this._checkCompaction(lastAssistant, false);
 			}
+
+			this.agent.state.messages = limitActiveContextMessages(this.agent.state.messages);
+			this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
 
 			// Build messages array (custom message if any, then user message)
 			messages = [];
@@ -2696,6 +2706,7 @@ export class AgentSession {
 			: createAllToolDefinitions(this._cwd, {
 					read: { autoResizeImages },
 					bash: { commandPrefix: shellCommandPrefix, shellPath },
+					workingNote: (note) => this.sessionManager.appendWorkingNote(note),
 				});
 
 		this._baseToolDefinitions = new Map(
@@ -2724,7 +2735,7 @@ export class AgentSession {
 
 		const defaultActiveToolNames = this._baseToolsOverride
 			? Object.keys(this._baseToolsOverride)
-			: ["read", "bash", "edit", "write"];
+			: ["read", "bash", "edit", "write", "working_note"];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,
