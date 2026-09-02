@@ -2808,7 +2808,9 @@ export class AgentSession {
 
 		const nextActiveToolNames = (
 			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
-		).filter((name) => isAllowedTool(name) && (!isExternalToolSource(name) || previousActiveToolNames.includes(name)));
+		).filter(
+			(name) => isAllowedTool(name) && (!isExternalToolSource(name) || previousActiveToolNames.includes(name)),
+		);
 
 		if (allowedToolNames) {
 			for (const toolName of this._toolRegistry.keys()) {
@@ -2818,7 +2820,13 @@ export class AgentSession {
 			}
 		} else if (options?.includeAllExtensionTools) {
 			for (const toolName of this._toolRegistry.keys()) {
-				if (isAllowedTool(toolName)) nextActiveToolNames.push(toolName);
+				if (
+					isAllowedTool(toolName) &&
+					!isExternalToolSource(toolName) &&
+					definitionRegistry.get(toolName)?.sourceInfo.source !== "builtin"
+				) {
+					nextActiveToolNames.push(toolName);
+				}
 			}
 		} else if (!options?.activeToolNames) {
 			for (const toolName of this._toolRegistry.keys()) {
@@ -2828,7 +2836,13 @@ export class AgentSession {
 			}
 		}
 		for (const dispatcherName of ["tool_search", "tool_call"]) {
-			if (isAllowedTool(dispatcherName)) nextActiveToolNames.push(dispatcherName);
+			if (
+				isAllowedTool(dispatcherName) &&
+				options?.activeToolNames?.length !== 0 &&
+				this._initialActiveToolNames?.length !== 0
+			) {
+				nextActiveToolNames.push(dispatcherName);
+			}
 		}
 
 		this.setActiveToolsByName([...new Set(nextActiveToolNames)]);
