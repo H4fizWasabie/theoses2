@@ -248,14 +248,33 @@ export interface ExtensionBindings {
 export interface PromptOptions {
 	/** Whether to dispatch extension commands and expand skill commands and prompt templates (default: true) */
 	expandPromptTemplates?: boolean;
-	/** Image attachments */
-	images?: ImageContent[];
+	/** Image data URLs or already-normalized image attachments. */
+	images?: ImageContent[] | string[];
+	/** Bounded content of the message this prompt is replying to. */
+	replyContext?: string;
 	/** When streaming, how to queue the message: "steer" (interrupt) or "followUp" (wait). Required if streaming. */
 	streamingBehavior?: "steer" | "followUp";
 	/** Source of input for extension input event handlers. Defaults to "interactive". */
 	source?: InputSource;
 	/** Internal hook used by RPC mode to observe prompt preflight acceptance or rejection. */
 	preflightResult?: (success: boolean) => void;
+}
+
+const REPLY_CONTEXT_CAP = 2000;
+
+function normalizeImages(images: PromptOptions["images"]): ImageContent[] | undefined {
+	if (!images) return undefined;
+	if (images.length === 0 || typeof images[0] !== "string") return images as ImageContent[];
+	return images.map((dataUrl) => {
+		const match = /^data:(image\/[a-z0-9.+-]+);base64,/i.exec(dataUrl);
+		if (!match) throw new Error("Image attachments must be base64 data URLs");
+		return { type: "image", data: dataUrl, mimeType: match[1] };
+	});
+}
+
+function addReplyContext(text: string, replyContext: string | undefined): string {
+	if (!replyContext) return text;
+	return `[Quoted message context]\n${replyContext.slice(0, REPLY_CONTEXT_CAP)}\n[/Quoted message context]\n\n${text}`;
 }
 
 /** Options for model/thinking mutations. */
@@ -1156,7 +1175,7 @@ export class AgentSession {
 
 			// Emit input event for extension interception (before skill/template expansion)
 			let currentText = text;
-			let currentImages = options?.images;
+			let currentImages = normalizeImages(options?.images);
 			if (this._extensionRunner.hasHandlers("input")) {
 				const inputResult = await this._extensionRunner.emitInput(
 					currentText,
@@ -1180,6 +1199,7 @@ export class AgentSession {
 				expandedText = this._expandSkillCommand(expandedText);
 				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 			}
+			const contextualText = addReplyContext(expandedText, options?.replyContext);
 
 			// If streaming, queue via steer() or followUp() based on option
 			if (this.isStreaming) {
@@ -1189,9 +1209,9 @@ export class AgentSession {
 					);
 				}
 				if (options.streamingBehavior === "followUp") {
-					await this._queueFollowUp(expandedText, currentImages);
+					await this._queueFollowUp(contextualText, currentImages);
 				} else {
-					await this._queueSteer(expandedText, currentImages);
+					await this._queueSteer(contextualText, currentImages);
 				}
 				preflightResult?.(true);
 				return;
@@ -1234,7 +1254,7 @@ export class AgentSession {
 			messages = [];
 
 			// Add user message
-			const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
+			const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: contextualText }];
 			if (currentImages) {
 				userContent.push(...currentImages);
 			}
@@ -1252,7 +1272,7 @@ export class AgentSession {
 
 			// Emit before_agent_start extension event
 			const result = await this._extensionRunner.emitBeforeAgentStart(
-				expandedText,
+				contextualText,
 				currentImages,
 				this._baseSystemPrompt,
 				this._baseSystemPromptOptions,
