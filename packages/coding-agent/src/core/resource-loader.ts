@@ -68,8 +68,10 @@ function resolvePromptInput(input: string | undefined, description: string): str
 	return input;
 }
 
-function loadContextFileFromDir(dir: string): { path: string; content: string } | null {
-	const candidates = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
+function loadContextFileFromDir(
+	dir: string,
+	candidates = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"],
+): { path: string; content: string } | null {
 	for (const filename of candidates) {
 		const filePath = join(dir, filename);
 		if (existsSync(filePath)) {
@@ -131,6 +133,11 @@ export function loadProjectContextFiles(options: {
 		contextFiles.push(globalContext);
 		seenPaths.add(globalContext.path);
 	}
+	const globalPersona = loadContextFileFromDir(resolvedAgentDir, ["THEOSES.md"]);
+	if (globalPersona) {
+		contextFiles.push(globalPersona);
+		seenPaths.add(globalPersona.path);
+	}
 
 	const ancestorContextFiles: Array<{ path: string; content: string }> = [];
 
@@ -144,6 +151,11 @@ export function loadProjectContextFiles(options: {
 		if (contextFile && !isShadowed && !seenPaths.has(contextFile.path)) {
 			ancestorContextFiles.unshift(contextFile);
 			seenPaths.add(contextFile.path);
+		}
+		const personaFile = loadContextFileFromDir(currentDir, ["THEOSES.md"]);
+		if (personaFile && !seenPaths.has(personaFile.path)) {
+			ancestorContextFiles.unshift(personaFile);
+			seenPaths.add(personaFile.path);
 		}
 
 		const parentDir = dirname(currentDir);

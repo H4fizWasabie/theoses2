@@ -10,6 +10,7 @@
 - Changed package-source handling so git URLs are no longer parsed as installable sources; local `.git/HEAD` branch display remains CLI-only.
 - Added explicit `remember` retrieval and `save_note` durable-memory tools backed by the shared `~/.pi/memory.jsonl` store.
 - Changed session discovery and recent-session lookup to filter by `{channel, channelSessionId}`, with CLI legacy fallback to resolved cwd.
+- Changed persona loading to use editable `THEOSES.md` files through the existing context-file loader.
 
 ## [0.84.3] - 2026-08-24
 
