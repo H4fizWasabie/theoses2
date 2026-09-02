@@ -6,7 +6,13 @@ import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
-import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
+import type {
+	ExtensionRunner,
+	LoadExtensionsResult,
+	RegisteredTool,
+	SessionStartEvent,
+	ToolDefinition,
+} from "./extensions/index.ts";
 import { convertToLlm } from "./messages.ts";
 import { findInitialModel } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
@@ -16,6 +22,7 @@ import { DefaultResourceLoader } from "./resource-loader.ts";
 import { getDefaultSessionDir, limitActiveContextMessages, SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { time } from "./timings.ts";
+import type { ToolSource } from "./tool-sources.ts";
 import {
 	createBashTool,
 	createCodingTools,
@@ -74,6 +81,8 @@ export interface CreateAgentSessionOptions {
 	excludeTools?: string[];
 	/** Custom tools to register (in addition to built-in tools). */
 	customTools?: ToolDefinition[];
+	/** Channel-neutral tools discovered from HTTP sidecars or MCP servers. */
+	toolSources?: ToolSource[];
 
 	/** Resource loader. When omitted, DefaultResourceLoader is used. */
 	resourceLoader?: ResourceLoader;
@@ -112,6 +121,8 @@ export type {
 } from "./extensions/index.ts";
 export type { PromptTemplate } from "./prompt-templates.ts";
 export type { Skill } from "./skills.ts";
+export type { HttpSidecarToolSourceOptions, McpHttpToolSourceOptions, ToolSource } from "./tool-sources.ts";
+export { HttpSidecarToolSource, McpHttpToolSource } from "./tool-sources.ts";
 export type { Tool } from "./tools/index.ts";
 
 export {
@@ -186,6 +197,17 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
 		await resourceLoader.reload();
 		time("resourceLoader.reload");
+	}
+
+	const externalTools: RegisteredTool[] = [];
+	for (const source of options.toolSources ?? []) {
+		try {
+			externalTools.push(...(await source.load()));
+		} catch (error) {
+			console.error(
+				`Warning: Could not load tools from ${source.name}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
 	}
 
 	// Check if session has existing data to restore
@@ -401,6 +423,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		scopedModels: options.scopedModels,
 		resourceLoader,
 		customTools: options.customTools,
+		externalTools,
 		modelRuntime,
 		initialActiveToolNames,
 		allowedToolNames,

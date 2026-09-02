@@ -78,3 +78,10 @@ export {
 	type WorkingIndicatorOptions,
 } from "./extensions/index.ts";
 export { createSyntheticSourceInfo } from "./source-info.ts";
+export {
+	HttpSidecarToolSource,
+	type HttpSidecarToolSourceOptions,
+	McpHttpToolSource,
+	type McpHttpToolSourceOptions,
+	type ToolSource,
+} from "./tool-sources.ts";
