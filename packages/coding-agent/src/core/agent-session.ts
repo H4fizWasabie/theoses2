@@ -675,6 +675,18 @@ export class AgentSession {
 
 		// Notify all listeners
 		this._emit(event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event) } : event);
+		if (event.type === "agent_end") {
+			const assistant = [...event.messages].reverse().find((message) => message.role === "assistant") as
+				| AssistantMessage
+				| undefined;
+			const outcome =
+				assistant?.stopReason === "aborted"
+					? "aborted"
+					: assistant?.stopReason === "error"
+						? "failed"
+						: "completed";
+			this.sessionManager.appendOperationFinished(outcome);
+		}
 
 		// Handle session persistence
 		if (event.type === "message_end") {
@@ -1203,7 +1215,7 @@ export class AgentSession {
 				expandedText = this._expandSkillCommand(expandedText);
 				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 			}
-			const abortNotice = this._findLastAssistantMessage()?.stopReason === "aborted" ? `${ABORT_NOTICE}\n\n` : "";
+			const abortNotice = this.sessionManager.getLastOperationOutcome() === "aborted" ? `${ABORT_NOTICE}\n\n` : "";
 			const contextualText = `${abortNotice}${addReplyContext(expandedText, options?.replyContext)}`;
 
 			// If streaming, queue via steer() or followUp() based on option

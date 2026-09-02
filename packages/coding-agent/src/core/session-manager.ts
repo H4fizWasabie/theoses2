@@ -138,6 +138,11 @@ export interface WorkingNoteEntry extends SessionEntryBase {
 	note: string;
 }
 
+export interface OperationFinishedEntry extends SessionEntryBase {
+	type: "operation_finished";
+	outcome: "completed" | "aborted" | "failed";
+}
+
 /**
  * Custom message entry for extensions to inject messages into LLM context.
  * Use customType to identify your extension's entries.
@@ -169,7 +174,8 @@ export type SessionEntry =
 	| CustomMessageEntry
 	| LabelEntry
 	| SessionInfoEntry
-	| WorkingNoteEntry;
+	| WorkingNoteEntry
+	| OperationFinishedEntry;
 
 /** Raw file entry (includes header) */
 export type FileEntry = SessionHeader | SessionEntry;
@@ -216,6 +222,7 @@ export type ReadonlySessionManager = Pick<
 	| "getSessionFile"
 	| "getChannelSessionKey"
 	| "getWorkingNote"
+	| "getLastOperationOutcome"
 	| "getLeafId"
 	| "getLeafEntry"
 	| "getEntry"
@@ -1089,6 +1096,25 @@ export class SessionManager {
 			parentId: this.leafId,
 			timestamp: new Date().toISOString(),
 			note: bounded,
+		};
+		this._appendEntry(entry);
+		return entry.id;
+	}
+
+	getLastOperationOutcome(): OperationFinishedEntry["outcome"] | undefined {
+		for (const entry of this.getBranch().toReversed()) {
+			if (entry.type === "operation_finished") return entry.outcome;
+		}
+		return undefined;
+	}
+
+	appendOperationFinished(outcome: OperationFinishedEntry["outcome"]): string {
+		const entry: OperationFinishedEntry = {
+			type: "operation_finished",
+			id: generateId(this.byId),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
+			outcome,
 		};
 		this._appendEntry(entry);
 		return entry.id;
