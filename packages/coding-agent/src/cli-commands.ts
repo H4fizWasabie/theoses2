@@ -35,10 +35,6 @@ import { spawnProcess, spawnProcessSync, waitForChildProcess } from "./utils/chi
 import { canonicalizePath, getCwdRelativePath } from "./utils/paths.ts";
 import { getPiUserAgent } from "./utils/pi-user-agent.ts";
 import { formatVersionCheckError, getLatestPiRelease, isNewerPackageVersion } from "./utils/version-check.ts";
-import {
-	cleanupWindowsSelfUpdateQuarantine,
-	quarantineWindowsNativeDependencies,
-} from "./utils/windows-self-update.ts";
 
 export type UpdateCommand = "update";
 
@@ -486,16 +482,6 @@ async function runSelfUpdate(command: SelfUpdateCommand): Promise<void> {
 	}
 }
 
-function prepareWindowsNpmSelfUpdate(): void {
-	if (process.platform !== "win32") {
-		return;
-	}
-
-	const packageDir = getPackageDir();
-	cleanupWindowsSelfUpdateQuarantine(packageDir);
-	quarantineWindowsNativeDependencies(packageDir);
-}
-
 export interface UpdateCommandRuntimeOptions {
 	extensionFactories?: InlineExtension[];
 }
@@ -688,9 +674,6 @@ export async function handleUpdateCommand(
 						printSelfUpdateNote(selfUpdatePlan.note);
 					}
 					try {
-						if (installMethod === "npm") {
-							prepareWindowsNpmSelfUpdate();
-						}
 						await runSelfUpdate(selfUpdateCommand);
 					} catch (error: unknown) {
 						const message = error instanceof Error ? error.message : "Unknown package command error";

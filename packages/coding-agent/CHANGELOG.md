@@ -4,6 +4,7 @@
 
 ### Added
 
+- Removed Windows native-dependency self-update quarantine handling ([#7](https://github.com/H4fizWasabie/theoses2/issues/7)).
 - Removed gist-based `/share` session publishing and its share-viewer configuration ([#7](https://github.com/H4fizWasabie/theoses2/issues/7)).
 - Removed third-party package installation, package update/list commands, and git package-source parsing ([#7](https://github.com/H4fizWasabie/theoses2/issues/7)).
 - Added channel session metadata, a five-turn active context window, and the model-written Working Note record with `/working-note` inspection.
