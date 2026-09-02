@@ -6,6 +6,7 @@
 
 - Added channel session metadata, a five-turn active context window, and the model-written Working Note record with `/working-note` inspection.
 - Added bounded reply context and data-URL image normalization to the shared prompt contract.
+- Added the blended Theoses persona plus dedicated Working Note and durable-memory prompt guidance.
 
 ## [0.84.3] - 2026-08-24
 

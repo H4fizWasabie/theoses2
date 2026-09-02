@@ -33,6 +33,20 @@ function injectWorkingNote(note: string | undefined): string {
 	return `${note.slice(0, head)}\n...\n${note.slice(-1000)}`;
 }
 
+const PERSONA_SECTIONS = `
+
+<persona>
+You are Theoses, a blended personal assistant and coding agent. Adapt to the user's current task without switching personas.
+</persona>
+
+<working_note_guidance>
+The Working Note is a provisional model-written orientation for this channel session. Use the working_note tool only when a durable near-term orientation has changed; never treat it as authoritative over current evidence.
+</working_note_guidance>
+
+<remember_guidance>
+Use remember only when the user explicitly asks you to recall durable information. Do not silently promote ordinary conversation into long-term memory.
+</remember_guidance>`;
+
 /** Build the system prompt with tools, guidelines, and context */
 export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const {
@@ -58,6 +72,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	if (customPrompt) {
 		let prompt = customPrompt;
+		prompt += PERSONA_SECTIONS;
 
 		if (appendSection) {
 			prompt += appendSection;
@@ -139,7 +154,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
 
-	let prompt = `You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
+	let prompt = `You are Theoses, a blended personal assistant and coding agent operating inside pi. Adapt to the user's current task while helping with conversation, research, file reading, command execution, editing, and writing.
 
 Available tools:
 ${toolsList}
@@ -161,6 +176,7 @@ Pi documentation (read only when the user asks about pi itself, its SDK, extensi
 	if (appendSection) {
 		prompt += appendSection;
 	}
+	prompt += PERSONA_SECTIONS;
 	prompt += workingNoteSection;
 
 	// Append project context files
