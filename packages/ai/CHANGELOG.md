@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Removed the hosted `radius.pi.dev` default gateway; Radius now requires an explicit configured gateway ([#19](https://github.com/H4fizWasabie/theoses2/issues/19)).
+
 ### Added
 
 - Added deferred metadata for tools that capable providers may keep out of the initial schema set ([#16](https://github.com/H4fizWasabie/theoses2/issues/16)).

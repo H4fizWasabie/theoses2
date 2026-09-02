@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Removed `pi.dev` version checks, install telemetry, remote catalog overlays, provider attribution, and installer-backed self-updates ([#19](https://github.com/H4fizWasabie/theoses2/issues/19)).
+
 ### Added
 
 - Added model-agnostic `tool_search`/`tool_call` dispatch for deferred extension and sidecar tools ([#16](https://github.com/H4fizWasabie/theoses2/issues/16)).

@@ -65,38 +65,6 @@ describe("Radius provider", () => {
 		expect(runtime.hasConfiguredAuth(RADIUS_PROVIDER_ID)).toBe(true);
 	});
 
-	it("fetches and stores the catalog for configured Radius auth", async () => {
-		vi.spyOn(globalThis, "fetch").mockImplementation(
-			async () =>
-				new Response(JSON.stringify(radiusConfig("https://radius.example.com/v1")), {
-					status: 200,
-					headers: { "content-type": "application/json" },
-				}),
-		);
-		const modelsStore = new InMemoryModelsStore();
-		const credentials = AuthStorage.inMemory({
-			[RADIUS_PROVIDER_ID]: {
-				type: "oauth",
-				access: "access-token",
-				refresh: "refresh-token",
-				expires: Date.now() + 60 * 60 * 1000,
-			},
-		});
-		const runtime = await ModelRuntime.create({
-			credentials,
-			modelsStore,
-			modelsPath: null,
-			allowModelNetwork: true,
-		});
-
-		expect(runtime.getModel(RADIUS_PROVIDER_ID, "auto")).toBeDefined();
-		expect((await modelsStore.read(RADIUS_PROVIDER_ID))?.models).toHaveLength(1);
-		const radiusRequest = vi
-			.mocked(fetch)
-			.mock.calls.find(([url]) => String(url) === "https://radius.pi.dev/v1/config");
-		expect(radiusRequest?.[1]?.headers).toMatchObject({ authorization: "Bearer access-token" });
-	});
-
 	it("does not refresh catalogs over the network by default", async () => {
 		const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("unexpected catalog fetch"));
 		const runtime = await ModelRuntime.create({
@@ -121,7 +89,7 @@ describe("Radius provider", () => {
 		});
 
 		expect(runtime.getModels(RADIUS_PROVIDER_ID)).toEqual([]);
-		expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("radius.pi.dev/v1/config"))).toBe(false);
+		expect(fetchSpy).not.toHaveBeenCalled();
 	});
 
 	it("supports custom Radius gateways from models.json", async () => {
