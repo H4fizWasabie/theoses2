@@ -2700,6 +2700,7 @@ export class AgentSession {
 
 	private _refreshToolRegistry(options?: { activeToolNames?: string[]; includeAllExtensionTools?: boolean }): void {
 		const previousActiveToolNames = this.getActiveToolNames();
+		const previousRegistryNames = new Set(this._toolRegistry.keys());
 		const allowedToolNames = this._allowedToolNames;
 		const excludedToolNames = this._excludedToolNames;
 		const isAllowedTool = (name: string): boolean =>
@@ -2745,6 +2746,7 @@ export class AgentSession {
 			});
 		}
 		for (const definition of dispatcherDefinitions) {
+			if (!isAllowedTool(definition.name)) continue;
 			definitionRegistry.set(definition.name, {
 				definition,
 				sourceInfo: createSyntheticSourceInfo(`<builtin:${definition.name}>`, { source: "builtin" }),
@@ -2795,22 +2797,39 @@ export class AgentSession {
 		}
 		this._toolRegistry = toolRegistry;
 
+		// Only tools sourced from an external tool source (#14: HTTP sidecar/MCP) default to
+		// deferred/inactive (#16). Built-in, extension-registered, and SDK tools keep their
+		// pre-#16 default-active behavior — #16 scoped deferral to large external catalogs,
+		// not to Pi's own first-party tool registration mechanisms.
+		const isExternalToolSource = (name: string): boolean => {
+			const source = definitionRegistry.get(name)?.sourceInfo.source;
+			return source?.startsWith("sidecar:") === true || source?.startsWith("mcp:") === true;
+		};
+
 		const nextActiveToolNames = (
 			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
-		).filter(
-			(name) =>
-				isAllowedTool(name) &&
-				(definitionRegistry.get(name)?.sourceInfo.source === "builtin" || previousActiveToolNames.includes(name)),
-		);
+		).filter((name) => isAllowedTool(name) && (!isExternalToolSource(name) || previousActiveToolNames.includes(name)));
 
 		if (allowedToolNames) {
 			for (const toolName of this._toolRegistry.keys()) {
-				if (allowedToolNames.has(toolName) && definitionRegistry.get(toolName)?.sourceInfo.source === "builtin") {
+				if (allowedToolNames.has(toolName) && !isExternalToolSource(toolName)) {
+					nextActiveToolNames.push(toolName);
+				}
+			}
+		} else if (options?.includeAllExtensionTools) {
+			for (const toolName of this._toolRegistry.keys()) {
+				if (isAllowedTool(toolName)) nextActiveToolNames.push(toolName);
+			}
+		} else if (!options?.activeToolNames) {
+			for (const toolName of this._toolRegistry.keys()) {
+				if (!previousRegistryNames.has(toolName) && isAllowedTool(toolName) && !isExternalToolSource(toolName)) {
 					nextActiveToolNames.push(toolName);
 				}
 			}
 		}
-		nextActiveToolNames.push("tool_search", "tool_call");
+		for (const dispatcherName of ["tool_search", "tool_call"]) {
+			if (isAllowedTool(dispatcherName)) nextActiveToolNames.push(dispatcherName);
+		}
 
 		this.setActiveToolsByName([...new Set(nextActiveToolNames)]);
 	}
