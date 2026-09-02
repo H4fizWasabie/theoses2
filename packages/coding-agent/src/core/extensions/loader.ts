@@ -25,7 +25,7 @@ import { CONFIG_DIR_NAME, getAgentDir, isBunBinary } from "../../config.ts";
 // NOTE: This import works because loader.ts exports are NOT re-exported from index.ts,
 // avoiding a circular dependency. Extensions can import from theoses-coding-agent.
 import * as _bundledPiCodingAgent from "../../index.ts";
-import { resolvePath } from "../../utils/paths.ts";
+import { canonicalizePath, resolvePath } from "../../utils/paths.ts";
 import { createEventBus, type EventBus } from "../event-bus.ts";
 import type { ExecOptions } from "../exec.ts";
 import { execCommand } from "../exec.ts";
@@ -703,6 +703,24 @@ function resolveExtensionEntries(dir: string): string[] | null {
 	}
 
 	return null;
+}
+
+export function resolveExtensionPaths(paths: string[], cwd: string, excludedPaths: string[] = []): string[] {
+	const excluded = excludedPaths.map((path) => canonicalizePath(resolvePath(path, cwd)));
+	const isExcluded = (candidate: string) =>
+		excluded.some((excludedPath) => candidate === excludedPath || candidate.startsWith(`${excludedPath}${path.sep}`));
+	const resolvedPaths: string[] = [];
+	for (const rawPath of paths) {
+		const resolvedPath = resolvePath(rawPath, cwd, { normalizeUnicodeSpaces: true });
+		if (!fs.existsSync(resolvedPath) || !fs.statSync(resolvedPath).isDirectory()) {
+			if (!isExcluded(canonicalizePath(resolvedPath))) resolvedPaths.push(resolvedPath);
+			continue;
+		}
+
+		const entries = resolveExtensionEntries(resolvedPath) ?? discoverExtensionsInDir(resolvedPath);
+		resolvedPaths.push(...entries.filter((entry) => !isExcluded(canonicalizePath(entry))));
+	}
+	return resolvedPaths;
 }
 
 /**

@@ -35,6 +35,7 @@
 
 - Fixed `noTools: "builtin"` activating built-in and deferred dispatcher tools when creating a session from services ([#23](https://github.com/H4fizWasabie/theoses2/issues/23)).
 - Fixed the Cloudflare AI Gateway default model pointing at a removed catalog entry ([#24](https://github.com/H4fizWasabie/theoses2/issues/24)).
+- Fixed automatic extension discovery, project trust filtering, and configured resource exclusions ([#24](https://github.com/H4fizWasabie/theoses2/issues/24)).
 
 ## [0.84.3] - 2026-08-24
 
