@@ -76,8 +76,8 @@ describe("stdout cleanliness in non-interactive modes", () => {
 
 		expect(result.code).toBe(0);
 		expect(result.stdout).toBe("");
-		expect(result.stderr).toContain("changed 1 package in 471ms");
-		expect(result.stderr).toContain("found 0 vulnerabilities");
+		expect(result.stderr).not.toContain("changed 1 package in 471ms");
+		expect(result.stderr).not.toContain("found 0 vulnerabilities");
 		expect(result.stderr).toContain("Usage:");
 	});
 });
