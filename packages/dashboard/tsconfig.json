@@ -1,0 +1,19 @@
+{
+	"extends": "../../tsconfig.json",
+	"compilerOptions": {
+		"outDir": "dist",
+		"rootDir": "src",
+		"noEmit": false,
+		"declaration": true,
+		"paths": {
+			"theoses-agent-core": ["../agent/dist/index.d.ts"],
+			"theoses-agent-core/*": ["../agent/dist/*.d.ts"],
+			"theoses-ai": ["../ai/dist/index.d.ts"],
+			"theoses-ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"],
+			"theoses-coding-agent": ["../coding-agent/dist/index.d.ts"],
+			"theoses-coding-agent/*": ["../coding-agent/dist/*.d.ts"]
+		}
+	},
+	"include": ["src/**/*.ts"],
+	"exclude": ["node_modules", "dist"]
+}

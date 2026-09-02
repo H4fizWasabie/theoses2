@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Theoses</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">Theoses</div>
+      <button id="new-session" class="button">+ New</button>
+      <button id="toggle-sidebar" class="icon-button" title="Collapse conversations and files">☰</button>
+      <button id="toggle-files" class="icon-button" title="Collapse file editor">▣</button>
+      <div class="topbar-spacer"></div>
+      <span class="connection">private · Tailscale</span>
+    </header>
+    <main class="shell">
+      <aside class="sidebar">
+        <section class="sessions-pane">
+          <div class="section-title"><span>Conversations</span><button id="refresh-sessions" class="icon-button" title="Refresh">↻</button></div>
+          <div id="sessions" class="session-list"></div>
+        </section>
+        <section class="explorer-pane">
+          <div class="section-title"><span>Files</span><button id="refresh-files" class="icon-button" title="Refresh">↻</button></div>
+          <div id="tree" class="tree"></div>
+        </section>
+      </aside>
+      <button class="resize-handle" data-resize="sidebar" aria-label="Resize sidebar"></button>
+      <section class="chat-pane">
+        <div class="pane-head"><div><strong id="session-title">No dashboard session</strong><span id="session-channel"></span></div><span id="chat-status"></span></div>
+        <div id="messages" class="messages"><div class="empty">Create a dashboard session to begin.</div></div>
+        <div id="reply-bar" class="reply-bar" hidden></div>
+        <form id="chat-form" class="composer">
+          <textarea id="message" rows="2" placeholder="Message Theoses…" disabled></textarea>
+          <button class="send" type="submit" disabled>Send</button>
+        </form>
+      </section>
+      <button class="resize-handle" data-resize="files" aria-label="Resize file editor"></button>
+      <section class="file-pane">
+        <div id="tabs" class="tabs"></div>
+        <div id="file-empty" class="empty file-empty">Select a text file from the tree.</div>
+        <div id="editor" class="editor" hidden>
+          <div class="editor-head"><span id="file-path"></span><span><button id="preview-file" class="button" disabled>Preview</button><button id="save-file" class="button" disabled>Save</button></span></div>
+          <textarea id="file-content" spellcheck="false"></textarea>
+          <pre id="file-preview" hidden></pre>
+          <div id="file-status" class="file-status"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
