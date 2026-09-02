@@ -62,7 +62,7 @@ describe("Radius provider", () => {
 		const model = runtime.getModel(RADIUS_PROVIDER_ID, "auto");
 		expect(model).toMatchObject({ api: "pi-messages", baseUrl: "https://radius.example.com/v1" });
 		expect(runtime.getProvider(RADIUS_PROVIDER_ID)?.name).toBe("Radius");
-		expect(runtime.hasConfiguredAuth(RADIUS_PROVIDER_ID)).toBe(true);
+		expect(runtime.hasConfiguredAuth(RADIUS_PROVIDER_ID)).toBe(false);
 	});
 
 	it("does not refresh catalogs over the network by default", async () => {
