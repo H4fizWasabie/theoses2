@@ -4,6 +4,7 @@
 
 ### Added
 
+- Removed gist-based `/share` session publishing and its share-viewer configuration ([#7](https://github.com/H4fizWasabie/theoses2/issues/7)).
 - Removed third-party package installation, package update/list commands, and git package-source parsing ([#7](https://github.com/H4fizWasabie/theoses2/issues/7)).
 - Added channel session metadata, a five-turn active context window, and the model-written Working Note record with `/working-note` inspection.
 - Added bounded reply context and data-URL image normalization to the shared prompt contract.
