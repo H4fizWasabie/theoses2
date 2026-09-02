@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -33,30 +33,6 @@ async function runCli(args: string[]): Promise<{ stdout: string; stderr: string;
 	const projectConfigDir = join(projectDir, ".pi");
 	mkdirSync(agentDir, { recursive: true });
 	mkdirSync(projectConfigDir, { recursive: true });
-
-	const fakeNpmPath = join(tempRoot, "fake-npm.mjs");
-	writeFileSync(
-		fakeNpmPath,
-		[
-			'console.log("changed 1 package in 471ms");',
-			'console.log("found 0 vulnerabilities");',
-			"process.exit(0);",
-		].join("\n"),
-		"utf-8",
-	);
-
-	writeFileSync(
-		join(projectConfigDir, "settings.json"),
-		JSON.stringify(
-			{
-				packages: ["npm:fake-package"],
-				npmCommand: [process.execPath, fakeNpmPath],
-			},
-			null,
-			2,
-		),
-		"utf-8",
-	);
 
 	return await new Promise((resolvePromise, reject) => {
 		const child = spawn(process.execPath, [cliPath, ...args], {

@@ -7,6 +7,19 @@ import type { ResourceDiagnostic } from "./diagnostics.ts";
 
 export type { ResourceCollision, ResourceDiagnostic } from "./diagnostics.ts";
 
+export interface ResolvedResource {
+	path: string;
+	enabled: boolean;
+	metadata: PathMetadata;
+}
+
+export interface ResolvedPaths {
+	extensions: ResolvedResource[];
+	skills: ResolvedResource[];
+	prompts: ResolvedResource[];
+	themes: ResolvedResource[];
+}
+
 import { canonicalizePath, isLocalPath, resolvePath } from "../utils/paths.ts";
 import { stripBom } from "../utils/text.ts";
 import { createEventBus, type EventBus } from "./event-bus.ts";
@@ -18,14 +31,16 @@ import {
 } from "./extensions/loader.ts";
 import type { Extension, ExtensionRuntime, InlineExtension, LoadExtensionsResult } from "./extensions/types.ts";
 import { findGitPaths } from "./footer-data-provider.ts";
-import { DefaultPackageManager, type PathMetadata, type ResolvedResource } from "./package-manager.ts";
 import type { PromptTemplate } from "./prompt-templates.ts";
 import { loadPromptTemplates } from "./prompt-templates.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import type { Skill } from "./skills.ts";
 import { loadSkills } from "./skills.ts";
+import type { PathMetadata } from "./source-info.ts";
 import { createSourceInfo, type SourceInfo } from "./source-info.ts";
 import { resetTimings } from "./timings.ts";
+
+export type { PathMetadata } from "./source-info.ts";
 
 export interface ResourceExtensionPaths {
 	skillPaths?: Array<{ path: string; metadata: PathMetadata }>;
@@ -100,6 +115,62 @@ function loadContextFileFromDir(
  * file's `gitdir:` target in realpath form while cwd may still be symlinked
  * (macOS `/tmp` -> `/private/tmp`).
  */
+function resolveConfiguredResources(entries: string[], baseDir: string, metadata: PathMetadata): ResolvedResource[] {
+	return entries.map((entry) => ({
+		path: resolvePath(entry.replace(/^[!+-]/, ""), baseDir),
+		enabled: !entry.startsWith("!") && !entry.startsWith("-"),
+		metadata,
+	}));
+}
+
+export function resolveLocalResources(
+	cwd: string,
+	agentDir: string,
+	settingsManager: SettingsManager,
+	additionalExtensionPaths: string[],
+): ResolvedPaths {
+	const globalSettings = settingsManager.getGlobalSettings();
+	const projectSettings = settingsManager.getProjectSettings();
+	const projectBaseDir = join(cwd, CONFIG_DIR_NAME);
+	const localDefaults = (directory: string, scope: "user" | "project"): ResolvedResource[] =>
+		existsSync(directory)
+			? [
+					{
+						path: directory,
+						enabled: true,
+						metadata: { source: "auto", scope, origin: "top-level" },
+					},
+				]
+			: [];
+	const resolveType = (resourceType: keyof ResolvedPaths): ResolvedResource[] => [
+		...localDefaults(join(agentDir, resourceType), "user"),
+		...localDefaults(join(projectBaseDir, resourceType), "project"),
+		...resolveConfiguredResources((projectSettings[resourceType] ?? []) as string[], projectBaseDir, {
+			source: "local",
+			scope: "project",
+			origin: "top-level",
+		}),
+		...resolveConfiguredResources((globalSettings[resourceType] ?? []) as string[], agentDir, {
+			source: "local",
+			scope: "user",
+			origin: "top-level",
+		}),
+	];
+	return {
+		extensions: [
+			...resolveType("extensions"),
+			...additionalExtensionPaths.map((path) => ({
+				path: resolvePath(path, cwd),
+				enabled: true,
+				metadata: { source: "cli", scope: "temporary" as const, origin: "top-level" as const },
+			})),
+		],
+		skills: resolveType("skills"),
+		prompts: resolveType("prompts"),
+		themes: resolveType("themes"),
+	};
+}
+
 function findShadowedContextFile(cwd: string): string | undefined {
 	const gitPaths = findGitPaths(cwd);
 	if (!gitPaths) return undefined;
@@ -210,7 +281,6 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private agentDir: string;
 	private settingsManager: SettingsManager;
 	private eventBus: EventBus;
-	private packageManager: DefaultPackageManager;
 	private additionalExtensionPaths: string[];
 	private additionalSkillPaths: string[];
 	private additionalPromptTemplatePaths: string[];
@@ -268,11 +338,6 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.agentDir = resolvePath(options.agentDir);
 		this.settingsManager = options.settingsManager ?? SettingsManager.create(this.cwd, this.agentDir);
 		this.eventBus = options.eventBus ?? createEventBus();
-		this.packageManager = new DefaultPackageManager({
-			cwd: this.cwd,
-			agentDir: this.agentDir,
-			settingsManager: this.settingsManager,
-		});
 		this.additionalExtensionPaths = options.additionalExtensionPaths ?? [];
 		this.additionalSkillPaths = options.additionalSkillPaths ?? [];
 		this.additionalPromptTemplatePaths = options.additionalPromptTemplatePaths ?? [];
@@ -391,7 +456,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 	async loadProjectTrustExtensions(): Promise<LoadExtensionsResult> {
 		// Force untrusted project settings for the bootstrap pass. This keeps project-local
-		// extensions/packages out while still loading user/global and temporary CLI extensions.
+		// extensions out while still loading user/global and temporary CLI extensions.
 		this.settingsManager.setProjectTrusted(false);
 		await this.settingsManager.reload();
 		return this.loadCurrentExtensionSet({ includeInlineFactories: true });
@@ -413,11 +478,14 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 		// reload() preserves SettingsManager.projectTrusted and reloads settings for that trust state.
 		await this.settingsManager.reload();
-		const resolvedPaths = await this.packageManager.resolve();
-		const cliExtensionPaths = await this.packageManager.resolveExtensionSources(this.additionalExtensionPaths, {
-			temporary: true,
-		});
-		// Kept on the instance so post-reload passes (extendResources) can still resolve package metadata.
+		const resolvedPaths = resolveLocalResources(this.cwd, this.agentDir, this.settingsManager, []);
+		const cliExtensionPaths = resolveLocalResources(
+			this.cwd,
+			this.agentDir,
+			this.settingsManager,
+			this.additionalExtensionPaths,
+		);
+		// Kept on the instance so post-reload passes can still resolve resource metadata.
 		this.resourceMetadataByPath = new Map();
 		const metadataByPath = this.resourceMetadataByPath;
 
@@ -559,10 +627,13 @@ export class DefaultResourceLoader implements ResourceLoader {
 	}
 
 	private async loadCurrentExtensionSet(options: { includeInlineFactories: boolean }): Promise<LoadExtensionsResult> {
-		const resolvedPaths = await this.packageManager.resolve();
-		const cliExtensionPaths = await this.packageManager.resolveExtensionSources(this.additionalExtensionPaths, {
-			temporary: true,
-		});
+		const resolvedPaths = resolveLocalResources(this.cwd, this.agentDir, this.settingsManager, []);
+		const cliExtensionPaths = resolveLocalResources(
+			this.cwd,
+			this.agentDir,
+			this.settingsManager,
+			this.additionalExtensionPaths,
+		);
 		const enabledExtensions = resolvedPaths.extensions.filter((r) => r.enabled).map((r) => r.path);
 		const cliEnabledExtensions = cliExtensionPaths.extensions.filter((r) => r.enabled).map((r) => r.path);
 		const extensionPaths = this.noExtensions
@@ -646,7 +717,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 	}
 
 	private mapSkillPath(resource: ResolvedResource, metadataByPath: Map<string, PathMetadata>): string {
-		if (resource.metadata.source !== "auto" && resource.metadata.origin !== "package") {
+		if (resource.metadata.source !== "auto") {
 			return resource.path;
 		}
 		try {

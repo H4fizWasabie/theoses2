@@ -3,7 +3,7 @@ import { existsSync } from "fs";
 import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, getAgentDir, getSettingsPath, PACKAGE_NAME } from "../config.ts";
 import { areExperimentalFeaturesEnabled } from "../core/experimental.ts";
 import { KeybindingsManager } from "../core/keybindings.ts";
-import { DefaultPackageManager, type ResolvedResource } from "../core/package-manager.ts";
+import type { ResolvedResource } from "../core/resource-loader.ts";
 import { SettingsManager } from "../core/settings-manager.ts";
 import { ExtensionInputComponent } from "../modes/interactive/components/extension-input.ts";
 import { ExtensionSelectorComponent } from "../modes/interactive/components/extension-selector.ts";
@@ -22,6 +22,7 @@ import {
 	setTheme,
 	type Theme,
 } from "../modes/interactive/theme/theme.ts";
+import { resolvePath } from "../utils/paths.ts";
 
 const OFFICIAL_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 const OFFICIAL_APP_NAME = "pi";
@@ -65,13 +66,13 @@ async function loadStartupThemes(settingsManager: SettingsManager): Promise<Them
 	const globalSettingsManager = SettingsManager.inMemory(settingsManager.getGlobalSettings(), {
 		projectTrusted: false,
 	});
-	const packageManager = new DefaultPackageManager({
-		cwd: process.cwd(),
-		agentDir: getAgentDir(),
-		settingsManager: globalSettingsManager,
-	});
-	const resolvedPaths = await packageManager.resolve(async () => "skip");
-	return loadThemes(resolvedPaths.themes);
+	const agentDir = getAgentDir();
+	const resolvedPaths: ResolvedResource[] = globalSettingsManager.getThemePaths().map((path) => ({
+		path: resolvePath(path, agentDir),
+		enabled: true,
+		metadata: { source: "local", scope: "user", origin: "top-level" },
+	}));
+	return loadThemes(resolvedPaths);
 }
 
 export async function createStartupTui(settingsManager: SettingsManager): Promise<TUI> {

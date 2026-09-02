@@ -808,7 +808,7 @@ export interface CompactionPreparation {
 	/** Messages that will be summarized and discarded */
 	messagesToSummarize: AgentMessage[];
 	/** Session entry IDs corresponding to messagesToSummarize */
-	messagesToSummarizeEntryIds: string[];
+	messagesToSummarizeEntryIds?: string[];
 	/** Messages that will be turned into turn prefix summary (if splitting) */
 	turnPrefixMessages: AgentMessage[];
 	/** Whether this is a split turn (cut point in middle of turn) */

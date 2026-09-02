@@ -1897,16 +1897,16 @@ export class AgentSession {
 
 	private _distillDroppedMemory(
 		messages: AgentMessage[],
-		messageEntryIds: string[],
+		messageEntryIds: string[] | undefined,
 		requestModel: Model<any>,
 		apiKey: string | undefined,
 		headers: Record<string, string> | undefined,
 		signal: AbortSignal,
 		env: Record<string, string> | undefined,
 	): void {
-		const unpromotedMessages = messages.filter(
-			(_message, index) => !this.sessionManager.isEntryPromoted(messageEntryIds[index]!),
-		);
+		const unpromotedMessages = messageEntryIds
+			? messages.filter((_message, index) => !this.sessionManager.isEntryPromoted(messageEntryIds[index]!))
+			: messages;
 		if (unpromotedMessages.length === 0) return;
 		void distillMemory(
 			unpromotedMessages,

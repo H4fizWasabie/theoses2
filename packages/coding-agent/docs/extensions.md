@@ -123,18 +123,12 @@ Additional paths via `settings.json`:
 
 ```json
 {
-  "packages": [
-    "npm:@foo/bar@1.0.0",
-    "git:github.com/user/repo@v1"
-  ],
   "extensions": [
     "/path/to/local/extension.ts",
     "/path/to/local/extension/dir"
   ]
 }
 ```
-
-To share extensions via npm or git as pi packages, see [packages.md](packages.md).
 
 ## Available Imports
 
@@ -146,8 +140,6 @@ To share extensions via npm or git as pi packages, see [packages.md](packages.md
 | `@earendil-works/pi-tui` | TUI components for custom rendering |
 
 npm dependencies work too. Add a `package.json` next to your extension (or in a parent directory), run `npm install`, and imports from `node_modules/` are resolved automatically.
-
-For distributed pi packages installed with `pi install` (npm or git), runtime deps must be in `dependencies`. Package installation uses production installs (`npm install --omit=dev`) by default, so `devDependencies` are not available at runtime; when `npmCommand` is configured, git packages use plain `install` for compatibility with wrappers.
 
 Node.js built-ins (`node:fs`, `node:path`, etc.) are also available.
 
@@ -242,7 +234,7 @@ Defer background resource startup until `session_start` or the command/tool/even
     └── utils.ts        # Helper module
 ```
 
-**Package with dependencies** - for extensions that need npm packages:
+**Extension with dependencies** - for extensions that need npm packages:
 
 ```
 ~/.pi/agent/extensions/
@@ -1561,7 +1553,7 @@ Each entry has this shape:
     path: string;
     source: string;
     scope: "user" | "project" | "temporary";
-    origin: "package" | "top-level";
+    origin: "top-level";
     baseDir?: string;
   };
 }

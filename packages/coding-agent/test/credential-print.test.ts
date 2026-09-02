@@ -66,7 +66,7 @@ describe("credential print commands", () => {
 		expect(await storage.read("openai-codex")).toMatchObject({ access: "fresh-test-token" });
 	});
 
-	test("reports unknown auth options like package commands", async () => {
+	test("reports unknown auth options", async () => {
 		const originalExitCode = process.exitCode;
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {

@@ -6,11 +6,7 @@ import { SettingsManager } from "../src/core/settings-manager.ts";
 /**
  * Tests for the fix to a bug where external file changes to arrays were overwritten.
  *
- * The bug scenario was:
- * 1. Pi starts with settings.json containing packages: ["npm:some-pkg"]
- * 2. User externally edits file to packages: []
- * 3. User changes an unrelated setting (e.g., theme) via UI
- * 4. save() would overwrite packages back to ["npm:some-pkg"] from stale in-memory state
+ * The bug scenario covers preserving externally edited settings when changing an unrelated setting.
  *
  * The fix tracks which fields were explicitly modified during the session, and only
  * those fields override file values during save().
@@ -32,43 +28,6 @@ describe("SettingsManager - External Edit Preservation", () => {
 		if (existsSync(testDir)) {
 			rmSync(testDir, { recursive: true });
 		}
-	});
-
-	it("should preserve file changes to packages array when changing unrelated setting", async () => {
-		const settingsPath = join(agentDir, "settings.json");
-
-		// Initial state: packages has one item
-		writeFileSync(
-			settingsPath,
-			JSON.stringify({
-				theme: "dark",
-				packages: ["npm:pi-mcp-adapter"],
-			}),
-		);
-
-		// Pi starts up, loads settings into memory
-		const manager = SettingsManager.create(projectDir, agentDir);
-
-		// At this point, globalSettings.packages = ["npm:pi-mcp-adapter"]
-		expect(manager.getPackages()).toEqual(["npm:pi-mcp-adapter"]);
-
-		// User externally edits settings.json to remove the package
-		const currentSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-		currentSettings.packages = []; // User wants to remove this!
-		writeFileSync(settingsPath, JSON.stringify(currentSettings, null, 2));
-
-		// Verify file was changed
-		expect(JSON.parse(readFileSync(settingsPath, "utf-8")).packages).toEqual([]);
-
-		// User changes an UNRELATED setting via UI (this triggers save)
-		manager.setTheme("light");
-		await manager.flush();
-
-		// With the fix, packages should be preserved as [] (not reverted to startup value)
-		const savedSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-
-		expect(savedSettings.packages).toEqual([]);
-		expect(savedSettings.theme).toBe("light");
 	});
 
 	it("should preserve file changes to extensions array when changing unrelated setting", async () => {

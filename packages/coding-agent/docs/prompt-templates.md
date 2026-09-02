@@ -10,7 +10,6 @@ Pi loads prompt templates from:
 
 - Global: `~/.pi/agent/prompts/*.md`
 - Project: `.pi/prompts/*.md` (only after the project is trusted)
-- Packages: `prompts/` directories or `pi.prompts` entries in `package.json`
 - Settings: `prompts` array with files or directories
 - CLI: `--prompt-template <path>` (repeatable)
 

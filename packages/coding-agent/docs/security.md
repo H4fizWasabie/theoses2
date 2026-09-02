@@ -4,7 +4,7 @@ Pi is a local coding agent. It runs with the permissions of the user account tha
 
 ## Project Trust
 
-Project trust controls whether pi loads project-local settings, resources, packages, and extensions. It is not a sandbox and it does not restrict what the model can ask tools to do after you start working in a directory.
+Project trust controls whether pi loads project-local settings, resources, and extensions. It is not a sandbox and it does not restrict what the model can ask tools to do after you start working in a directory.
 
 Pi considers a project to have resources that require trust when it finds any of these from the current working directory:
 
@@ -21,8 +21,7 @@ Trusting a project allows pi to load project resources that require trust, inclu
 
 - `.pi/settings.json`
 - `.pi` resources such as extensions, skills, prompt templates, themes, and system prompt files
-- missing project packages configured through project settings
-- project-local extensions and project package-managed extensions
+- project-local extensions
 
 Declining trust skips protected resources. Context files such as `AGENTS.override.md`, `AGENTS.md`, and `CLAUDE.md` are loaded regardless of project trust unless context loading is disabled. Before trust is resolved, pi only loads context files, user/global extensions, and CLI `-e` extensions. User/global and CLI extensions can handle the `project_trust` event; the first extension that returns a yes/no decision owns the decision.
 
