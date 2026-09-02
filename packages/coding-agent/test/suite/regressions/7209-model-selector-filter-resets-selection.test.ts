@@ -68,7 +68,7 @@ describe("model selector filter resets selection to top", () => {
 		// Move selection down two rows to alpha-3.
 		selector.handleInput("\x1b[B");
 		selector.handleInput("\x1b[B");
-		expect(selectedModelId(stripAnsi(selector.render(120).join("\n")))).toBe("alpha-3");
+		expect(selectedModelId(stripAnsi(selector.render(120).join("\n")))).toBe("deepseek-v4-pro");
 
 		// Type a query that matches the three alpha models. The selection must
 		// move back to the top row (alpha-1), not stay clamped at index 2.
