@@ -41,7 +41,7 @@
 		}
 	},
 	"bin": {
-		"pi-ai": "dist/cli.js"
+		"theoses-ai": "dist/cli.js"
 	},
 	"files": [
 		"dist",
