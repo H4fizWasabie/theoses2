@@ -9,7 +9,11 @@ import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { stripBom } from "../utils/text.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
-import type { HttpSidecarToolSourceOptions, McpHttpToolSourceOptions } from "./tool-sources.ts";
+import type {
+	HttpSidecarToolSourceOptions,
+	McpHttpToolSourceOptions,
+	McpStdioToolSourceOptions,
+} from "./tool-sources.ts";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -70,7 +74,8 @@ export interface WarningSettings {
 
 export type ToolSourceSettings =
 	| ({ kind: "sidecar" } & HttpSidecarToolSourceOptions)
-	| ({ kind: "mcp" } & McpHttpToolSourceOptions);
+	| ({ kind: "mcp" } & McpHttpToolSourceOptions)
+	| ({ kind: "mcp-stdio" } & McpStdioToolSourceOptions);
 
 export type DefaultProjectTrust = "ask" | "always" | "never";
 

@@ -21,7 +21,7 @@ import { DefaultResourceLoader } from "./resource-loader.ts";
 import { getDefaultSessionDir, limitActiveContextMessages, SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { time } from "./timings.ts";
-import { HttpSidecarToolSource, McpHttpToolSource, type ToolSource } from "./tool-sources.ts";
+import { HttpSidecarToolSource, McpHttpToolSource, McpStdioToolSource, type ToolSource } from "./tool-sources.ts";
 import {
 	createBashTool,
 	createCodingTools,
@@ -120,8 +120,13 @@ export type {
 } from "./extensions/index.ts";
 export type { PromptTemplate } from "./prompt-templates.ts";
 export type { Skill } from "./skills.ts";
-export type { HttpSidecarToolSourceOptions, McpHttpToolSourceOptions, ToolSource } from "./tool-sources.ts";
-export { HttpSidecarToolSource, McpHttpToolSource } from "./tool-sources.ts";
+export type {
+	HttpSidecarToolSourceOptions,
+	McpHttpToolSourceOptions,
+	McpStdioToolSourceOptions,
+	ToolSource,
+} from "./tool-sources.ts";
+export { HttpSidecarToolSource, McpHttpToolSource, McpStdioToolSource } from "./tool-sources.ts";
 export type { Tool } from "./tools/index.ts";
 
 export {
@@ -198,11 +203,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		time("resourceLoader.reload");
 	}
 
-	const configuredToolSources = settingsManager
-		.getToolSources()
-		.map(({ kind, ...source }) =>
-			kind === "sidecar" ? new HttpSidecarToolSource(source) : new McpHttpToolSource(source),
-		);
+	const configuredToolSources = settingsManager.getToolSources().map((source) => {
+		if (source.kind === "sidecar") return new HttpSidecarToolSource(source);
+		if (source.kind === "mcp-stdio") return new McpStdioToolSource(source);
+		return new McpHttpToolSource(source);
+	});
 	const externalTools: RegisteredTool[] = [];
 	for (const source of [...configuredToolSources, ...(options.toolSources ?? [])]) {
 		try {
