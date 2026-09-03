@@ -14,7 +14,7 @@
 	"files": ["dist", "README.md", "CHANGELOG.md"],
 	"scripts": {
 		"build": "tsgo -p tsconfig.json && shx cp -r src/public dist/public",
-		"test": "node --import tsx --test test/*.test.ts"
+		"test": "node --experimental-strip-types --test test/*.test.ts"
 	},
 	"dependencies": {
 		"theoses-coding-agent": "^0.84.3"
