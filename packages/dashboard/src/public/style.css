@@ -128,6 +128,7 @@ button { color: inherit; }
 #file-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, monospace; }
 #file-content { min-height: 0; flex: 1; border: 0; resize: none; padding: 16px; color: var(--text); background: var(--panel); font: 12px/1.6 ui-monospace, SFMono-Regular, monospace; outline: none; }
 #file-preview { min-height: 0; flex: 1; overflow: auto; margin: 0; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 ui-monospace, SFMono-Regular, monospace; }
+.file-preview-html { min-height: 0; flex: 1; border: 0; background: #fff; }
 .file-status { min-height: 28px; padding: 6px 12px; color: var(--muted); border-top: 1px solid var(--border); font-size: 11px; }
 .file-status.error { color: var(--danger); }
 .reply-bar[hidden], .editor[hidden] { display: none; }

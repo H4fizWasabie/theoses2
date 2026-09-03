@@ -103,7 +103,10 @@ function usageBadge(usage) {
 function renderTurnBody(turn) {
   if (turn.queued && !turn.segments.length) return '<div class="queued-note">queued…</div>';
   if (turn.pending && !turn.segments.length) return '<div class="thinking"><span></span><span></span><span></span></div>';
-  return mergeSegments(turn.segments).map((item) => item.kind === "tool" ? renderToolBlock(item.entry) : `<div class="message-text">${escapeHtml(item.text)}</div>`).join("");
+  const body = mergeSegments(turn.segments).map((item) => item.kind === "tool" ? renderToolBlock(item.entry) : `<div class="message-text">${escapeHtml(item.text)}</div>`).join("");
+  // A tool call finishing doesn't mean the turn is done - theoses may still be producing more
+  // text or another tool call. Without this, the UI looks frozen between segments.
+  return turn.active ? `${body}<div class="thinking"><span></span><span></span><span></span></div>` : body;
 }
 
 function renderHistory() {
@@ -166,7 +169,7 @@ async function activateTab(path) {
     try { Object.assign(tab, await request(`/api/file?path=${encodeURIComponent(path)}`)); }
     catch (error) { $("file-status").textContent = error.message; $("file-status").className = "file-status error"; return; }
   }
-  $("file-empty").hidden = true; $("editor").hidden = false; $("file-path").textContent = path; $("file-content").value = tab.content; $("file-preview").textContent = tab.content; $("save-file").disabled = false; $("preview-file").disabled = false; $("file-status").textContent = ""; $("file-status").className = "file-status"; setPreview(state.preview);
+  $("file-empty").hidden = true; $("editor").hidden = false; $("file-path").textContent = path; $("file-content").value = tab.content; $("file-preview").textContent = tab.content; $("file-preview-html").srcdoc = tab.content; $("save-file").disabled = false; $("preview-file").disabled = false; $("file-status").textContent = ""; $("file-status").className = "file-status"; setPreview(state.preview);
 }
 
 function openFile(path) {
@@ -179,6 +182,10 @@ function closeTab(path) {
   if (state.activeTab === path) state.activeTab = state.tabs.at(-1)?.path || null;
   renderTabs();
   if (state.activeTab) void activateTab(state.activeTab); else { $("editor").hidden = true; $("file-empty").hidden = false; $("preview-file").disabled = true; }
+}
+
+function isHtmlPath(path) {
+  return /\.html?$/i.test(path || "");
 }
 
 function parentPath(path) {
@@ -225,7 +232,7 @@ $("save-file").addEventListener("click", async () => {
   if (!tab) return;
   try {
     const saved = await request("/api/file", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: tab.path, content: $("file-content").value, version: tab.version }) });
-    Object.assign(tab, saved); $("file-content").value = saved.content; $("file-preview").textContent = saved.content; $("file-status").textContent = "Saved";
+    Object.assign(tab, saved); $("file-content").value = saved.content; $("file-preview").textContent = saved.content; $("file-preview-html").srcdoc = saved.content; $("file-status").textContent = "Saved";
   } catch (error) { $("file-status").textContent = error.message; $("file-status").className = "file-status error"; }
 });
 
@@ -268,8 +275,10 @@ $("telegram-settings-form").addEventListener("submit", async (event) => {
 
 function setPreview(enabled) {
   state.preview = enabled;
+  const html = isHtmlPath(state.activeTab);
   $("file-content").hidden = enabled;
-  $("file-preview").hidden = !enabled;
+  $("file-preview").hidden = !enabled || html;
+  $("file-preview-html").hidden = !enabled || !html;
   $("preview-file").textContent = enabled ? "Edit" : "Preview";
 }
 
@@ -279,17 +288,17 @@ function togglePanel(name) {
   const mobile = window.matchMedia("(max-width: 640px)").matches;
   const panel = document.querySelector(name === "sidebar" ? ".sidebar" : ".file-pane");
   if (mobile) panel.classList.toggle("open");
-  else $(".shell").classList.toggle(`${name}-collapsed`);
+  else document.querySelector(".shell").classList.toggle(`${name}-collapsed`);
 }
 
 $("toggle-sidebar").addEventListener("click", () => togglePanel("sidebar"));
 $("toggle-files").addEventListener("click", () => togglePanel("files"));
 
 document.querySelectorAll("[data-resize]").forEach((handle) => handle.addEventListener("pointerdown", (event) => {
-  const shell = $(".shell");
+  const shell = document.querySelector(".shell");
   const start = event.clientX;
   const variable = handle.dataset.resize === "sidebar" ? "--sidebar-width" : "--files-width";
-  const initial = handle.dataset.resize === "sidebar" ? $(".sidebar").getBoundingClientRect().width : $(".file-pane").getBoundingClientRect().width;
+  const initial = (handle.dataset.resize === "sidebar" ? document.querySelector(".sidebar") : document.querySelector(".file-pane")).getBoundingClientRect().width;
   handle.setPointerCapture(event.pointerId);
   const move = (moveEvent) => {
     const delta = moveEvent.clientX - start;
@@ -322,6 +331,12 @@ async function streamSSE(response, onEvent) {
   }
 }
 
+$("message").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  $("chat-form").requestSubmit();
+});
+
 $("chat-form").addEventListener("submit", (event) => {
   event.preventDefault();
   if (!state.active || state.active.channel === "telegram") return;
@@ -335,13 +350,14 @@ $("chat-form").addEventListener("submit", (event) => {
   // history this request is responsible for, without clobbering later queued turns still in flight.
   const settledCount = state.history.length + 2;
   state.history.push({ role: "user", segments: [{ type: "text", text: message }] });
-  const liveTurn = { role: "assistant", segments: [], pending: true, queued: true };
+  const liveTurn = { role: "assistant", segments: [], pending: true, queued: true, active: true };
   state.history.push(liveTurn);
   state.pending = (state.pending || 0) + 1;
   renderActive();
   renderHistory();
 
   void (async () => {
+    let settled = false;
     try {
       const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
         method: "POST",
@@ -366,14 +382,23 @@ $("chat-form").addEventListener("submit", (event) => {
         } else if (eventName === "usage") {
           liveTurn.usage = data;
         } else if (eventName === "done") {
+          settled = true;
+          liveTurn.active = false;
           if (data.history.length >= settledCount) state.history = data.history.slice(0, settledCount).concat(state.history.slice(settledCount));
         } else if (eventName === "error") {
+          settled = true;
+          liveTurn.active = false;
           $("chat-status").textContent = data.message;
         }
         renderHistory();
       });
+      if (!settled) {
+        liveTurn.active = false; liveTurn.pending = false;
+        $("chat-status").textContent = "Connection lost - the response above may be incomplete.";
+        renderHistory();
+      }
       await loadSessions();
-    } catch (error) { $("chat-status").textContent = error.message; renderHistory(); }
+    } catch (error) { liveTurn.active = false; liveTurn.pending = false; $("chat-status").textContent = error.message; renderHistory(); }
     finally { state.pending -= 1; renderActive(); }
   })();
 });
