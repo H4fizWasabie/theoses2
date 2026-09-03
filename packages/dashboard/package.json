@@ -1,0 +1,28 @@
+{
+	"name": "theoses-dashboard",
+	"version": "0.84.3",
+	"description": "Private browser dashboard for Theoses",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": ["dist", "README.md", "CHANGELOG.md"],
+	"scripts": {
+		"build": "tsgo -p tsconfig.json && shx cp -r src/public dist/public",
+		"test": "node --experimental-strip-types --test test/*.test.ts"
+	},
+	"dependencies": {
+		"theoses-coding-agent": "^0.84.3"
+	},
+	"devDependencies": {
+		"shx": "0.4.0"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	}
+}
