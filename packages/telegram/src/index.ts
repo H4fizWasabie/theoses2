@@ -10,6 +10,7 @@ import { chunkHtml, formatTelegramHtml, splitSections } from "./format.ts";
 
 const CHANNEL = "telegram";
 const TELEGRAM_MESSAGE_LIMIT = 4000;
+const TYPING_INTERVAL_MS = 4000; // Telegram's typing indicator expires after ~5s, so it must be re-sent.
 
 function chatId(ctx: Context): string | undefined {
 	return ctx.chat?.id.toString();
@@ -41,6 +42,11 @@ function assistantText(event: AgentSessionEvent): string | undefined {
  * caller's message for the first) so multi-part replies read as one chain.
  * A chunk Telegram rejects (malformed HTML -> 400) is resent as plain text -
  * stray tags beat a lost message. Ported from Mino's sendTelegramReply.
+ *
+ * If `statusMessageId` is given (a live "Running <tool>..." status message),
+ * the very first chunk edits it in place instead of sending a new message,
+ * so the status message becomes the final answer rather than being replaced
+ * by a separate one.
  */
 async function sendTelegramReply(
 	bot: Bot,
@@ -48,13 +54,32 @@ async function sendTelegramReply(
 	reply: string,
 	toolNames: string[],
 	replyTo: number | undefined,
+	statusMessageId: number | undefined,
 ): Promise<void> {
 	const sections = splitSections(reply);
 	let lastId = replyTo;
+	let pendingEditId = statusMessageId;
 	for (const [index, section] of sections.entries()) {
 		const names = index === sections.length - 1 ? toolNames : [];
 		const html = formatTelegramHtml(section, names);
 		for (const chunk of chunkHtml(html, TELEGRAM_MESSAGE_LIMIT)) {
+			const editId = pendingEditId;
+			pendingEditId = undefined; // only the very first chunk overall replaces the status message
+			if (editId !== undefined) {
+				try {
+					await bot.api.editMessageText(chatId, editId, chunk, { parse_mode: "HTML" });
+					lastId = editId;
+					continue;
+				} catch {
+					try {
+						await bot.api.editMessageText(chatId, editId, chunk);
+						lastId = editId;
+						continue;
+					} catch {
+						// Status message may have been deleted or rate-limited; fall through to sending fresh.
+					}
+				}
+			}
 			const replyParameters = lastId ? { message_id: lastId } : undefined;
 			try {
 				const sent = await bot.api.sendMessage(chatId, chunk, {
@@ -70,6 +95,14 @@ async function sendTelegramReply(
 			}
 		}
 	}
+}
+
+/** Re-sends the Telegram "typing..." chat action every few seconds until `signal` aborts. */
+function startTypingIndicator(bot: Bot, chatId: number, signal: AbortSignal): void {
+	const tick = () => void bot.api.sendChatAction(chatId, "typing").catch(() => {});
+	tick();
+	const interval = setInterval(tick, TYPING_INTERVAL_MS);
+	signal.addEventListener("abort", () => clearInterval(interval));
 }
 
 async function downloadFile(bot: Bot, token: string, fileId: string): Promise<Uint8Array> {
@@ -141,11 +174,33 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			}
 
 			let response: string | undefined;
+			let statusMessageId: number | undefined;
+			let statusPending: Promise<unknown> = Promise.resolve();
+			const setStatus = (text: string) => {
+				statusPending = statusPending.then(async () => {
+					try {
+						if (statusMessageId === undefined) {
+							const sent = await bot.api.sendMessage(ctx.chat.id, text, {
+								reply_parameters: { message_id: ctx.message.message_id },
+							});
+							statusMessageId = sent.message_id;
+						} else {
+							await bot.api.editMessageText(ctx.chat.id, statusMessageId, text);
+						}
+					} catch {
+						// Ignore transient status failures (e.g. "message not modified", rate limits).
+					}
+				});
+			};
+
 			const toolNames: string[] = [];
 			const unsubscribe = session.subscribe((event) => {
 				response = assistantText(event) ?? response;
+				if (event.type === "tool_execution_start") setStatus(`Running ${event.toolName}...`);
 				if (event.type === "tool_execution_end") toolNames.push(event.toolName);
 			});
+			const abortController = new AbortController();
+			startTypingIndicator(bot, ctx.chat.id, abortController.signal);
 			try {
 				await session.prompt(messageText(ctx), {
 					replyContext: replyText(ctx),
@@ -154,8 +209,14 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				});
 			} finally {
 				unsubscribe();
+				abortController.abort();
 			}
-			if (response) await sendTelegramReply(bot, ctx.chat.id, response, toolNames, ctx.message.message_id);
+			await statusPending;
+			if (response) {
+				await sendTelegramReply(bot, ctx.chat.id, response, toolNames, ctx.message.message_id, statusMessageId);
+			} else if (statusMessageId !== undefined) {
+				await bot.api.deleteMessage(ctx.chat.id, statusMessageId).catch(() => {});
+			}
 		});
 		queues.set(
 			chat,

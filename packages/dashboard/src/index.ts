@@ -339,7 +339,7 @@ async function streamChat(info: SessionInfo, request: IncomingMessage, response:
 	setQueue(record, work);
 	try {
 		await work;
-		sseSend(response, "done", { history: sessionHistory(record.manager) });
+		sseSend(response, "done", {});
 	} catch (error) {
 		sseSend(response, "error", { message: error instanceof Error ? error.message : String(error) });
 	} finally {
