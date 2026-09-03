@@ -8,10 +8,12 @@ import {
 	type AgentSession,
 	type AgentSessionEvent,
 	createAgentSession,
+	getAgentDir,
 	type SessionInfo,
 	SessionManager,
 } from "theoses-coding-agent";
 import { FileConflictError, listDirectory, readTextFile, renamePath, writeTextFile } from "./files.ts";
+import { saveTelegramConfig, telegramConfigStatus } from "./telegram-config.ts";
 
 const DASHBOARD_CHANNEL = "dashboard";
 const TELEGRAM_CHANNEL = "telegram";
@@ -29,6 +31,7 @@ export interface DashboardServerOptions {
 	host?: string;
 	port?: number;
 	accessToken?: string;
+	telegramConfigPath?: string;
 }
 
 interface SessionView {
@@ -235,7 +238,28 @@ function errorStatus(error: unknown): number {
 	return 400;
 }
 
-async function api(request: IncomingMessage, response: ServerResponse, url: URL, cwd: string): Promise<boolean> {
+async function api(
+	request: IncomingMessage,
+	response: ServerResponse,
+	url: URL,
+	cwd: string,
+	telegramConfigPath: string,
+): Promise<boolean> {
+	if (url.pathname === "/api/telegram" && request.method === "GET") {
+		json(response, 200, await telegramConfigStatus(telegramConfigPath));
+		return true;
+	}
+	if (url.pathname === "/api/telegram" && request.method === "POST") {
+		const input = await body(request);
+		if (typeof input !== "object" || input === null) throw new Error("settings object is required");
+		const values = input as Record<string, unknown>;
+		await saveTelegramConfig(telegramConfigPath, {
+			botToken: typeof values.botToken === "string" ? values.botToken : undefined,
+			ownerTelegramId: typeof values.ownerTelegramId === "string" ? values.ownerTelegramId : undefined,
+		});
+		json(response, 200, { ok: true, restartRequired: true });
+		return true;
+	}
 	if (url.pathname === "/api/sessions" && request.method === "GET") {
 		json(response, 200, { sessions: await visibleSessions() });
 		return true;
@@ -306,6 +330,7 @@ async function asset(response: ServerResponse, pathname: string): Promise<void> 
 export function createDashboardServer(options: DashboardServerOptions = {}) {
 	const cwd = options.cwd ?? process.cwd();
 	const accessToken = options.accessToken ?? process.env.THEOSES_DASHBOARD_TOKEN ?? "";
+	const telegramConfigPath = options.telegramConfigPath ?? join(getAgentDir(), "theoses.env");
 	return createServer(async (request, response) => {
 		try {
 			const url = new URL(request.url ?? "/", "http://localhost");
@@ -315,7 +340,7 @@ export function createDashboardServer(options: DashboardServerOptions = {}) {
 					return;
 				}
 				if (!requireAccess(request, response, accessToken)) return;
-				if (await api(request, response, url, cwd)) return;
+				if (await api(request, response, url, cwd, telegramConfigPath)) return;
 				json(response, 404, { error: "Not found" });
 				return;
 			}

@@ -21,6 +21,7 @@
     <header class="topbar">
       <div class="brand">Theoses</div>
       <button id="new-session" class="button">+ New</button>
+      <button id="telegram-settings-button" class="button">Settings</button>
       <button id="toggle-sidebar" class="icon-button" title="Collapse conversations and files">☰</button>
       <button id="toggle-files" class="icon-button" title="Collapse file editor">▣</button>
       <div class="topbar-spacer"></div>
@@ -60,6 +61,18 @@
       </section>
     </main>
   </div>
+  <dialog id="telegram-settings" class="settings-dialog">
+    <form id="telegram-settings-form" class="settings-card" method="dialog">
+      <div class="settings-head"><div><h2>Telegram</h2><p>Configure the private owner channel.</p></div><button id="close-telegram-settings" class="icon-button" type="button" title="Close">×</button></div>
+      <label for="telegram-token">Bot token</label>
+      <input id="telegram-token" name="botToken" type="password" autocomplete="new-password" placeholder="Leave blank to keep the saved token">
+      <label for="telegram-owner-id">Owner Telegram ID</label>
+      <input id="telegram-owner-id" name="ownerTelegramId" inputmode="numeric" pattern="-?[1-9][0-9]*" required>
+      <p class="settings-help">To find your ID, open <code>@userinfobot</code> in Telegram, send <code>/start</code>, and paste the numeric <code>Id</code> it returns. Do not enter a username or phone number.</p>
+      <div id="telegram-settings-status" class="file-status" aria-live="polite"></div>
+      <button class="button" type="submit">Save Telegram settings</button>
+    </form>
+  </dialog>
   <script src="/app.js" type="module"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -68,6 +68,51 @@ test("dashboard fails closed when no access token is configured", async () => {
 	try {
 		const response = await fetch(`${base}/api/sessions`);
 		assert.equal(response.status, 503);
+	} finally {
+		await close(server);
+	}
+});
+
+test("dashboard saves Telegram onboarding settings without exposing the bot token", async () => {
+	const root = await mkdtemp(join(tmpdir(), "theoses-dashboard-telegram-"));
+	const configPath = join(root, "theoses.env");
+	await writeFile(configPath, "OTHER_SETTING=preserved\n");
+	await chmod(configPath, 0o600);
+	const server = createDashboardServer({ accessToken: "test-owner-token", telegramConfigPath: configPath });
+	const base = await listen(server);
+	try {
+		const unauthenticated = await fetch(`${base}/api/telegram`);
+		assert.equal(unauthenticated.status, 401);
+
+		const status = await fetch(`${base}/api/telegram`, {
+			headers: { Authorization: "Bearer test-owner-token" },
+		});
+		const statusBody = await status.json();
+		assert.deepEqual(statusBody, { configured: false, ownerTelegramId: null });
+		assert.doesNotMatch(JSON.stringify(statusBody), /secret/);
+
+		const saved = await fetch(`${base}/api/telegram`, {
+			method: "POST",
+			headers: { Authorization: "Bearer test-owner-token", "Content-Type": "application/json" },
+			body: JSON.stringify({ botToken: "123:secret", ownerTelegramId: "-100123" }),
+		});
+		assert.deepEqual(await saved.json(), { ok: true, restartRequired: true });
+		const savedConfig = await readFile(configPath, "utf8");
+		assert.match(savedConfig, /OTHER_SETTING=preserved/);
+		assert.match(savedConfig, /THEOSES_TELEGRAM_BOT_TOKEN=123:secret/);
+		assert.equal((await stat(configPath)).mode & 0o777, 0o600);
+
+		const configured = await fetch(`${base}/api/telegram`, {
+			headers: { Authorization: "Bearer test-owner-token" },
+		});
+		assert.deepEqual(await configured.json(), { configured: true, ownerTelegramId: "-100123" });
+
+		const invalid = await fetch(`${base}/api/telegram`, {
+			method: "POST",
+			headers: { Authorization: "Bearer test-owner-token", "Content-Type": "application/json" },
+			body: JSON.stringify({ ownerTelegramId: "@owner" }),
+		});
+		assert.equal(invalid.status, 400);
 	} finally {
 		await close(server);
 	}

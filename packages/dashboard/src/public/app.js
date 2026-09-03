@@ -25,6 +25,18 @@ function showApp() {
   $("app").hidden = false;
 }
 
+async function openTelegramSettings() {
+  try {
+    const data = await request("/api/telegram");
+    $("telegram-owner-id").value = data.ownerTelegramId || "";
+    $("telegram-token").value = "";
+    $("telegram-settings-status").textContent = data.configured ? "Configured. Leave the token blank to keep it." : "Not configured.";
+    $("telegram-settings").showModal();
+  } catch (error) {
+    $("chat-status").textContent = error.message;
+  }
+}
+
 function relativeTime(value) {
   const age = Date.now() - new Date(value).getTime();
   if (age < 60_000) return "now";
@@ -172,6 +184,28 @@ $("login-form").addEventListener("submit", async (event) => {
   }
 });
 
+$("telegram-settings-button").addEventListener("click", () => void openTelegramSettings());
+$("close-telegram-settings").addEventListener("click", () => $("telegram-settings").close());
+$("telegram-settings-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector("button[type=submit]");
+  button.disabled = true;
+  try {
+    const data = await request("/api/telegram", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ botToken: $("telegram-token").value, ownerTelegramId: $("telegram-owner-id").value }),
+    });
+    $("telegram-token").value = "";
+    $("telegram-settings-status").textContent = data.restartRequired ? "Saved. Restart the Telegram service to apply it." : "Saved.";
+  } catch (error) {
+    $("telegram-settings-status").textContent = error.message;
+    $("telegram-settings-status").className = "file-status error";
+  } finally {
+    button.disabled = false;
+  }
+});
+
 function setPreview(enabled) {
   state.preview = enabled;
   $("file-content").hidden = enabled;
@@ -226,6 +260,8 @@ async function start() {
   try {
     await Promise.all([loadSessions(), loadTree()]);
     showApp();
+    const telegram = await request("/api/telegram");
+    if (!telegram.configured) await openTelegramSettings();
   } catch (error) {
     if (error.status === 401 || error.status === 503) showLogin(error.message);
     else { showApp(); $("chat-status").textContent = error.message; }
