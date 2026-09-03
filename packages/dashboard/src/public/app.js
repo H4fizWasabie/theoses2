@@ -5,8 +5,24 @@ const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({"&":
 async function request(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  if (!response.ok) {
+    const error = new Error(data.error || `Request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
+}
+
+function showLogin(message = "") {
+  $("login").hidden = false;
+  $("app").hidden = true;
+  $("login-status").textContent = message;
+  $("login-token").focus();
+}
+
+function showApp() {
+  $("login").hidden = true;
+  $("app").hidden = false;
 }
 
 function relativeTime(value) {
@@ -141,6 +157,21 @@ $("save-file").addEventListener("click", async () => {
   } catch (error) { $("file-status").textContent = error.message; $("file-status").className = "file-status error"; }
 });
 
+$("login-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector("button");
+  button.disabled = true;
+  try {
+    await request("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: $("login-token").value }) });
+    $("login-token").value = "";
+    await start();
+  } catch (error) {
+    showLogin(error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+
 function setPreview(enabled) {
   state.preview = enabled;
   $("file-content").hidden = enabled;
@@ -190,4 +221,15 @@ $("chat-form").addEventListener("submit", async (event) => {
 $("new-session").addEventListener("click", () => void newSession().catch((error) => window.alert(error.message)));
 $("refresh-sessions").addEventListener("click", () => void loadSessions());
 $("refresh-files").addEventListener("click", () => void loadTree());
-void Promise.all([loadSessions(), loadTree()]).catch((error) => { $("chat-status").textContent = error.message; });
+
+async function start() {
+  try {
+    await Promise.all([loadSessions(), loadTree()]);
+    showApp();
+  } catch (error) {
+    if (error.status === 401 || error.status === 503) showLogin(error.message);
+    else { showApp(); $("chat-status").textContent = error.message; }
+  }
+}
+
+void start();

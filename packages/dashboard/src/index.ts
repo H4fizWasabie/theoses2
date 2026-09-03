@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { readFile as readAsset } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
@@ -15,6 +15,7 @@ import { FileConflictError, listDirectory, readTextFile, renamePath, writeTextFi
 
 const DASHBOARD_CHANNEL = "dashboard";
 const TELEGRAM_CHANNEL = "telegram";
+const DASHBOARD_TOKEN_COOKIE = "theoses_dashboard_token";
 const publicDirectory = fileURLToPath(new URL("./public/", import.meta.url));
 
 interface DashboardSession {
@@ -27,6 +28,7 @@ export interface DashboardServerOptions {
 	cwd?: string;
 	host?: string;
 	port?: number;
+	accessToken?: string;
 }
 
 interface SessionView {
@@ -39,6 +41,63 @@ interface SessionView {
 }
 
 const sessions = new Map<string, Promise<DashboardSession>>();
+
+function tokenMatches(candidate: string, expected: string): boolean {
+	const candidateBytes = Buffer.from(candidate);
+	const expectedBytes = Buffer.from(expected);
+	return candidateBytes.length === expectedBytes.length && timingSafeEqual(candidateBytes, expectedBytes);
+}
+
+function cookieValue(header: string | undefined): string | undefined {
+	for (const item of header?.split(";") ?? []) {
+		const [name, ...parts] = item.trim().split("=");
+		if (name !== DASHBOARD_TOKEN_COOKIE) continue;
+		try {
+			return decodeURIComponent(parts.join("="));
+		} catch {
+			return undefined;
+		}
+	}
+	return undefined;
+}
+
+function requestToken(request: IncomingMessage): string | undefined {
+	const authorization = request.headers.authorization;
+	const bearer = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+	return bearer ?? cookieValue(request.headers.cookie);
+}
+
+function requireAccess(request: IncomingMessage, response: ServerResponse, accessToken: string): boolean {
+	if (!accessToken) {
+		json(response, 503, { error: "Dashboard access token is not configured" });
+		return false;
+	}
+	if (tokenMatches(requestToken(request) ?? "", accessToken)) return true;
+	response.setHeader("WWW-Authenticate", 'Bearer realm="Theoses dashboard"');
+	json(response, 401, { error: "Dashboard authentication required" });
+	return false;
+}
+
+async function login(request: IncomingMessage, response: ServerResponse, accessToken: string): Promise<void> {
+	if (request.method !== "POST") {
+		json(response, 405, { error: "POST only" });
+		return;
+	}
+	if (!accessToken) {
+		json(response, 503, { error: "Dashboard access token is not configured" });
+		return;
+	}
+	const supplied = stringField(await body(request), "token");
+	if (!tokenMatches(supplied, accessToken)) {
+		response.setHeader("WWW-Authenticate", 'Bearer realm="Theoses dashboard"');
+		json(response, 401, { error: "Invalid dashboard token" });
+		return;
+	}
+	const secure = request.headers["x-forwarded-proto"] === "https";
+	const flags = `Path=/; HttpOnly; SameSite=Strict${secure ? "; Secure" : ""}`;
+	response.setHeader("Set-Cookie", `${DASHBOARD_TOKEN_COOKIE}=${encodeURIComponent(accessToken)}; ${flags}`);
+	json(response, 200, { ok: true });
+}
 
 function json(response: ServerResponse, status: number, value: unknown): void {
 	response.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
@@ -246,10 +305,16 @@ async function asset(response: ServerResponse, pathname: string): Promise<void> 
 
 export function createDashboardServer(options: DashboardServerOptions = {}) {
 	const cwd = options.cwd ?? process.cwd();
+	const accessToken = options.accessToken ?? process.env.THEOSES_DASHBOARD_TOKEN ?? "";
 	return createServer(async (request, response) => {
 		try {
 			const url = new URL(request.url ?? "/", "http://localhost");
 			if (url.pathname.startsWith("/api/")) {
+				if (url.pathname === "/api/login") {
+					await login(request, response, accessToken);
+					return;
+				}
+				if (!requireAccess(request, response, accessToken)) return;
 				if (await api(request, response, url, cwd)) return;
 				json(response, 404, { error: "Not found" });
 				return;

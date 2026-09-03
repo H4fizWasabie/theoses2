@@ -7,7 +7,17 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="app">
+  <div id="login" class="login">
+    <form id="login-form" class="login-card">
+      <h1>Theoses</h1>
+      <p>Enter the dashboard owner token to continue.</p>
+      <label for="login-token">Owner token</label>
+      <input id="login-token" name="token" type="password" autocomplete="current-password" required>
+      <button class="button" type="submit">Sign in</button>
+      <div id="login-status" class="file-status" aria-live="polite"></div>
+    </form>
+  </div>
+  <div class="app" hidden>
     <header class="topbar">
       <div class="brand">Theoses</div>
       <button id="new-session" class="button">+ New</button>

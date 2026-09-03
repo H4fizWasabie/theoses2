@@ -27,3 +27,15 @@ _Avoid_: session note entry, note record
 **Abort Notice**:
 A rendering rule, not stored state: when the most recent operation's outcome is `aborted` (Pi's existing `OperationFinishedRecord`), the next turn's prompt is prefixed with an explicit notice that the prior task was cancelled and should not be resumed. No new persistence — reuses Pi's existing abort/outcome records.
 _Avoid_: stop marker, boundary marker
+
+**Owner**:
+The single human who controls a Theoses2 runtime across its channels. Theoses2 has one owner, not a user directory or role hierarchy.
+_Avoid_: account, tenant, operator
+
+**Channel Access**:
+The boundary that proves a request comes from the owner through a particular channel. Telegram uses the configured owner chat ID; the dashboard uses an owner credential.
+_Avoid_: network trust, session identity
+
+**Delegated Coding Agent**:
+A coding agent operating on the owner's behalf, normally against an isolated development or test runtime rather than as a separate Theoses2 owner.
+_Avoid_: dashboard user, Theoses2 account
