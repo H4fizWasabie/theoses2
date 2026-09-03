@@ -9,7 +9,11 @@ import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { stripBom } from "../utils/text.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
-import type { HttpSidecarToolSourceOptions, McpHttpToolSourceOptions } from "./tool-sources.ts";
+import type {
+	HttpSidecarToolSourceOptions,
+	McpHttpToolSourceOptions,
+	McpStdioToolSourceOptions,
+} from "./tool-sources.ts";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -70,7 +74,8 @@ export interface WarningSettings {
 
 export type ToolSourceSettings =
 	| ({ kind: "sidecar" } & HttpSidecarToolSourceOptions)
-	| ({ kind: "mcp" } & McpHttpToolSourceOptions);
+	| ({ kind: "mcp" } & McpHttpToolSourceOptions)
+	| ({ kind: "mcp-stdio" } & McpStdioToolSourceOptions);
 
 export type DefaultProjectTrust = "ask" | "always" | "never";
 
@@ -1302,6 +1307,29 @@ export class SettingsManager {
 
 	getToolSources(): ToolSourceSettings[] {
 		return structuredClone(this.settings.toolSources ?? []);
+	}
+
+	setToolSources(sources: ToolSourceSettings[]): void {
+		this.globalSettings.toolSources = sources;
+		this.markModified("toolSources");
+		this.save();
+	}
+
+	addToolSource(source: ToolSourceSettings): void {
+		const existing = this.getToolSources();
+		if (existing.some((entry) => entry.name === source.name)) {
+			throw new Error(`Tool source "${source.name}" already exists`);
+		}
+		this.setToolSources([...existing, source]);
+	}
+
+	removeToolSource(name: string): void {
+		const existing = this.getToolSources();
+		const filtered = existing.filter((entry) => entry.name !== name);
+		if (filtered.length === existing.length) {
+			throw new Error(`Tool source "${name}" not found`);
+		}
+		this.setToolSources(filtered);
 	}
 
 	setWarnings(warnings: WarningSettings): void {

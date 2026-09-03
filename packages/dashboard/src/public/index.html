@@ -17,7 +17,7 @@
       <div id="login-status" class="file-status" aria-live="polite"></div>
     </form>
   </div>
-  <div class="app" hidden>
+  <div id="app" class="app" hidden>
     <header class="topbar">
       <div class="brand">Theoses</div>
       <button id="new-session" class="button">+ New</button>
@@ -35,6 +35,10 @@
         </section>
         <section class="explorer-pane">
           <div class="section-title"><span>Files</span><button id="refresh-files" class="icon-button" title="Refresh">↻</button></div>
+          <form id="path-form" class="path-bar">
+            <button id="path-up" type="button" class="icon-button" title="Up one directory">↑</button>
+            <input id="path-input" type="text" autocomplete="off" spellcheck="false">
+          </form>
           <div id="tree" class="tree"></div>
         </section>
       </aside>
@@ -45,6 +49,7 @@
         <div id="reply-bar" class="reply-bar" hidden></div>
         <form id="chat-form" class="composer">
           <textarea id="message" rows="2" placeholder="Message Theoses…" disabled></textarea>
+          <button id="stop-chat" class="stop" type="button" hidden>Stop</button>
           <button class="send" type="submit" disabled>Send</button>
         </form>
       </section>

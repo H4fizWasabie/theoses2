@@ -1,7 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { readFile as readAsset } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentMessage } from "theoses-agent-core";
 import {
@@ -135,11 +135,66 @@ function messageText(message: AgentMessage): string {
 	return message.content.map((part) => (part.type === "text" ? part.text : "[image]")).join("");
 }
 
-function sessionHistory(manager: SessionManager): Array<{ role: "user" | "assistant"; content: string }> {
-	return manager.getEntries().flatMap((entry) => {
-		if (entry.type !== "message" || (entry.message.role !== "user" && entry.message.role !== "assistant")) return [];
-		return [{ role: entry.message.role, content: messageText(entry.message) }];
-	});
+type HistorySegment =
+	| { type: "text"; text: string }
+	| { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
+	| { type: "tool_result"; id: string; name: string; result: string; isError: boolean };
+
+interface UsageSummary {
+	input: number;
+	output: number;
+	totalTokens: number;
+	cost: number;
+}
+
+interface HistoryTurn {
+	role: "user" | "assistant";
+	segments: HistorySegment[];
+	usage?: UsageSummary;
+}
+
+function usageSummary(usage: {
+	input: number;
+	output: number;
+	totalTokens: number;
+	cost: { total: number };
+}): UsageSummary {
+	return { input: usage.input, output: usage.output, totalTokens: usage.totalTokens, cost: usage.cost.total };
+}
+
+function sessionHistory(manager: SessionManager): HistoryTurn[] {
+	const turns: HistoryTurn[] = [];
+	for (const entry of manager.getEntries()) {
+		if (entry.type !== "message") continue;
+		const message = entry.message;
+		if (message.role === "user") {
+			turns.push({ role: "user", segments: [{ type: "text", text: messageText(message) }] });
+			continue;
+		}
+		if (message.role === "assistant") {
+			const segments: HistorySegment[] = [];
+			for (const part of message.content) {
+				if (part.type === "text") segments.push({ type: "text", text: part.text });
+				else if (part.type === "toolCall")
+					segments.push({ type: "tool_call", id: part.id, name: part.name, args: part.arguments });
+			}
+			turns.push({ role: "assistant", segments, usage: usageSummary(message.usage) });
+			continue;
+		}
+		if (message.role === "toolResult") {
+			const segment: HistorySegment = {
+				type: "tool_result",
+				id: message.toolCallId,
+				name: message.toolName,
+				result: message.content.map((part) => (part.type === "text" ? part.text : "[image]")).join(""),
+				isError: message.isError,
+			};
+			const last = turns.at(-1);
+			if (last?.role === "assistant") last.segments.push(segment);
+			else turns.push({ role: "assistant", segments: [segment] });
+		}
+	}
+	return turns;
 }
 
 function sessionView(info: SessionInfo): SessionView {
@@ -165,8 +220,29 @@ async function findVisibleSession(id: string): Promise<SessionInfo> {
 	const info = (await SessionManager.listAll()).find(
 		(session) => session.id === id && (session.channel === DASHBOARD_CHANNEL || session.channel === TELEGRAM_CHANNEL),
 	);
-	if (!info) throw new Error("Session not found");
-	return info;
+	if (info) return info;
+
+	// Not on disk yet: SessionManager only flushes a session file once it has an
+	// assistant message, so a brand-new session lives only in the in-memory map.
+	for (const [path, pending] of sessions) {
+		const record = await pending;
+		if (record.manager.getSessionId() !== id) continue;
+		const key = record.manager.getChannelSessionKey();
+		if (key.channel !== DASHBOARD_CHANNEL) continue;
+		return {
+			path,
+			id,
+			cwd: record.manager.getCwd(),
+			channel: key.channel,
+			channelSessionId: key.channelSessionId,
+			created: new Date(),
+			modified: new Date(),
+			messageCount: 0,
+			firstMessage: "",
+			allMessagesText: "",
+		};
+	}
+	throw new Error("Session not found");
 }
 
 async function dashboardSession(path: string): Promise<DashboardSession> {
@@ -197,25 +273,62 @@ async function newDashboardSession(cwd: string): Promise<SessionView> {
 	const path = manager.getSessionFile();
 	if (!path) throw new Error("Dashboard session was not persisted");
 	sessions.set(path, Promise.resolve({ manager, session, queue: Promise.resolve() }));
-	const info = (await SessionManager.listAll()).find((item) => item.path === path);
-	if (!info) throw new Error("Dashboard session was not discoverable");
-	return sessionView(info);
+	return {
+		id,
+		channel: DASHBOARD_CHANNEL,
+		title: id,
+		modified: new Date().toISOString(),
+		messageCount: 0,
+		path,
+	};
 }
 
-async function chat(
-	info: SessionInfo,
-	request: IncomingMessage,
-): Promise<{ reply: string; history: Array<{ role: "user" | "assistant"; content: string }> }> {
+function sseSend(response: ServerResponse, event: string, data: unknown): void {
+	response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+function toolResultText(result: unknown): string {
+	if (typeof result === "string") return result;
+	if (result && typeof result === "object" && Array.isArray((result as { content?: unknown }).content)) {
+		return (result as { content: Array<{ type: string; text?: string }> }).content
+			.map((part) => (part.type === "text" ? (part.text ?? "") : "[image]"))
+			.join("");
+	}
+	return JSON.stringify(result);
+}
+
+async function streamChat(info: SessionInfo, request: IncomingMessage, response: ServerResponse): Promise<void> {
 	if (info.channel !== DASHBOARD_CHANNEL) throw new Error("Telegram sessions are read-only");
 	const record = await dashboardSession(info.path);
 	const input = await body(request);
 	const message = stringField(input, "message").trim();
 	if (!message) throw new Error("message is required");
 	const replyContext = optionalStringField(input, "replyContext");
-	let reply = "";
+
+	response.writeHead(200, {
+		"Content-Type": "text/event-stream; charset=utf-8",
+		"Cache-Control": "no-cache, no-store",
+		Connection: "keep-alive",
+		"X-Accel-Buffering": "no",
+	});
+
 	const work = record.queue.then(async () => {
 		const unsubscribe = record.session.subscribe((event: AgentSessionEvent) => {
-			if (event.type === "message_end" && event.message.role === "assistant") reply = messageText(event.message);
+			if (event.type === "message_update" && event.message.role === "assistant") {
+				const delta = event.assistantMessageEvent;
+				if (delta.type === "text_delta") sseSend(response, "delta", { text: delta.delta });
+			} else if (event.type === "tool_execution_start") {
+				sseSend(response, "tool_call", { id: event.toolCallId, name: event.toolName, args: event.args });
+			} else if (event.type === "tool_execution_end") {
+				sseSend(response, "tool_result", {
+					id: event.toolCallId,
+					name: event.toolName,
+					result: toolResultText(event.result),
+					isError: event.isError,
+				});
+			} else if (event.type === "message_end" && event.message.role === "assistant") {
+				sseSend(response, "usage", usageSummary(event.message.usage));
+			}
 		});
 		try {
 			await record.session.prompt(message, { replyContext, source: "interactive" });
@@ -224,8 +337,20 @@ async function chat(
 		}
 	});
 	setQueue(record, work);
-	await work;
-	return { reply, history: sessionHistory(record.manager) };
+	try {
+		await work;
+		sseSend(response, "done", { history: sessionHistory(record.manager) });
+	} catch (error) {
+		sseSend(response, "error", { message: error instanceof Error ? error.message : String(error) });
+	} finally {
+		response.end();
+	}
+}
+
+async function stopChat(info: SessionInfo): Promise<void> {
+	if (info.channel !== DASHBOARD_CHANNEL) throw new Error("Telegram sessions are read-only");
+	const record = await dashboardSession(info.path);
+	await record.session.abort();
 }
 
 function errorStatus(error: unknown): number {
@@ -269,12 +394,17 @@ async function api(
 		return true;
 	}
 
-	const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)(?:\/messages)?$/);
+	const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)(?:\/(messages|stop))?$/);
 	if (sessionMatch) {
 		const id = decodeURIComponent(sessionMatch[1]);
 		const info = await findVisibleSession(id);
-		if (url.pathname.endsWith("/messages") && request.method === "POST") {
-			json(response, 200, await chat(info, request));
+		if (sessionMatch[2] === "messages" && request.method === "POST") {
+			await streamChat(info, request, response);
+			return true;
+		}
+		if (sessionMatch[2] === "stop" && request.method === "POST") {
+			await stopChat(info);
+			json(response, 200, { ok: true });
 			return true;
 		}
 		if (request.method === "GET") {
@@ -285,10 +415,8 @@ async function api(
 	}
 
 	if (url.pathname === "/api/files" && request.method === "GET") {
-		json(response, 200, {
-			path: url.searchParams.get("path") ?? "/",
-			entries: await listDirectory(url.searchParams.get("path") ?? "/"),
-		});
+		const requestedPath = url.searchParams.get("path") ?? "/";
+		json(response, 200, { path: resolve(requestedPath), entries: await listDirectory(requestedPath) });
 		return true;
 	}
 	if (url.pathname === "/api/file" && request.method === "GET") {

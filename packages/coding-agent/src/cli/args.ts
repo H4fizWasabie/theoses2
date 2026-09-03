@@ -267,6 +267,7 @@ ${chalk.bold("Usage:")}
 ${chalk.bold("Commands:")}
   ${APP_NAME} update                    Refresh model catalogs
   ${APP_NAME} auth <command>            Print credentials or check provider readiness
+  ${APP_NAME} mcp <command>             Register, list, or remove MCP tool servers
   ${APP_NAME} <command> --help          Show command help
 
 ${chalk.bold("Options:")}

@@ -1,3 +1,4 @@
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import type { AgentToolResult, AgentToolUpdateCallback } from "theoses-agent-core";
 import type { TSchema } from "typebox";
 import { VERSION } from "../config.ts";
@@ -204,6 +205,131 @@ export class McpHttpToolSource implements ToolSource {
 			signal,
 		);
 		await this.notify("notifications/initialized", {}, signal);
+		const result = await this.request("tools/list", {}, signal);
+		const catalog = parseToolList(result, `MCP ${this.name}`);
+		const sourceInfo = createSyntheticSourceInfo(`<mcp:${this.name}>`, { source: `mcp:${this.name}` });
+		return catalog.map((tool) =>
+			createExternalTool(tool, sourceInfo, async (toolName, args, executeSignal) => {
+				const call = await this.request("tools/call", { name: toolName, arguments: args }, executeSignal);
+				if (typeof call !== "object" || call === null) return responseText(call);
+				const content = (call as { content?: unknown }).content;
+				return `[UNTRUSTED EXTERNAL CONTENT]\n${responseText(content ?? call)}`;
+			}),
+		);
+	}
+}
+
+export interface McpStdioToolSourceOptions {
+	name: string;
+	command: string;
+	args?: string[];
+	env?: Record<string, string>;
+	cwd?: string;
+}
+
+interface PendingStdioRequest {
+	resolve: (value: unknown) => void;
+	reject: (error: Error) => void;
+}
+
+/** Spawns a local MCP server and speaks newline-delimited JSON-RPC over its stdin/stdout. */
+export class McpStdioToolSource implements ToolSource {
+	readonly name: string;
+	private readonly command: string;
+	private readonly args: string[];
+	private readonly env?: Record<string, string>;
+	private readonly cwd?: string;
+	private requestId = 0;
+	private child?: ChildProcessWithoutNullStreams;
+	private buffer = "";
+	private readonly pending = new Map<number, PendingStdioRequest>();
+
+	constructor(options: McpStdioToolSourceOptions) {
+		this.name = options.name;
+		this.command = options.command;
+		this.args = options.args ?? [];
+		this.env = options.env;
+		this.cwd = options.cwd;
+	}
+
+	private ensureStarted(signal?: AbortSignal): ChildProcessWithoutNullStreams {
+		if (this.child) return this.child;
+		const child = spawn(this.command, this.args, {
+			cwd: this.cwd,
+			env: this.env ? { ...process.env, ...this.env } : process.env,
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+		child.stdout.setEncoding("utf8");
+		child.stdout.on("data", (chunk: string) => this.handleStdout(chunk));
+		const failAll = (error: Error) => {
+			for (const request of this.pending.values()) request.reject(error);
+			this.pending.clear();
+		};
+		child.on("exit", (code, signalName) => {
+			failAll(
+				new Error(`MCP ${this.name} process exited (code ${code ?? "unknown"}, signal ${signalName ?? "none"})`),
+			);
+			this.child = undefined;
+		});
+		child.on("error", (error) => failAll(error));
+		signal?.addEventListener("abort", () => child.kill());
+		this.child = child;
+		return child;
+	}
+
+	private handleStdout(chunk: string): void {
+		this.buffer += chunk;
+		let newlineIndex: number;
+		// biome-ignore lint/suspicious/noAssignInExpressions: standard line-buffering pattern
+		while ((newlineIndex = this.buffer.indexOf("\n")) !== -1) {
+			const line = this.buffer.slice(0, newlineIndex).trim();
+			this.buffer = this.buffer.slice(newlineIndex + 1);
+			if (!line) continue;
+			let message: { id?: unknown; result?: unknown; error?: { message?: string } };
+			try {
+				message = JSON.parse(line);
+			} catch {
+				continue; // servers may write non-protocol diagnostics to stdout; ignore
+			}
+			if (typeof message.id !== "number") continue; // notification, not a response we're waiting on
+			const request = this.pending.get(message.id);
+			if (!request) continue;
+			this.pending.delete(message.id);
+			if (message.error) request.reject(new Error(`MCP ${this.name}: ${message.error.message ?? "request failed"}`));
+			else request.resolve(message.result);
+		}
+	}
+
+	private async request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
+		const child = this.ensureStarted(signal);
+		const id = ++this.requestId;
+		const payload = `${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`;
+		return new Promise((resolve, reject) => {
+			this.pending.set(id, { resolve, reject });
+			child.stdin.write(payload, (error) => {
+				if (!error) return;
+				this.pending.delete(id);
+				reject(error);
+			});
+		});
+	}
+
+	private notify(method: string, params: unknown): void {
+		const child = this.ensureStarted();
+		child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
+	}
+
+	async load(signal?: AbortSignal): Promise<RegisteredTool[]> {
+		await this.request(
+			"initialize",
+			{
+				protocolVersion: "2025-06-18",
+				capabilities: {},
+				clientInfo: { name: "theoses-coding-agent", version: VERSION },
+			},
+			signal,
+		);
+		this.notify("notifications/initialized", {});
 		const result = await this.request("tools/list", {}, signal);
 		const catalog = parseToolList(result, `MCP ${this.name}`);
 		const sourceInfo = createSyntheticSourceInfo(`<mcp:${this.name}>`, { source: `mcp:${this.name}` });

@@ -1,6 +1,12 @@
-const state = { sessions: [], active: null, history: [], reply: null, tabs: [], activeTab: null, busy: false, preview: false };
+const state = { sessions: [], active: null, history: [], reply: null, tabs: [], activeTab: null, pending: 0, preview: false, filesRoot: "/" };
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
+
+if (!$('login') || !$('app')) {
+  const fresh = new URL(window.location.href);
+  fresh.searchParams.set('fresh', Date.now().toString());
+  window.location.replace(fresh.href);
+} else {
 
 async function request(url, options) {
   const response = await fetch(url, options);
@@ -55,19 +61,64 @@ function renderSessions() {
   target.querySelectorAll("[data-session]").forEach((button) => button.addEventListener("click", () => openSession(button.dataset.session)));
 }
 
+function flatText(turn) {
+  return turn.segments.filter((segment) => segment.type === "text").map((segment) => segment.text).join("");
+}
+
+function mergeSegments(segments) {
+  const byId = new Map();
+  const merged = [];
+  for (const segment of segments) {
+    if (segment.type === "text") { merged.push({ kind: "text", text: segment.text }); continue; }
+    if (segment.type === "tool_call") {
+      const entry = { call: segment, result: null };
+      byId.set(segment.id, entry);
+      merged.push({ kind: "tool", entry });
+      continue;
+    }
+    const existing = byId.get(segment.id);
+    if (existing) existing.result = segment;
+    else merged.push({ kind: "tool", entry: { call: null, result: segment } });
+  }
+  return merged;
+}
+
+function renderToolBlock(entry) {
+  const name = entry.call?.name || entry.result?.name || "tool";
+  const status = entry.result ? (entry.result.isError ? "error" : "done") : "running";
+  const args = entry.call ? JSON.stringify(entry.call.args, null, 2) : "";
+  return `<details class="tool-call ${status}">
+    <summary><span class="tool-icon">${status === "running" ? "◌" : status === "error" ? "✕" : "✓"}</span> ${escapeHtml(name)}</summary>
+    ${args ? `<pre class="tool-args">${escapeHtml(args)}</pre>` : ""}
+    ${entry.result ? `<pre class="tool-result${entry.result.isError ? " error" : ""}">${escapeHtml(entry.result.result)}</pre>` : '<div class="tool-pending">running…</div>'}
+  </details>`;
+}
+
+function usageBadge(usage) {
+  if (!usage) return "";
+  const cost = usage.cost ? ` · $${usage.cost.toFixed(4)}` : "";
+  return `<span class="usage-badge" title="${usage.input} in / ${usage.output} out">${usage.totalTokens.toLocaleString()} tok${cost}</span>`;
+}
+
+function renderTurnBody(turn) {
+  if (turn.queued && !turn.segments.length) return '<div class="queued-note">queued…</div>';
+  if (turn.pending && !turn.segments.length) return '<div class="thinking"><span></span><span></span><span></span></div>';
+  return mergeSegments(turn.segments).map((item) => item.kind === "tool" ? renderToolBlock(item.entry) : `<div class="message-text">${escapeHtml(item.text)}</div>`).join("");
+}
+
 function renderHistory() {
   const target = $("messages");
   if (!state.history.length) { target.innerHTML = '<div class="empty">No messages yet.</div>'; return; }
-  target.innerHTML = state.history.map((message, index) => `<article class="message"><div class="message-label">${message.role === "user" ? "You" : "Theoses"}</div><div class="message-body">${escapeHtml(message.content)}</div><div class="message-tools"><button class="reply" data-reply="${index}">Reply</button></div></article>`).join("");
+  target.innerHTML = state.history.map((turn, index) => `<article class="message"><div class="message-label">${turn.role === "user" ? "You" : "Theoses"}${usageBadge(turn.usage)}</div><div class="message-body">${renderTurnBody(turn)}</div><div class="message-tools"><button class="reply" data-reply="${index}">Reply</button></div></article>`).join("");
   target.querySelectorAll("[data-reply]").forEach((button) => button.addEventListener("click", () => setReply(state.history[Number(button.dataset.reply)])));
   target.scrollTop = target.scrollHeight;
 }
 
-function setReply(message) {
-  state.reply = message;
+function setReply(turn) {
+  state.reply = turn;
   const bar = $("reply-bar");
-  bar.hidden = !message;
-  bar.innerHTML = message ? `Replying to ${escapeHtml(message.role)}: ${escapeHtml(message.content.slice(0, 140))} <button class="reply" id="cancel-reply">Cancel</button>` : "";
+  bar.hidden = !turn;
+  bar.innerHTML = turn ? `Replying to ${escapeHtml(turn.role)}: ${escapeHtml(flatText(turn).slice(0, 140))} <button class="reply" id="cancel-reply">Cancel</button>` : "";
   $("cancel-reply")?.addEventListener("click", () => setReply(null));
 }
 
@@ -75,9 +126,10 @@ function renderActive() {
   const telegram = state.active?.channel === "telegram";
   $("session-title").textContent = state.active?.title || "No dashboard session";
   $("session-channel").textContent = state.active ? ` · ${state.active.channel}` : "";
-  $("message").disabled = !state.active || telegram || state.busy;
+  $("message").disabled = !state.active || telegram;
   $("message").placeholder = telegram ? "Telegram sessions are read-only" : "Message Theoses…";
-  $("chat-form").querySelector("button").disabled = !state.active || telegram || state.busy;
+  $("chat-form").querySelector(".send").disabled = !state.active || telegram;
+  $("stop-chat").hidden = !state.active || telegram || !state.pending;
 }
 
 async function loadSessions() {
@@ -129,23 +181,31 @@ function closeTab(path) {
   if (state.activeTab) void activateTab(state.activeTab); else { $("editor").hidden = true; $("file-empty").hidden = false; $("preview-file").disabled = true; }
 }
 
-function renderDirectory(path, entries, target) {
-  target.innerHTML = entries.map((entry) => `<div class="tree-item"><div class="tree-row"><button class="tree-toggle" data-expand="${escapeHtml(entry.path)}">${entry.kind === "directory" ? "▸" : "·"}</button><button class="tree-name" data-open="${escapeHtml(entry.path)}">${escapeHtml(entry.name)}</button><button class="tree-rename" data-rename="${escapeHtml(entry.path)}" title="Rename">rename</button></div><div class="tree-children" data-children="${escapeHtml(entry.path)}"></div></div>`).join("");
-  target.querySelectorAll("[data-expand]").forEach((button) => button.addEventListener("click", () => toggleDirectory(button.dataset.expand, button)));
-  target.querySelectorAll("[data-open]").forEach((button) => button.addEventListener("click", () => { const entry = entries.find((item) => item.path === button.dataset.open); if (entry?.kind === "directory") toggleDirectory(entry.path, button.previousElementSibling); else openFile(entry.path); }));
+function parentPath(path) {
+  const trimmed = path.replace(/\/+$/, "");
+  if (!trimmed) return "/";
+  const index = trimmed.lastIndexOf("/");
+  return index <= 0 ? "/" : trimmed.slice(0, index);
+}
+
+function renderDirectory(entries, target) {
+  target.innerHTML = entries.map((entry) => `<div class="tree-row"><span class="tree-kind">${entry.kind === "directory" ? "▸" : "·"}</span><button class="tree-name" data-open="${escapeHtml(entry.path)}">${escapeHtml(entry.name)}</button><button class="tree-rename" data-rename="${escapeHtml(entry.path)}" title="Rename">rename</button></div>`).join("");
+  target.querySelectorAll("[data-open]").forEach((button) => button.addEventListener("click", () => {
+    const entry = entries.find((item) => item.path === button.dataset.open);
+    if (entry?.kind === "directory") void loadTree(entry.path); else openFile(entry.path);
+  }));
   target.querySelectorAll("[data-rename]").forEach((button) => button.addEventListener("click", () => renameEntry(button.dataset.rename)));
 }
 
-async function toggleDirectory(path, button) {
-  const child = button.parentElement.nextElementSibling;
-  if (child.childElementCount) { child.replaceChildren(); button.textContent = "▸"; return; }
-  try { const data = await request(`/api/files?path=${encodeURIComponent(path)}`); renderDirectory(path, data.entries, child); button.textContent = "▾"; }
-  catch (error) { child.innerHTML = `<div class="file-status error">${escapeHtml(error.message)}</div>`; }
-}
-
-async function loadTree() {
-  const data = await request("/api/files?path=%2F");
-  renderDirectory("/", data.entries, $("tree"));
+async function loadTree(path = state.filesRoot) {
+  try {
+    const data = await request(`/api/files?path=${encodeURIComponent(path)}`);
+    state.filesRoot = data.path;
+    $("path-input").value = data.path;
+    renderDirectory(data.entries, $("tree"));
+  } catch (error) {
+    $("tree").innerHTML = `<div class="file-status error">${escapeHtml(error.message)}</div>`;
+  }
 }
 
 async function renameEntry(path) {
@@ -240,21 +300,98 @@ document.querySelectorAll("[data-resize]").forEach((handle) => handle.addEventLi
   handle.addEventListener("pointermove", move); handle.addEventListener("pointerup", stop);
 }));
 
-$("chat-form").addEventListener("submit", async (event) => {
+async function streamSSE(response, onEvent) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary;
+    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      let eventName = "message"; let data = "";
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        else if (line.startsWith("data:")) data += line.slice(5).trim();
+      }
+      if (data) onEvent(eventName, JSON.parse(data));
+    }
+  }
+}
+
+$("chat-form").addEventListener("submit", (event) => {
   event.preventDefault();
   if (!state.active || state.active.channel === "telegram") return;
   const input = $("message"); const message = input.value.trim(); if (!message) return;
-  state.busy = true; renderActive(); input.value = "";
-  try {
-    const data = await request(`/api/sessions/${encodeURIComponent(state.active.id)}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, replyContext: state.reply?.content }) });
-    state.history = data.history; setReply(null); renderHistory(); await loadSessions();
-  } catch (error) { $("chat-status").textContent = error.message; }
-  finally { state.busy = false; renderActive(); }
+  const replyContext = state.reply ? flatText(state.reply) : undefined;
+  const sessionId = state.active.id;
+  input.value = ""; setReply(null); $("chat-status").textContent = "";
+
+  // Position of this turn's pair in state.history at submit time. Because pushes below happen
+  // synchronously, this index is stable and lets the eventual "done" patch only the slice of
+  // history this request is responsible for, without clobbering later queued turns still in flight.
+  const settledCount = state.history.length + 2;
+  state.history.push({ role: "user", segments: [{ type: "text", text: message }] });
+  const liveTurn = { role: "assistant", segments: [], pending: true, queued: true };
+  state.history.push(liveTurn);
+  state.pending = (state.pending || 0) + 1;
+  renderActive();
+  renderHistory();
+
+  void (async () => {
+    try {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, replyContext }),
+      });
+      if (!response.ok || !response.body) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || `Request failed (${response.status})`);
+      }
+      await streamSSE(response, (eventName, data) => {
+        if (state.active?.id !== sessionId) return;
+        if (eventName === "delta") {
+          liveTurn.pending = false; liveTurn.queued = false;
+          const last = liveTurn.segments.at(-1);
+          if (last?.type === "text") last.text += data.text; else liveTurn.segments.push({ type: "text", text: data.text });
+        } else if (eventName === "tool_call") {
+          liveTurn.pending = false; liveTurn.queued = false;
+          liveTurn.segments.push({ type: "tool_call", id: data.id, name: data.name, args: data.args });
+        } else if (eventName === "tool_result") {
+          liveTurn.segments.push({ type: "tool_result", id: data.id, name: data.name, result: data.result, isError: data.isError });
+        } else if (eventName === "usage") {
+          liveTurn.usage = data;
+        } else if (eventName === "done") {
+          if (data.history.length >= settledCount) state.history = data.history.slice(0, settledCount).concat(state.history.slice(settledCount));
+        } else if (eventName === "error") {
+          $("chat-status").textContent = data.message;
+        }
+        renderHistory();
+      });
+      await loadSessions();
+    } catch (error) { $("chat-status").textContent = error.message; renderHistory(); }
+    finally { state.pending -= 1; renderActive(); }
+  })();
+});
+
+$("stop-chat").addEventListener("click", async () => {
+  if (!state.active) return;
+  try { await request(`/api/sessions/${encodeURIComponent(state.active.id)}/stop`, { method: "POST" }); }
+  catch (error) { $("chat-status").textContent = error.message; }
 });
 
 $("new-session").addEventListener("click", () => void newSession().catch((error) => window.alert(error.message)));
 $("refresh-sessions").addEventListener("click", () => void loadSessions());
 $("refresh-files").addEventListener("click", () => void loadTree());
+$("path-up").addEventListener("click", () => void loadTree(parentPath(state.filesRoot)));
+$("path-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void loadTree($("path-input").value.trim() || "/");
+});
 
 async function start() {
   try {
@@ -269,3 +406,4 @@ async function start() {
 }
 
 void start();
+}
