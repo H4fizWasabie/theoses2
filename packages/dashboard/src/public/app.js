@@ -1,4 +1,4 @@
-const state = { sessions: [], active: null, history: [], reply: null, tabs: [], activeTab: null, busy: false, preview: false };
+const state = { sessions: [], active: null, history: [], reply: null, tabs: [], activeTab: null, busy: false, preview: false, filesRoot: "/" };
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
 
@@ -135,23 +135,31 @@ function closeTab(path) {
   if (state.activeTab) void activateTab(state.activeTab); else { $("editor").hidden = true; $("file-empty").hidden = false; $("preview-file").disabled = true; }
 }
 
-function renderDirectory(path, entries, target) {
-  target.innerHTML = entries.map((entry) => `<div class="tree-item"><div class="tree-row"><button class="tree-toggle" data-expand="${escapeHtml(entry.path)}">${entry.kind === "directory" ? "▸" : "·"}</button><button class="tree-name" data-open="${escapeHtml(entry.path)}">${escapeHtml(entry.name)}</button><button class="tree-rename" data-rename="${escapeHtml(entry.path)}" title="Rename">rename</button></div><div class="tree-children" data-children="${escapeHtml(entry.path)}"></div></div>`).join("");
-  target.querySelectorAll("[data-expand]").forEach((button) => button.addEventListener("click", () => toggleDirectory(button.dataset.expand, button)));
-  target.querySelectorAll("[data-open]").forEach((button) => button.addEventListener("click", () => { const entry = entries.find((item) => item.path === button.dataset.open); if (entry?.kind === "directory") toggleDirectory(entry.path, button.previousElementSibling); else openFile(entry.path); }));
+function parentPath(path) {
+  const trimmed = path.replace(/\/+$/, "");
+  if (!trimmed) return "/";
+  const index = trimmed.lastIndexOf("/");
+  return index <= 0 ? "/" : trimmed.slice(0, index);
+}
+
+function renderDirectory(entries, target) {
+  target.innerHTML = entries.map((entry) => `<div class="tree-row"><span class="tree-kind">${entry.kind === "directory" ? "▸" : "·"}</span><button class="tree-name" data-open="${escapeHtml(entry.path)}">${escapeHtml(entry.name)}</button><button class="tree-rename" data-rename="${escapeHtml(entry.path)}" title="Rename">rename</button></div>`).join("");
+  target.querySelectorAll("[data-open]").forEach((button) => button.addEventListener("click", () => {
+    const entry = entries.find((item) => item.path === button.dataset.open);
+    if (entry?.kind === "directory") void loadTree(entry.path); else openFile(entry.path);
+  }));
   target.querySelectorAll("[data-rename]").forEach((button) => button.addEventListener("click", () => renameEntry(button.dataset.rename)));
 }
 
-async function toggleDirectory(path, button) {
-  const child = button.parentElement.nextElementSibling;
-  if (child.childElementCount) { child.replaceChildren(); button.textContent = "▸"; return; }
-  try { const data = await request(`/api/files?path=${encodeURIComponent(path)}`); renderDirectory(path, data.entries, child); button.textContent = "▾"; }
-  catch (error) { child.innerHTML = `<div class="file-status error">${escapeHtml(error.message)}</div>`; }
-}
-
-async function loadTree() {
-  const data = await request("/api/files?path=%2F");
-  renderDirectory("/", data.entries, $("tree"));
+async function loadTree(path = state.filesRoot) {
+  try {
+    const data = await request(`/api/files?path=${encodeURIComponent(path)}`);
+    state.filesRoot = data.path;
+    $("path-input").value = data.path;
+    renderDirectory(data.entries, $("tree"));
+  } catch (error) {
+    $("tree").innerHTML = `<div class="file-status error">${escapeHtml(error.message)}</div>`;
+  }
 }
 
 async function renameEntry(path) {
@@ -261,6 +269,11 @@ $("chat-form").addEventListener("submit", async (event) => {
 $("new-session").addEventListener("click", () => void newSession().catch((error) => window.alert(error.message)));
 $("refresh-sessions").addEventListener("click", () => void loadSessions());
 $("refresh-files").addEventListener("click", () => void loadTree());
+$("path-up").addEventListener("click", () => void loadTree(parentPath(state.filesRoot)));
+$("path-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void loadTree($("path-input").value.trim() || "/");
+});
 
 async function start() {
   try {

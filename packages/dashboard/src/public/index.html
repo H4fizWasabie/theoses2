@@ -35,6 +35,10 @@
         </section>
         <section class="explorer-pane">
           <div class="section-title"><span>Files</span><button id="refresh-files" class="icon-button" title="Refresh">↻</button></div>
+          <form id="path-form" class="path-bar">
+            <button id="path-up" type="button" class="icon-button" title="Up one directory">↑</button>
+            <input id="path-input" type="text" autocomplete="off" spellcheck="false">
+          </form>
           <div id="tree" class="tree"></div>
         </section>
       </aside>

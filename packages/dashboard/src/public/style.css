@@ -53,7 +53,11 @@ button { color: inherit; }
 .section-title, .pane-head, .editor-head { height: 40px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .icon-button { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 4px 6px; font-size: 16px; }
 .icon-button:hover { color: var(--text); }
-.session-list, .tree { overflow: auto; height: calc(100% - 40px); padding: 5px; }
+.session-list { overflow: auto; height: calc(100% - 40px); padding: 5px; }
+.path-bar { display: flex; align-items: center; gap: 4px; height: 32px; padding: 0 8px; border-bottom: 1px solid var(--border); }
+.path-bar input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font-size: 12px; font-family: ui-monospace, monospace; }
+.path-bar input:focus { outline: none; }
+.tree { overflow: auto; height: calc(100% - 72px); padding: 5px; }
 .session { width: 100%; display: block; text-align: left; border: 0; border-radius: 6px; background: transparent; padding: 9px 9px 8px; cursor: pointer; }
 .session:hover, .session.active { background: var(--accent-soft); }
 .session-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
@@ -103,11 +107,11 @@ button { color: inherit; }
 
 .tree-row { display: flex; align-items: center; gap: 4px; min-height: 28px; padding: 2px 4px; border-radius: 5px; }
 .tree-row:hover { background: var(--panel-muted); }
-.tree-toggle, .tree-rename { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.tree-kind { color: var(--muted); width: 14px; text-align: center; flex: 0 0 auto; }
+.tree-rename { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
 .tree-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; border: 0; background: transparent; cursor: pointer; }
 .tree-rename { opacity: 0; font-size: 11px; }
 .tree-row:hover .tree-rename { opacity: 1; }
-.tree-children { margin-left: 14px; }
 
 @media (max-width: 900px) {
   .shell { grid-template-columns: 240px 7px minmax(320px, 1fr); }

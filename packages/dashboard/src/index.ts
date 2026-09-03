@@ -1,7 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { readFile as readAsset } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentMessage } from "theoses-agent-core";
 import {
@@ -311,10 +311,8 @@ async function api(
 	}
 
 	if (url.pathname === "/api/files" && request.method === "GET") {
-		json(response, 200, {
-			path: url.searchParams.get("path") ?? "/",
-			entries: await listDirectory(url.searchParams.get("path") ?? "/"),
-		});
+		const requestedPath = url.searchParams.get("path") ?? "/";
+		json(response, 200, { path: resolve(requestedPath), entries: await listDirectory(requestedPath) });
 		return true;
 	}
 	if (url.pathname === "/api/file" && request.method === "GET") {
