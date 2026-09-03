@@ -103,7 +103,10 @@ function usageBadge(usage) {
 function renderTurnBody(turn) {
   if (turn.queued && !turn.segments.length) return '<div class="queued-note">queued…</div>';
   if (turn.pending && !turn.segments.length) return '<div class="thinking"><span></span><span></span><span></span></div>';
-  return mergeSegments(turn.segments).map((item) => item.kind === "tool" ? renderToolBlock(item.entry) : `<div class="message-text">${escapeHtml(item.text)}</div>`).join("");
+  const body = mergeSegments(turn.segments).map((item) => item.kind === "tool" ? renderToolBlock(item.entry) : `<div class="message-text">${escapeHtml(item.text)}</div>`).join("");
+  // A tool call finishing doesn't mean the turn is done - theoses may still be producing more
+  // text or another tool call. Without this, the UI looks frozen between segments.
+  return turn.active ? `${body}<div class="thinking"><span></span><span></span><span></span></div>` : body;
 }
 
 function renderHistory() {
@@ -347,13 +350,14 @@ $("chat-form").addEventListener("submit", (event) => {
   // history this request is responsible for, without clobbering later queued turns still in flight.
   const settledCount = state.history.length + 2;
   state.history.push({ role: "user", segments: [{ type: "text", text: message }] });
-  const liveTurn = { role: "assistant", segments: [], pending: true, queued: true };
+  const liveTurn = { role: "assistant", segments: [], pending: true, queued: true, active: true };
   state.history.push(liveTurn);
   state.pending = (state.pending || 0) + 1;
   renderActive();
   renderHistory();
 
   void (async () => {
+    let settled = false;
     try {
       const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
         method: "POST",
@@ -378,14 +382,23 @@ $("chat-form").addEventListener("submit", (event) => {
         } else if (eventName === "usage") {
           liveTurn.usage = data;
         } else if (eventName === "done") {
+          settled = true;
+          liveTurn.active = false;
           if (data.history.length >= settledCount) state.history = data.history.slice(0, settledCount).concat(state.history.slice(settledCount));
         } else if (eventName === "error") {
+          settled = true;
+          liveTurn.active = false;
           $("chat-status").textContent = data.message;
         }
         renderHistory();
       });
+      if (!settled) {
+        liveTurn.active = false; liveTurn.pending = false;
+        $("chat-status").textContent = "Connection lost - the response above may be incomplete.";
+        renderHistory();
+      }
       await loadSessions();
-    } catch (error) { $("chat-status").textContent = error.message; renderHistory(); }
+    } catch (error) { liveTurn.active = false; liveTurn.pending = false; $("chat-status").textContent = error.message; renderHistory(); }
     finally { state.pending -= 1; renderActive(); }
   })();
 });
