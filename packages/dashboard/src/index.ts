@@ -347,6 +347,12 @@ async function streamChat(info: SessionInfo, request: IncomingMessage, response:
 	}
 }
 
+async function stopChat(info: SessionInfo): Promise<void> {
+	if (info.channel !== DASHBOARD_CHANNEL) throw new Error("Telegram sessions are read-only");
+	const record = await dashboardSession(info.path);
+	await record.session.abort();
+}
+
 function errorStatus(error: unknown): number {
 	if (error instanceof FileConflictError) return 409;
 	if (error instanceof Error && "code" in error) {
@@ -388,12 +394,17 @@ async function api(
 		return true;
 	}
 
-	const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)(?:\/messages)?$/);
+	const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)(?:\/(messages|stop))?$/);
 	if (sessionMatch) {
 		const id = decodeURIComponent(sessionMatch[1]);
 		const info = await findVisibleSession(id);
-		if (url.pathname.endsWith("/messages") && request.method === "POST") {
+		if (sessionMatch[2] === "messages" && request.method === "POST") {
 			await streamChat(info, request, response);
+			return true;
+		}
+		if (sessionMatch[2] === "stop" && request.method === "POST") {
+			await stopChat(info);
+			json(response, 200, { ok: true });
 			return true;
 		}
 		if (request.method === "GET") {

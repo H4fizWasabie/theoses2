@@ -1,4 +1,4 @@
-const state = { sessions: [], active: null, history: [], reply: null, tabs: [], activeTab: null, busy: false, preview: false, filesRoot: "/" };
+const state = { sessions: [], active: null, history: [], reply: null, tabs: [], activeTab: null, pending: 0, preview: false, filesRoot: "/" };
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
 
@@ -101,6 +101,7 @@ function usageBadge(usage) {
 }
 
 function renderTurnBody(turn) {
+  if (turn.queued && !turn.segments.length) return '<div class="queued-note">queued…</div>';
   if (turn.pending && !turn.segments.length) return '<div class="thinking"><span></span><span></span><span></span></div>';
   return mergeSegments(turn.segments).map((item) => item.kind === "tool" ? renderToolBlock(item.entry) : `<div class="message-text">${escapeHtml(item.text)}</div>`).join("");
 }
@@ -125,9 +126,10 @@ function renderActive() {
   const telegram = state.active?.channel === "telegram";
   $("session-title").textContent = state.active?.title || "No dashboard session";
   $("session-channel").textContent = state.active ? ` · ${state.active.channel}` : "";
-  $("message").disabled = !state.active || telegram || state.busy;
+  $("message").disabled = !state.active || telegram;
   $("message").placeholder = telegram ? "Telegram sessions are read-only" : "Message Theoses…";
-  $("chat-form").querySelector("button").disabled = !state.active || telegram || state.busy;
+  $("chat-form").querySelector(".send").disabled = !state.active || telegram;
+  $("stop-chat").hidden = !state.active || telegram || !state.pending;
 }
 
 async function loadSessions() {
@@ -320,50 +322,66 @@ async function streamSSE(response, onEvent) {
   }
 }
 
-$("chat-form").addEventListener("submit", async (event) => {
+$("chat-form").addEventListener("submit", (event) => {
   event.preventDefault();
   if (!state.active || state.active.channel === "telegram") return;
   const input = $("message"); const message = input.value.trim(); if (!message) return;
   const replyContext = state.reply ? flatText(state.reply) : undefined;
-  state.busy = true; renderActive(); input.value = ""; setReply(null); $("chat-status").textContent = "";
+  const sessionId = state.active.id;
+  input.value = ""; setReply(null); $("chat-status").textContent = "";
 
+  // Position of this turn's pair in state.history at submit time. Because pushes below happen
+  // synchronously, this index is stable and lets the eventual "done" patch only the slice of
+  // history this request is responsible for, without clobbering later queued turns still in flight.
+  const settledCount = state.history.length + 2;
   state.history.push({ role: "user", segments: [{ type: "text", text: message }] });
-  const liveTurn = { role: "assistant", segments: [], pending: true };
+  const liveTurn = { role: "assistant", segments: [], pending: true, queued: true };
   state.history.push(liveTurn);
+  state.pending = (state.pending || 0) + 1;
+  renderActive();
   renderHistory();
 
-  try {
-    const response = await fetch(`/api/sessions/${encodeURIComponent(state.active.id)}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, replyContext }),
-    });
-    if (!response.ok || !response.body) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.error || `Request failed (${response.status})`);
-    }
-    await streamSSE(response, (eventName, data) => {
-      if (eventName === "delta") {
-        liveTurn.pending = false;
-        const last = liveTurn.segments.at(-1);
-        if (last?.type === "text") last.text += data.text; else liveTurn.segments.push({ type: "text", text: data.text });
-      } else if (eventName === "tool_call") {
-        liveTurn.pending = false;
-        liveTurn.segments.push({ type: "tool_call", id: data.id, name: data.name, args: data.args });
-      } else if (eventName === "tool_result") {
-        liveTurn.segments.push({ type: "tool_result", id: data.id, name: data.name, result: data.result, isError: data.isError });
-      } else if (eventName === "usage") {
-        liveTurn.usage = data;
-      } else if (eventName === "done") {
-        state.history = data.history;
-      } else if (eventName === "error") {
-        $("chat-status").textContent = data.message;
+  void (async () => {
+    try {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, replyContext }),
+      });
+      if (!response.ok || !response.body) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || `Request failed (${response.status})`);
       }
-      renderHistory();
-    });
-    await loadSessions();
-  } catch (error) { $("chat-status").textContent = error.message; renderHistory(); }
-  finally { state.busy = false; renderActive(); }
+      await streamSSE(response, (eventName, data) => {
+        if (state.active?.id !== sessionId) return;
+        if (eventName === "delta") {
+          liveTurn.pending = false; liveTurn.queued = false;
+          const last = liveTurn.segments.at(-1);
+          if (last?.type === "text") last.text += data.text; else liveTurn.segments.push({ type: "text", text: data.text });
+        } else if (eventName === "tool_call") {
+          liveTurn.pending = false; liveTurn.queued = false;
+          liveTurn.segments.push({ type: "tool_call", id: data.id, name: data.name, args: data.args });
+        } else if (eventName === "tool_result") {
+          liveTurn.segments.push({ type: "tool_result", id: data.id, name: data.name, result: data.result, isError: data.isError });
+        } else if (eventName === "usage") {
+          liveTurn.usage = data;
+        } else if (eventName === "done") {
+          if (data.history.length >= settledCount) state.history = data.history.slice(0, settledCount).concat(state.history.slice(settledCount));
+        } else if (eventName === "error") {
+          $("chat-status").textContent = data.message;
+        }
+        renderHistory();
+      });
+      await loadSessions();
+    } catch (error) { $("chat-status").textContent = error.message; renderHistory(); }
+    finally { state.pending -= 1; renderActive(); }
+  })();
+});
+
+$("stop-chat").addEventListener("click", async () => {
+  if (!state.active) return;
+  try { await request(`/api/sessions/${encodeURIComponent(state.active.id)}/stop`, { method: "POST" }); }
+  catch (error) { $("chat-status").textContent = error.message; }
 });
 
 $("new-session").addEventListener("click", () => void newSession().catch((error) => window.alert(error.message)));
