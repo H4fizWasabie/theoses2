@@ -36,6 +36,10 @@ _Avoid_: account, tenant, operator
 The boundary that proves a request comes from the owner through a particular channel. Telegram uses the configured owner chat ID; the dashboard uses an owner credential.
 _Avoid_: network trust, session identity
 
+**Owner Telegram ID**:
+The numeric Telegram identifier that authorizes the owner's private chat with Theoses2. For a private chat, this is the same value as the Telegram chat ID used by the runtime.
+_Avoid_: Telegram username, display name, phone number
+
 **Delegated Coding Agent**:
 A coding agent operating on the owner's behalf, normally against an isolated development or test runtime rather than as a separate Theoses2 owner.
 _Avoid_: dashboard user, Theoses2 account

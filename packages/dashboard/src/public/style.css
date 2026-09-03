@@ -27,6 +27,15 @@ button { color: inherit; }
 .login-card p { color: var(--muted); }
 .login-card label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .login-card input { border: 1px solid var(--border); border-radius: 6px; padding: 9px; color: var(--text); background: var(--panel); }
+.settings-dialog { width: min(440px, calc(100% - 32px)); padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); box-shadow: 0 12px 40px rgb(32 35 33 / 18%); }
+.settings-dialog::backdrop { background: rgb(32 35 33 / 25%); }
+.settings-card { display: grid; gap: 10px; padding: 22px; }
+.settings-head { display: flex; justify-content: space-between; align-items: start; margin-bottom: 4px; }
+.settings-head h2, .settings-head p { margin: 0; }
+.settings-head p, .settings-help { color: var(--muted); }
+.settings-card label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.settings-card input { border: 1px solid var(--border); border-radius: 6px; padding: 9px; color: var(--text); background: var(--panel); }
+.settings-help { margin: 0; font-size: 12px; line-height: 1.5; }
 .topbar { height: 48px; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
 .brand { font-size: 15px; font-weight: 650; letter-spacing: -.02em; }
 .topbar-spacer { flex: 1; }
