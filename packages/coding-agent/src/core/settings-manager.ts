@@ -1304,6 +1304,29 @@ export class SettingsManager {
 		return structuredClone(this.settings.toolSources ?? []);
 	}
 
+	setToolSources(sources: ToolSourceSettings[]): void {
+		this.globalSettings.toolSources = sources;
+		this.markModified("toolSources");
+		this.save();
+	}
+
+	addToolSource(source: ToolSourceSettings): void {
+		const existing = this.getToolSources();
+		if (existing.some((entry) => entry.name === source.name)) {
+			throw new Error(`Tool source "${source.name}" already exists`);
+		}
+		this.setToolSources([...existing, source]);
+	}
+
+	removeToolSource(name: string): void {
+		const existing = this.getToolSources();
+		const filtered = existing.filter((entry) => entry.name !== name);
+		if (filtered.length === existing.length) {
+			throw new Error(`Tool source "${name}" not found`);
+		}
+		this.setToolSources(filtered);
+	}
+
 	setWarnings(warnings: WarningSettings): void {
 		this.globalSettings.warnings = { ...warnings };
 		this.markModified("warnings");

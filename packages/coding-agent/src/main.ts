@@ -29,6 +29,7 @@ import { resolveCredentialForPrint } from "./cli/credential-print.ts";
 import { processFileArguments } from "./cli/file-processor.ts";
 import { buildInitialMessage } from "./cli/initial-message.ts";
 import { listModels } from "./cli/list-models.ts";
+import { handleMcpCommand } from "./cli/mcp-command.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
@@ -573,6 +574,11 @@ export async function main(args: string[], options?: MainOptions) {
 	const bootstrapSettingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
 	applyHttpProxySettings(bootstrapSettingsManager.getGlobalSettings().httpProxy);
 	configureHttpDispatcher();
+
+	if (await handleMcpCommand(args, bootstrapSettingsManager)) {
+		process.exit(process.exitCode ?? 0);
+		return;
+	}
 
 	if (await handleUpdateCommand(args)) {
 		const exitCode = process.exitCode ?? 0;
