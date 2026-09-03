@@ -165,8 +165,29 @@ async function findVisibleSession(id: string): Promise<SessionInfo> {
 	const info = (await SessionManager.listAll()).find(
 		(session) => session.id === id && (session.channel === DASHBOARD_CHANNEL || session.channel === TELEGRAM_CHANNEL),
 	);
-	if (!info) throw new Error("Session not found");
-	return info;
+	if (info) return info;
+
+	// Not on disk yet: SessionManager only flushes a session file once it has an
+	// assistant message, so a brand-new session lives only in the in-memory map.
+	for (const [path, pending] of sessions) {
+		const record = await pending;
+		if (record.manager.getSessionId() !== id) continue;
+		const key = record.manager.getChannelSessionKey();
+		if (key.channel !== DASHBOARD_CHANNEL) continue;
+		return {
+			path,
+			id,
+			cwd: record.manager.getCwd(),
+			channel: key.channel,
+			channelSessionId: key.channelSessionId,
+			created: new Date(),
+			modified: new Date(),
+			messageCount: 0,
+			firstMessage: "",
+			allMessagesText: "",
+		};
+	}
+	throw new Error("Session not found");
 }
 
 async function dashboardSession(path: string): Promise<DashboardSession> {
