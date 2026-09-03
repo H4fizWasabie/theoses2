@@ -2,6 +2,12 @@ const state = { sessions: [], active: null, history: [], reply: null, tabs: [], 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
 
+if (!$('login') || !$('app')) {
+  const fresh = new URL(window.location.href);
+  fresh.searchParams.set('fresh', Date.now().toString());
+  window.location.replace(fresh.href);
+} else {
+
 async function request(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
@@ -269,3 +275,4 @@ async function start() {
 }
 
 void start();
+}
