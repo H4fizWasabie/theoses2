@@ -11,6 +11,25 @@ const mockState = vi.hoisted(() => ({
 	lastClientOptions: undefined as unknown,
 }));
 
+function cloudflareCompletionsModel(modelId: "gpt-5.1" | "gpt-5.5") {
+	const model = getModel("cloudflare-ai-gateway", modelId)!;
+	return {
+		...model,
+		api: "openai-completions" as const,
+		baseUrl: model.baseUrl
+			.replace("{CLOUDFLARE_ACCOUNT_ID}", "account-id")
+			.replace("{CLOUDFLARE_GATEWAY_ID}", "gateway-id")
+			.replace("/openai", "/compat"),
+		compat: {
+			supportsStore: false,
+			supportsDeveloperRole: false,
+			supportsReasoningEffort: false,
+			maxTokensField: "max_tokens" as const,
+			sendSessionAffinityHeaders: true,
+		},
+	};
+}
+
 vi.mock("openai", () => {
 	class FakeOpenAI {
 		constructor(options: unknown) {
@@ -164,7 +183,7 @@ describe("openai-completions empty tools handling", () => {
 		process.env.CLOUDFLARE_API_KEY = "cf-token";
 		process.env.CLOUDFLARE_ACCOUNT_ID = "account-id";
 		process.env.CLOUDFLARE_GATEWAY_ID = "gateway-id";
-		const model = getModel("cloudflare-ai-gateway", "gpt-5.5")!;
+		const model = cloudflareCompletionsModel("gpt-5.5");
 
 		await streamSimple(
 			model,
@@ -172,7 +191,7 @@ describe("openai-completions empty tools handling", () => {
 				systemPrompt: "You are helpful.",
 				messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
 			},
-			{ maxTokens: 1234, reasoning: "high" },
+			{ maxTokens: 1234, reasoning: "high", headers: { "cf-aig-authorization": "Bearer cf-token" } },
 		).result();
 
 		const params = mockState.lastParams as {
@@ -193,7 +212,7 @@ describe("openai-completions empty tools handling", () => {
 			defaultHeaders?: Record<string, unknown>;
 		};
 		expect(clientOptions.baseURL).toBe("https://gateway.ai.cloudflare.com/v1/account-id/gateway-id/compat");
-		expect(clientOptions.defaultHeaders?.Authorization).toBeNull();
+		expect(clientOptions.defaultHeaders?.Authorization).toBeUndefined();
 		expect(clientOptions.defaultHeaders?.["cf-aig-authorization"]).toBe("Bearer cf-token");
 	});
 
@@ -201,11 +220,13 @@ describe("openai-completions empty tools handling", () => {
 		process.env.CLOUDFLARE_API_KEY = "cf-token";
 		process.env.CLOUDFLARE_ACCOUNT_ID = "account-id";
 		process.env.CLOUDFLARE_GATEWAY_ID = "gateway-id";
-		const model = getModel("cloudflare-ai-gateway", "gpt-5.5")!;
+		const model = cloudflareCompletionsModel("gpt-5.5");
 
-		await streamSimple(model, {
-			messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
-		}).result();
+		await streamSimple(
+			model,
+			{ messages: [{ role: "user", content: "hi", timestamp: Date.now() }] },
+			{ headers: { "cf-aig-authorization": "Bearer cf-token" } },
+		).result();
 
 		const clientOptions = mockState.lastClientOptions as { baseURL?: string };
 		expect(clientOptions.baseURL).toBe("https://gateway.ai.cloudflare.com/v1/account-id/gateway-id/compat");
@@ -234,14 +255,14 @@ describe("openai-completions empty tools handling", () => {
 		process.env.CLOUDFLARE_API_KEY = "cf-token";
 		process.env.CLOUDFLARE_ACCOUNT_ID = "account-id";
 		process.env.CLOUDFLARE_GATEWAY_ID = "gateway-id";
-		const workersModel = getModel("cloudflare-ai-gateway", "gpt-5.5")!;
+		const workersModel = cloudflareCompletionsModel("gpt-5.5");
 
 		await streamSimple(
 			workersModel,
 			{
 				messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
 			},
-			{ sessionId: "session-1" },
+			{ sessionId: "session-1", headers: { "cf-aig-authorization": "Bearer cf-token" } },
 		).result();
 
 		const clientOptions = mockState.lastClientOptions as { defaultHeaders?: Record<string, string> };
