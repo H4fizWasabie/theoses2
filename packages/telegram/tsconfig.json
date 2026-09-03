@@ -4,7 +4,12 @@
 		"outDir": "dist",
 		"rootDir": "src",
 		"noEmit": false,
-		"declaration": true
+		"declaration": true,
+		"paths": {
+			"theoses-coding-agent": ["../coding-agent/dist/index.d.ts"],
+			"theoses-coding-agent/*": ["../coding-agent/dist/*.d.ts"]
+		}
 	},
-	"include": ["src/**/*.ts"]
+	"include": ["src/**/*.ts"],
+	"exclude": ["node_modules", "dist"]
 }

@@ -6,8 +6,10 @@ import {
 	type SessionInfo,
 	SessionManager,
 } from "theoses-coding-agent";
+import { chunkHtml, formatTelegramHtml, splitSections } from "./format.ts";
 
 const CHANNEL = "telegram";
+const TELEGRAM_MESSAGE_LIMIT = 4000;
 
 function chatId(ctx: Context): string | undefined {
 	return ctx.chat?.id.toString();
@@ -31,6 +33,43 @@ function assistantText(event: AgentSessionEvent): string | undefined {
 		.join("")
 		.trim();
 	return text || undefined;
+}
+
+/**
+ * Single exit point for outbound Telegram text: section-split on --- lines ->
+ * format -> chunk -> send. Each section threads to the previous one (the
+ * caller's message for the first) so multi-part replies read as one chain.
+ * A chunk Telegram rejects (malformed HTML -> 400) is resent as plain text -
+ * stray tags beat a lost message. Ported from Mino's sendTelegramReply.
+ */
+async function sendTelegramReply(
+	bot: Bot,
+	chatId: number,
+	reply: string,
+	toolNames: string[],
+	replyTo: number | undefined,
+): Promise<void> {
+	const sections = splitSections(reply);
+	let lastId = replyTo;
+	for (const [index, section] of sections.entries()) {
+		const names = index === sections.length - 1 ? toolNames : [];
+		const html = formatTelegramHtml(section, names);
+		for (const chunk of chunkHtml(html, TELEGRAM_MESSAGE_LIMIT)) {
+			const replyParameters = lastId ? { message_id: lastId } : undefined;
+			try {
+				const sent = await bot.api.sendMessage(chatId, chunk, {
+					parse_mode: "HTML",
+					reply_parameters: replyParameters,
+				});
+				lastId = sent.message_id;
+			} catch {
+				const sent = await bot.api
+					.sendMessage(chatId, chunk, { reply_parameters: replyParameters })
+					.catch(() => undefined);
+				if (sent) lastId = sent.message_id;
+			}
+		}
+	}
 }
 
 async function downloadFile(bot: Bot, token: string, fileId: string): Promise<Uint8Array> {
@@ -102,8 +141,10 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			}
 
 			let response: string | undefined;
+			const toolNames: string[] = [];
 			const unsubscribe = session.subscribe((event) => {
 				response = assistantText(event) ?? response;
+				if (event.type === "tool_execution_end") toolNames.push(event.toolName);
 			});
 			try {
 				await session.prompt(messageText(ctx), {
@@ -114,7 +155,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			} finally {
 				unsubscribe();
 			}
-			if (response) await ctx.reply(response);
+			if (response) await sendTelegramReply(bot, ctx.chat.id, response, toolNames, ctx.message.message_id);
 		});
 		queues.set(
 			chat,
