@@ -135,11 +135,66 @@ function messageText(message: AgentMessage): string {
 	return message.content.map((part) => (part.type === "text" ? part.text : "[image]")).join("");
 }
 
-function sessionHistory(manager: SessionManager): Array<{ role: "user" | "assistant"; content: string }> {
-	return manager.getEntries().flatMap((entry) => {
-		if (entry.type !== "message" || (entry.message.role !== "user" && entry.message.role !== "assistant")) return [];
-		return [{ role: entry.message.role, content: messageText(entry.message) }];
-	});
+type HistorySegment =
+	| { type: "text"; text: string }
+	| { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
+	| { type: "tool_result"; id: string; name: string; result: string; isError: boolean };
+
+interface UsageSummary {
+	input: number;
+	output: number;
+	totalTokens: number;
+	cost: number;
+}
+
+interface HistoryTurn {
+	role: "user" | "assistant";
+	segments: HistorySegment[];
+	usage?: UsageSummary;
+}
+
+function usageSummary(usage: {
+	input: number;
+	output: number;
+	totalTokens: number;
+	cost: { total: number };
+}): UsageSummary {
+	return { input: usage.input, output: usage.output, totalTokens: usage.totalTokens, cost: usage.cost.total };
+}
+
+function sessionHistory(manager: SessionManager): HistoryTurn[] {
+	const turns: HistoryTurn[] = [];
+	for (const entry of manager.getEntries()) {
+		if (entry.type !== "message") continue;
+		const message = entry.message;
+		if (message.role === "user") {
+			turns.push({ role: "user", segments: [{ type: "text", text: messageText(message) }] });
+			continue;
+		}
+		if (message.role === "assistant") {
+			const segments: HistorySegment[] = [];
+			for (const part of message.content) {
+				if (part.type === "text") segments.push({ type: "text", text: part.text });
+				else if (part.type === "toolCall")
+					segments.push({ type: "tool_call", id: part.id, name: part.name, args: part.arguments });
+			}
+			turns.push({ role: "assistant", segments, usage: usageSummary(message.usage) });
+			continue;
+		}
+		if (message.role === "toolResult") {
+			const segment: HistorySegment = {
+				type: "tool_result",
+				id: message.toolCallId,
+				name: message.toolName,
+				result: message.content.map((part) => (part.type === "text" ? part.text : "[image]")).join(""),
+				isError: message.isError,
+			};
+			const last = turns.at(-1);
+			if (last?.role === "assistant") last.segments.push(segment);
+			else turns.push({ role: "assistant", segments: [segment] });
+		}
+	}
+	return turns;
 }
 
 function sessionView(info: SessionInfo): SessionView {
@@ -228,20 +283,52 @@ async function newDashboardSession(cwd: string): Promise<SessionView> {
 	};
 }
 
-async function chat(
-	info: SessionInfo,
-	request: IncomingMessage,
-): Promise<{ reply: string; history: Array<{ role: "user" | "assistant"; content: string }> }> {
+function sseSend(response: ServerResponse, event: string, data: unknown): void {
+	response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+function toolResultText(result: unknown): string {
+	if (typeof result === "string") return result;
+	if (result && typeof result === "object" && Array.isArray((result as { content?: unknown }).content)) {
+		return (result as { content: Array<{ type: string; text?: string }> }).content
+			.map((part) => (part.type === "text" ? (part.text ?? "") : "[image]"))
+			.join("");
+	}
+	return JSON.stringify(result);
+}
+
+async function streamChat(info: SessionInfo, request: IncomingMessage, response: ServerResponse): Promise<void> {
 	if (info.channel !== DASHBOARD_CHANNEL) throw new Error("Telegram sessions are read-only");
 	const record = await dashboardSession(info.path);
 	const input = await body(request);
 	const message = stringField(input, "message").trim();
 	if (!message) throw new Error("message is required");
 	const replyContext = optionalStringField(input, "replyContext");
-	let reply = "";
+
+	response.writeHead(200, {
+		"Content-Type": "text/event-stream; charset=utf-8",
+		"Cache-Control": "no-cache, no-store",
+		Connection: "keep-alive",
+		"X-Accel-Buffering": "no",
+	});
+
 	const work = record.queue.then(async () => {
 		const unsubscribe = record.session.subscribe((event: AgentSessionEvent) => {
-			if (event.type === "message_end" && event.message.role === "assistant") reply = messageText(event.message);
+			if (event.type === "message_update" && event.message.role === "assistant") {
+				const delta = event.assistantMessageEvent;
+				if (delta.type === "text_delta") sseSend(response, "delta", { text: delta.delta });
+			} else if (event.type === "tool_execution_start") {
+				sseSend(response, "tool_call", { id: event.toolCallId, name: event.toolName, args: event.args });
+			} else if (event.type === "tool_execution_end") {
+				sseSend(response, "tool_result", {
+					id: event.toolCallId,
+					name: event.toolName,
+					result: toolResultText(event.result),
+					isError: event.isError,
+				});
+			} else if (event.type === "message_end" && event.message.role === "assistant") {
+				sseSend(response, "usage", usageSummary(event.message.usage));
+			}
 		});
 		try {
 			await record.session.prompt(message, { replyContext, source: "interactive" });
@@ -250,8 +337,14 @@ async function chat(
 		}
 	});
 	setQueue(record, work);
-	await work;
-	return { reply, history: sessionHistory(record.manager) };
+	try {
+		await work;
+		sseSend(response, "done", { history: sessionHistory(record.manager) });
+	} catch (error) {
+		sseSend(response, "error", { message: error instanceof Error ? error.message : String(error) });
+	} finally {
+		response.end();
+	}
 }
 
 function errorStatus(error: unknown): number {
@@ -300,7 +393,7 @@ async function api(
 		const id = decodeURIComponent(sessionMatch[1]);
 		const info = await findVisibleSession(id);
 		if (url.pathname.endsWith("/messages") && request.method === "POST") {
-			json(response, 200, await chat(info, request));
+			await streamChat(info, request, response);
 			return true;
 		}
 		if (request.method === "GET") {

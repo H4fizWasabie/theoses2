@@ -61,19 +61,63 @@ function renderSessions() {
   target.querySelectorAll("[data-session]").forEach((button) => button.addEventListener("click", () => openSession(button.dataset.session)));
 }
 
+function flatText(turn) {
+  return turn.segments.filter((segment) => segment.type === "text").map((segment) => segment.text).join("");
+}
+
+function mergeSegments(segments) {
+  const byId = new Map();
+  const merged = [];
+  for (const segment of segments) {
+    if (segment.type === "text") { merged.push({ kind: "text", text: segment.text }); continue; }
+    if (segment.type === "tool_call") {
+      const entry = { call: segment, result: null };
+      byId.set(segment.id, entry);
+      merged.push({ kind: "tool", entry });
+      continue;
+    }
+    const existing = byId.get(segment.id);
+    if (existing) existing.result = segment;
+    else merged.push({ kind: "tool", entry: { call: null, result: segment } });
+  }
+  return merged;
+}
+
+function renderToolBlock(entry) {
+  const name = entry.call?.name || entry.result?.name || "tool";
+  const status = entry.result ? (entry.result.isError ? "error" : "done") : "running";
+  const args = entry.call ? JSON.stringify(entry.call.args, null, 2) : "";
+  return `<details class="tool-call ${status}">
+    <summary><span class="tool-icon">${status === "running" ? "◌" : status === "error" ? "✕" : "✓"}</span> ${escapeHtml(name)}</summary>
+    ${args ? `<pre class="tool-args">${escapeHtml(args)}</pre>` : ""}
+    ${entry.result ? `<pre class="tool-result${entry.result.isError ? " error" : ""}">${escapeHtml(entry.result.result)}</pre>` : '<div class="tool-pending">running…</div>'}
+  </details>`;
+}
+
+function usageBadge(usage) {
+  if (!usage) return "";
+  const cost = usage.cost ? ` · $${usage.cost.toFixed(4)}` : "";
+  return `<span class="usage-badge" title="${usage.input} in / ${usage.output} out">${usage.totalTokens.toLocaleString()} tok${cost}</span>`;
+}
+
+function renderTurnBody(turn) {
+  if (turn.pending && !turn.segments.length) return '<div class="thinking"><span></span><span></span><span></span></div>';
+  return mergeSegments(turn.segments).map((item) => item.kind === "tool" ? renderToolBlock(item.entry) : `<div class="message-text">${escapeHtml(item.text)}</div>`).join("");
+}
+
 function renderHistory() {
   const target = $("messages");
   if (!state.history.length) { target.innerHTML = '<div class="empty">No messages yet.</div>'; return; }
-  target.innerHTML = state.history.map((message, index) => `<article class="message"><div class="message-label">${message.role === "user" ? "You" : "Theoses"}</div><div class="message-body">${escapeHtml(message.content)}</div><div class="message-tools"><button class="reply" data-reply="${index}">Reply</button></div></article>`).join("");
+  target.innerHTML = state.history.map((turn, index) => `<article class="message"><div class="message-label">${turn.role === "user" ? "You" : "Theoses"}${usageBadge(turn.usage)}</div><div class="message-body">${renderTurnBody(turn)}</div><div class="message-tools"><button class="reply" data-reply="${index}">Reply</button></div></article>`).join("");
   target.querySelectorAll("[data-reply]").forEach((button) => button.addEventListener("click", () => setReply(state.history[Number(button.dataset.reply)])));
   target.scrollTop = target.scrollHeight;
 }
 
-function setReply(message) {
-  state.reply = message;
+function setReply(turn) {
+  state.reply = turn;
   const bar = $("reply-bar");
-  bar.hidden = !message;
-  bar.innerHTML = message ? `Replying to ${escapeHtml(message.role)}: ${escapeHtml(message.content.slice(0, 140))} <button class="reply" id="cancel-reply">Cancel</button>` : "";
+  bar.hidden = !turn;
+  bar.innerHTML = turn ? `Replying to ${escapeHtml(turn.role)}: ${escapeHtml(flatText(turn).slice(0, 140))} <button class="reply" id="cancel-reply">Cancel</button>` : "";
   $("cancel-reply")?.addEventListener("click", () => setReply(null));
 }
 
@@ -254,15 +298,71 @@ document.querySelectorAll("[data-resize]").forEach((handle) => handle.addEventLi
   handle.addEventListener("pointermove", move); handle.addEventListener("pointerup", stop);
 }));
 
+async function streamSSE(response, onEvent) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary;
+    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      let eventName = "message"; let data = "";
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        else if (line.startsWith("data:")) data += line.slice(5).trim();
+      }
+      if (data) onEvent(eventName, JSON.parse(data));
+    }
+  }
+}
+
 $("chat-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!state.active || state.active.channel === "telegram") return;
   const input = $("message"); const message = input.value.trim(); if (!message) return;
-  state.busy = true; renderActive(); input.value = "";
+  const replyContext = state.reply ? flatText(state.reply) : undefined;
+  state.busy = true; renderActive(); input.value = ""; setReply(null); $("chat-status").textContent = "";
+
+  state.history.push({ role: "user", segments: [{ type: "text", text: message }] });
+  const liveTurn = { role: "assistant", segments: [], pending: true };
+  state.history.push(liveTurn);
+  renderHistory();
+
   try {
-    const data = await request(`/api/sessions/${encodeURIComponent(state.active.id)}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, replyContext: state.reply?.content }) });
-    state.history = data.history; setReply(null); renderHistory(); await loadSessions();
-  } catch (error) { $("chat-status").textContent = error.message; }
+    const response = await fetch(`/api/sessions/${encodeURIComponent(state.active.id)}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, replyContext }),
+    });
+    if (!response.ok || !response.body) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `Request failed (${response.status})`);
+    }
+    await streamSSE(response, (eventName, data) => {
+      if (eventName === "delta") {
+        liveTurn.pending = false;
+        const last = liveTurn.segments.at(-1);
+        if (last?.type === "text") last.text += data.text; else liveTurn.segments.push({ type: "text", text: data.text });
+      } else if (eventName === "tool_call") {
+        liveTurn.pending = false;
+        liveTurn.segments.push({ type: "tool_call", id: data.id, name: data.name, args: data.args });
+      } else if (eventName === "tool_result") {
+        liveTurn.segments.push({ type: "tool_result", id: data.id, name: data.name, result: data.result, isError: data.isError });
+      } else if (eventName === "usage") {
+        liveTurn.usage = data;
+      } else if (eventName === "done") {
+        state.history = data.history;
+      } else if (eventName === "error") {
+        $("chat-status").textContent = data.message;
+      }
+      renderHistory();
+    });
+    await loadSessions();
+  } catch (error) { $("chat-status").textContent = error.message; renderHistory(); }
   finally { state.busy = false; renderActive(); }
 });
 
