@@ -197,9 +197,14 @@ async function newDashboardSession(cwd: string): Promise<SessionView> {
 	const path = manager.getSessionFile();
 	if (!path) throw new Error("Dashboard session was not persisted");
 	sessions.set(path, Promise.resolve({ manager, session, queue: Promise.resolve() }));
-	const info = (await SessionManager.listAll()).find((item) => item.path === path);
-	if (!info) throw new Error("Dashboard session was not discoverable");
-	return sessionView(info);
+	return {
+		id,
+		channel: DASHBOARD_CHANNEL,
+		title: id,
+		modified: new Date().toISOString(),
+		messageCount: 0,
+		path,
+	};
 }
 
 async function chat(
