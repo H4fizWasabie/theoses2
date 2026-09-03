@@ -77,6 +77,7 @@ button { color: inherit; }
 .pane-head span { color: var(--muted); font-size: 11px; }
 .messages { min-height: 0; flex: 1; overflow: auto; padding: 20px max(20px, 7vw); }
 .message { margin: 0 auto 18px; max-width: 72ch; }
+.message + .message { padding-top: 18px; border-top: 1px solid var(--border); }
 .message-label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; margin-bottom: 4px; }
 .message-body { line-height: 1.55; }
 .message-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 6px; }

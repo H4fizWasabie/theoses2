@@ -345,10 +345,6 @@ $("chat-form").addEventListener("submit", (event) => {
   const sessionId = state.active.id;
   input.value = ""; setReply(null); $("chat-status").textContent = "";
 
-  // Position of this turn's pair in state.history at submit time. Because pushes below happen
-  // synchronously, this index is stable and lets the eventual "done" patch only the slice of
-  // history this request is responsible for, without clobbering later queued turns still in flight.
-  const settledCount = state.history.length + 2;
   state.history.push({ role: "user", segments: [{ type: "text", text: message }] });
   const liveTurn = { role: "assistant", segments: [], pending: true, queued: true, active: true };
   state.history.push(liveTurn);
@@ -384,7 +380,6 @@ $("chat-form").addEventListener("submit", (event) => {
         } else if (eventName === "done") {
           settled = true;
           liveTurn.active = false;
-          if (data.history.length >= settledCount) state.history = data.history.slice(0, settledCount).concat(state.history.slice(settledCount));
         } else if (eventName === "error") {
           settled = true;
           liveTurn.active = false;
