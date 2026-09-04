@@ -425,28 +425,65 @@ $("path-form").addEventListener("submit", (event) => {
 
 // --- Obsidian-style force-directed memory graph view ---
 
-const GRAPH_REPULSION = 2600;
-const GRAPH_SPRING_LENGTH = 90;
-const GRAPH_SPRING_STRENGTH = 0.02;
+const GRAPH_REPULSION = 1800;
+const GRAPH_SPRING_LENGTH = 70;
+const GRAPH_SPRING_STRENGTH = 0.03;
 const GRAPH_DAMPING = 0.85;
-const GRAPH_CENTER_STRENGTH = 0.01;
+const GRAPH_ANCHOR_STRENGTH = 0.025;
+const GRAPH_LABEL_ZOOM = 1.4;
+const GRAPH_MIN_SCALE = 0.08;
+const GRAPH_MAX_SCALE = 4;
+const GRAPH_GOLDEN_ANGLE = 2.399963;
+const CLUSTER_COLORS = ["#4d6b58", "#4a6fa5", "#a5674a", "#7a4a9c", "#4a9c8a", "#9c4a6f", "#8a9c4a", "#4a5f9c"];
+const SOLO_NODE_COLOR = "#b7bab6";
 let graphAnimationFrame = null;
-let graphDrag = null; // { node, pointerId } | { pan: true, pointerId, startX, startY, originX, originY }
+let graphDrag = null; // { node, pointerId, moved, startX, startY } | { pan: true, pointerId, startX, startY, originX, originY }
+let graphHoverNode = null;
 const graphView = { offsetX: 0, offsetY: 0, scale: 1 };
 
 function graphCanvas() { return $("graph-canvas"); }
 
-function layoutGraphNodes(nodes) {
-  const canvas = graphCanvas();
-  const cx = canvas.clientWidth / 2 || 400;
-  const cy = canvas.clientHeight / 2 || 300;
-  nodes.forEach((node, index) => {
-    if (node.x !== undefined) return;
-    const angle = (index / Math.max(nodes.length, 1)) * Math.PI * 2;
-    const radius = 120 + (index % 5) * 40;
-    node.x = cx + Math.cos(angle) * radius;
-    node.y = cy + Math.sin(angle) * radius;
-    node.vx = 0; node.vy = 0;
+/** Union-find over edges: nodes connected (directly or transitively) belong to the same cluster. */
+function computeGraphClusters(nodes, edges) {
+  const parent = new Map(nodes.map((node) => [node.id, node.id]));
+  const find = (id) => {
+    while (parent.get(id) !== id) { parent.set(id, parent.get(parent.get(id))); id = parent.get(id); }
+    return id;
+  };
+  for (const edge of edges) {
+    if (!parent.has(edge.source) || !parent.has(edge.target)) continue;
+    const rootA = find(edge.source), rootB = find(edge.target);
+    if (rootA !== rootB) parent.set(rootA, rootB);
+  }
+  const groups = new Map();
+  for (const node of nodes) {
+    const root = find(node.id);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(node);
+  }
+  return [...groups.values()].sort((a, b) => b.length - a.length);
+}
+
+/** Places each cluster on a sunflower spiral so distinct clusters don't start overlapping, colors them, and seeds node positions/anchors within their cluster. Anchors are gentle attractors the simulation pulls toward, keeping clusters visually distinct instead of collapsing into one blob. */
+function layoutGraphClusters(nodes, edges) {
+  const clusters = computeGraphClusters(nodes, edges);
+  clusters.forEach((cluster, index) => {
+    const color = cluster.length > 1 ? CLUSTER_COLORS[index % CLUSTER_COLORS.length] : SOLO_NODE_COLOR;
+    const spread = 90 * Math.sqrt(index + 1);
+    const angle = index * GRAPH_GOLDEN_ANGLE;
+    const anchorX = index === 0 ? 0 : Math.cos(angle) * spread;
+    const anchorY = index === 0 ? 0 : Math.sin(angle) * spread;
+    cluster.forEach((node, i) => {
+      const localAngle = (i / Math.max(cluster.length, 1)) * Math.PI * 2;
+      const localRadius = cluster.length > 1 ? 14 + Math.sqrt(cluster.length) * 8 : 0;
+      node.anchorX = anchorX + Math.cos(localAngle) * localRadius;
+      node.anchorY = anchorY + Math.sin(localAngle) * localRadius;
+      node.x = node.anchorX + (Math.random() - 0.5) * 8;
+      node.y = node.anchorY + (Math.random() - 0.5) * 8;
+      node.vx = 0; node.vy = 0;
+      node.clusterColor = color;
+      node.clusterSize = cluster.length;
+    });
   });
 }
 
@@ -477,13 +514,10 @@ function stepGraphSimulation(graph) {
     if (!source.pinned) { source._fx += fx; source._fy += fy; }
     if (!target.pinned) { target._fx -= fx; target._fy -= fy; }
   }
-  const canvas = graphCanvas();
-  const cx = canvas.clientWidth / 2 || 400;
-  const cy = canvas.clientHeight / 2 || 300;
   for (const node of nodes) {
     if (node.pinned) continue;
-    node._fx += (cx - node.x) * GRAPH_CENTER_STRENGTH;
-    node._fy += (cy - node.y) * GRAPH_CENTER_STRENGTH;
+    node._fx += (node.anchorX - node.x) * GRAPH_ANCHOR_STRENGTH;
+    node._fy += (node.anchorY - node.y) * GRAPH_ANCHOR_STRENGTH;
     node.vx = (node.vx + node._fx) * GRAPH_DAMPING;
     node.vy = (node.vy + node._fy) * GRAPH_DAMPING;
     node.x += node.vx; node.y += node.vy;
@@ -504,8 +538,8 @@ function drawGraph(graph) {
   ctx.translate(graphView.offsetX, graphView.offsetY);
   ctx.scale(graphView.scale, graphView.scale);
 
-  ctx.strokeStyle = "#c7cac6";
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = "#d5d7d3";
+  ctx.lineWidth = 1 / graphView.scale;
   for (const edge of graph.edges) {
     const source = graph.nodes.find((n) => n.id === edge.source);
     const target = graph.nodes.find((n) => n.id === edge.target);
@@ -516,14 +550,18 @@ function drawGraph(graph) {
     ctx.stroke();
   }
 
+  const showLabels = graphView.scale >= GRAPH_LABEL_ZOOM;
+  const radius = Math.min(3 + Math.max(graphView.scale, 0.4) * 2, 8);
   for (const node of graph.nodes) {
     ctx.beginPath();
-    ctx.fillStyle = "#4d6b58";
-    ctx.arc(node.x, node.y, 8, 0, Math.PI * 2);
+    ctx.fillStyle = node.clusterColor || SOLO_NODE_COLOR;
+    ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = "#202321";
-    ctx.font = "11px Inter, sans-serif";
-    ctx.fillText((node.subject || node.id).slice(0, 40), node.x + 12, node.y + 4);
+    if (showLabels || node === graphHoverNode) {
+      ctx.fillStyle = "#202321";
+      ctx.font = `${11 / graphView.scale}px Inter, sans-serif`;
+      ctx.fillText((node.subject || node.id).slice(0, 60), node.x + radius + 4 / graphView.scale, node.y + 4 / graphView.scale);
+    }
   }
   ctx.restore();
 }
@@ -546,17 +584,38 @@ function toGraphSpace(clientX, clientY) {
 
 function findGraphNodeAt(x, y) {
   if (!state.graph) return null;
-  return state.graph.nodes.find((node) => (node.x - x) ** 2 + (node.y - y) ** 2 <= 144);
+  const threshold = 8 / graphView.scale;
+  return state.graph.nodes.find((node) => (node.x - x) ** 2 + (node.y - y) ** 2 <= threshold * threshold);
+}
+
+/** Fits the current node layout to the canvas, zoomed out, so a fresh graph never opens crowded into one corner. */
+function fitGraphView() {
+  const nodes = state.graph?.nodes;
+  if (!nodes || nodes.length === 0) return;
+  const canvas = graphCanvas();
+  const width = canvas.clientWidth || 800, height = canvas.clientHeight || 600;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const node of nodes) {
+    minX = Math.min(minX, node.x); maxX = Math.max(maxX, node.x);
+    minY = Math.min(minY, node.y); maxY = Math.max(maxY, node.y);
+  }
+  const boxWidth = Math.max(maxX - minX, 1), boxHeight = Math.max(maxY - minY, 1);
+  const padding = 80;
+  const scale = Math.min((width - padding) / boxWidth, (height - padding) / boxHeight, 1);
+  graphView.scale = Math.max(scale, GRAPH_MIN_SCALE);
+  graphView.offsetX = width / 2 - graphView.scale * (minX + maxX) / 2;
+  graphView.offsetY = height / 2 - graphView.scale * (minY + maxY) / 2;
 }
 
 async function loadMemoryGraph() {
   $("graph-status").textContent = "Loading…";
   try {
     const data = await request("/api/memory-graph");
-    layoutGraphNodes(data.nodes);
+    layoutGraphClusters(data.nodes, data.edges);
     state.graph = data;
     $("graph-empty").hidden = data.nodes.length > 0;
     $("graph-status").textContent = `${data.nodes.length} nodes · ${data.edges.length} edges`;
+    fitGraphView();
     if (!graphAnimationFrame) graphTick();
   } catch (error) {
     $("graph-status").textContent = error.message;
@@ -575,7 +634,7 @@ function closeGraphView() {
 
 $("graph-view-button").addEventListener("click", openGraphView);
 $("graph-close").addEventListener("click", closeGraphView);
-$("graph-refresh").addEventListener("click", () => { if (state.graph) state.graph.nodes.forEach((n) => { n.x = undefined; }); void loadMemoryGraph(); });
+$("graph-refresh").addEventListener("click", () => void loadMemoryGraph());
 
 graphCanvas().addEventListener("pointerdown", (event) => {
   const point = toGraphSpace(event.clientX, event.clientY);
@@ -590,7 +649,12 @@ graphCanvas().addEventListener("pointerdown", (event) => {
 });
 
 graphCanvas().addEventListener("pointermove", (event) => {
-  if (!graphDrag || graphDrag.pointerId !== event.pointerId) return;
+  if (!graphDrag || graphDrag.pointerId !== event.pointerId) {
+    const point = toGraphSpace(event.clientX, event.clientY);
+    graphHoverNode = findGraphNodeAt(point.x, point.y);
+    graphCanvas().style.cursor = graphHoverNode ? "pointer" : "grab";
+    return;
+  }
   if (graphDrag.pan) {
     graphView.offsetX = graphDrag.originX + (event.clientX - graphDrag.startX);
     graphView.offsetY = graphDrag.originY + (event.clientY - graphDrag.startY);
@@ -617,7 +681,13 @@ graphCanvas().addEventListener("pointerup", (event) => {
 graphCanvas().addEventListener("wheel", (event) => {
   event.preventDefault();
   const factor = event.deltaY < 0 ? 1.1 : 0.9;
-  graphView.scale = Math.min(Math.max(graphView.scale * factor, 0.2), 3);
+  const nextScale = Math.min(Math.max(graphView.scale * factor, GRAPH_MIN_SCALE), GRAPH_MAX_SCALE);
+  const rect = graphCanvas().getBoundingClientRect();
+  const cx = event.clientX - rect.left, cy = event.clientY - rect.top;
+  // Keep the point under the cursor stationary while the scale changes, so zooming feels anchored, not like it recenters.
+  graphView.offsetX = cx - ((cx - graphView.offsetX) / graphView.scale) * nextScale;
+  graphView.offsetY = cy - ((cy - graphView.offsetY) / graphView.scale) * nextScale;
+  graphView.scale = nextScale;
 }, { passive: false });
 
 async function start() {
