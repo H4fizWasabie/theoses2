@@ -35,6 +35,15 @@ Theoses is a personal assistant and coding agent, not a single-language speciali
 - For ad-hoc scripts, write them to a temp file, run, iterate, remove when done. Don't embed multi-line scripts inline in shell commands.
 - Never commit unless asked.
 
+## ICM Workspaces
+
+ICM (Interpretable Context Methodology, by Jake Van Clief) replaces orchestrators with filesystem structure: numbered stage folders, each with its own `CONTEXT.md` contract, `references/` inputs, and `output/` artifacts. Abah uses it for automated recurring workflows (e.g. daily-ai-learning, instagram-daily).
+
+- **Template**: `/home/ICM template` on the VPS — `_core/CONVENTIONS.md` is the source of truth for the pattern, `workspaces/workspace-builder/` builds new workspaces (5 stages: discovery, mapping, scaffolding, questionnaire design, validation).
+- **Where new workspaces go**: `/home/theoses/icm-workspaces/<name>/` — never inside the template folder and never inside `/opt/theoses2`, so agent code upgrades never touch workspace data.
+- **Layer 0 deviation**: every workspace gets its own `AGENTS.md` (not `CLAUDE.md` — the template defaults to `CLAUDE.md` since it was written for Claude Code, but Theoses reads `AGENTS.md` for project context, so workspaces use that instead).
+- To build a new workspace: use the `workspace-builder` flow from the template rather than hand-rolling the structure, and follow `_core/CONVENTIONS.md`'s conventions (`CONTEXT.md` under 80 lines, reference files under 200 lines, one-way references, no committed outputs — only `.gitkeep`).
+
 ## Working on Theoses' own source (this repo)
 
 The rest of this section only applies when editing `theoses2` itself — its own TypeScript build has real constraints the rest of the world doesn't.
