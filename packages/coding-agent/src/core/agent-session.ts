@@ -222,7 +222,7 @@ export interface AgentSessionConfig {
 	externalTools?: RegisteredTool[];
 	/** Canonical model/auth runtime used by coding-agent internals. */
 	modelRuntime: ModelRuntime;
-	/** Initial active built-in tool names. Default: [read, bash, edit, write, working_note, remember, save_note, convert_doc] */
+	/** Initial active built-in tool names. Default: [read, bash, edit, write, working_note, remember, save_note, convert_doc, web_search] */
 	initialActiveToolNames?: string[];
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
 	allowedToolNames?: string[];
@@ -2903,7 +2903,7 @@ export class AgentSession {
 
 		const defaultActiveToolNames = this._baseToolsOverride
 			? Object.keys(this._baseToolsOverride)
-			: ["read", "bash", "edit", "write", "working_note", "remember", "save_note", "convert_doc"];
+			: ["read", "bash", "edit", "write", "working_note", "remember", "save_note", "convert_doc", "web_search"];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,

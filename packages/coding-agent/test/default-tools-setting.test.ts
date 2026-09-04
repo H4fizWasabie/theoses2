@@ -76,6 +76,7 @@ describe("defaultTools setting", () => {
 			"save_note",
 			"tool_call",
 			"tool_search",
+			"web_search",
 			"working_note",
 			"write",
 		]);
@@ -187,6 +188,7 @@ describe("defaultTools setting", () => {
 			"save_note",
 			"tool_call",
 			"tool_search",
+			"web_search",
 			"working_note",
 			"write",
 		]);

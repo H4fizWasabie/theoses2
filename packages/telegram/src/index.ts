@@ -17,7 +17,17 @@ const TYPING_INTERVAL_MS = 4000; // Telegram's typing indicator expires after ~5
 // document uploads are stored as artifacts (see the `ctx.message.document` branch
 // below) and need convert_doc enabled to ever be read, since no channel enables it
 // by default.
-const TELEGRAM_TOOLS = ["read", "bash", "edit", "write", "working_note", "remember", "save_note", "convert_doc"];
+const TELEGRAM_TOOLS = [
+	"read",
+	"bash",
+	"edit",
+	"write",
+	"working_note",
+	"remember",
+	"save_note",
+	"convert_doc",
+	"web_search",
+];
 
 function chatId(ctx: Context): string | undefined {
 	return ctx.chat?.id.toString();

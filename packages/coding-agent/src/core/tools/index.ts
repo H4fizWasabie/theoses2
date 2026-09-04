@@ -74,6 +74,11 @@ export {
 	truncateLine,
 	truncateTail,
 } from "./truncate.ts";
+export {
+	createWebSearchToolDefinition,
+	type WebSearchOperations,
+	type WebSearchToolInput,
+} from "./web-search.ts";
 export { createWorkingNoteToolDefinition, type WorkingNoteToolInput } from "./working-note.ts";
 export {
 	createWriteTool,
@@ -97,6 +102,7 @@ import { createMemoryToolDefinitions } from "./memory.ts";
 import { createPowerShellTool, createPowerShellToolDefinition, type PowerShellToolOptions } from "./powershell.ts";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
+import { createWebSearchToolDefinition, type WebSearchOperations } from "./web-search.ts";
 import { createWorkingNoteToolDefinition } from "./working-note.ts";
 import { createWriteTool, createWriteToolDefinition, type WriteToolOptions } from "./write.ts";
 
@@ -114,7 +120,8 @@ export type ToolName =
 	| "working_note"
 	| "remember"
 	| "save_note"
-	| "convert_doc";
+	| "convert_doc"
+	| "web_search";
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
 	"bash",
@@ -128,6 +135,7 @@ export const allToolNames: Set<ToolName> = new Set([
 	"remember",
 	"save_note",
 	"convert_doc",
+	"web_search",
 ]);
 
 export interface ToolsOptions {
@@ -143,6 +151,7 @@ export interface ToolsOptions {
 	memory?: MemoryStore;
 	onMemorySaved?: () => void;
 	convertDoc?: { operations?: ConvertDocOperations };
+	webSearch?: { operations?: WebSearchOperations; apiKeys?: string[] };
 }
 
 export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
@@ -172,6 +181,8 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 		}
 		case "convert_doc":
 			return createConvertDocToolDefinition(cwd, options?.convertDoc);
+		case "web_search":
+			return createWebSearchToolDefinition(options?.webSearch);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -204,6 +215,8 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 		}
 		case "convert_doc":
 			return wrapToolDefinition(createConvertDocToolDefinition(cwd, options?.convertDoc));
+		case "web_search":
+			return wrapToolDefinition(createWebSearchToolDefinition(options?.webSearch));
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -243,6 +256,7 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		remember: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore(), options?.onMemorySaved)[0]!,
 		save_note: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore(), options?.onMemorySaved)[1]!,
 		convert_doc: createConvertDocToolDefinition(cwd, options?.convertDoc),
+		web_search: createWebSearchToolDefinition(options?.webSearch),
 	};
 }
 
@@ -280,5 +294,6 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		remember: wrapToolDefinition(createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[0]!),
 		save_note: wrapToolDefinition(createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[1]!),
 		convert_doc: wrapToolDefinition(createConvertDocToolDefinition(cwd, options?.convertDoc)),
+		web_search: wrapToolDefinition(createWebSearchToolDefinition(options?.webSearch)),
 	};
 }
