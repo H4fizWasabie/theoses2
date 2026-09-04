@@ -29,6 +29,11 @@ export {
 	type FindToolOptions,
 } from "./find.ts";
 export {
+	createGenerateImageToolDefinition,
+	type GenerateImageOperations,
+	type GenerateImageToolInput,
+} from "./generate-image.ts";
+export {
 	createGrepTool,
 	createGrepToolDefinition,
 	type GrepOperations,
@@ -96,6 +101,7 @@ import type { ConvertDocOperations } from "./convert-doc.ts";
 import { createConvertDocToolDefinition } from "./convert-doc.ts";
 import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.ts";
 import { createFindTool, createFindToolDefinition, type FindToolOptions } from "./find.ts";
+import { createGenerateImageToolDefinition, type GenerateImageOperations } from "./generate-image.ts";
 import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.ts";
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.ts";
 import { createMemoryToolDefinitions } from "./memory.ts";
@@ -121,7 +127,8 @@ export type ToolName =
 	| "remember"
 	| "save_note"
 	| "convert_doc"
-	| "web_search";
+	| "web_search"
+	| "generate_image";
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
 	"bash",
@@ -136,6 +143,7 @@ export const allToolNames: Set<ToolName> = new Set([
 	"save_note",
 	"convert_doc",
 	"web_search",
+	"generate_image",
 ]);
 
 export interface ToolsOptions {
@@ -152,6 +160,7 @@ export interface ToolsOptions {
 	onMemorySaved?: () => void;
 	convertDoc?: { operations?: ConvertDocOperations };
 	webSearch?: { operations?: WebSearchOperations; apiKeys?: string[] };
+	generateImage?: { operations?: GenerateImageOperations };
 }
 
 export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
@@ -183,6 +192,8 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			return createConvertDocToolDefinition(cwd, options?.convertDoc);
 		case "web_search":
 			return createWebSearchToolDefinition(options?.webSearch);
+		case "generate_image":
+			return createGenerateImageToolDefinition(options?.generateImage);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -217,6 +228,8 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			return wrapToolDefinition(createConvertDocToolDefinition(cwd, options?.convertDoc));
 		case "web_search":
 			return wrapToolDefinition(createWebSearchToolDefinition(options?.webSearch));
+		case "generate_image":
+			return wrapToolDefinition(createGenerateImageToolDefinition(options?.generateImage));
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -257,6 +270,7 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		save_note: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore(), options?.onMemorySaved)[1]!,
 		convert_doc: createConvertDocToolDefinition(cwd, options?.convertDoc),
 		web_search: createWebSearchToolDefinition(options?.webSearch),
+		generate_image: createGenerateImageToolDefinition(options?.generateImage),
 	};
 }
 
@@ -295,5 +309,6 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		save_note: wrapToolDefinition(createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[1]!),
 		convert_doc: wrapToolDefinition(createConvertDocToolDefinition(cwd, options?.convertDoc)),
 		web_search: wrapToolDefinition(createWebSearchToolDefinition(options?.webSearch)),
+		generate_image: wrapToolDefinition(createGenerateImageToolDefinition(options?.generateImage)),
 	};
 }

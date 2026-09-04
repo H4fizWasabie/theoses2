@@ -30,7 +30,14 @@ export async function readMemoryGraph(): Promise<MemoryGraph> {
 	const nodes = store.listNodes();
 	const dir = memoryDir();
 	return {
-		nodes: nodes.map((node) => ({ id: node.id, subject: node.subject, at: node.at, path: join(dir, `${node.id}.md`) })),
-		edges: nodes.flatMap((node) => node.edges.map((edge) => ({ source: node.id, target: edge.target, rel: edge.rel }))),
+		nodes: nodes.map((node) => ({
+			id: node.id,
+			subject: node.subject,
+			at: node.at,
+			path: join(dir, `${node.id}.md`),
+		})),
+		edges: nodes.flatMap((node) =>
+			node.edges.map((edge) => ({ source: node.id, target: edge.target, rel: edge.rel })),
+		),
 	};
 }

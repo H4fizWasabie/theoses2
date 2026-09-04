@@ -24,5 +24,8 @@ test("dashboard file workbench edits safely and renames paths", async () => {
 
 	await deletePath(join(root, "note.md"));
 	const remaining = await listDirectory(root);
-	assert.equal(remaining.some((entry) => entry.name === "note.md"), false);
+	assert.equal(
+		remaining.some((entry) => entry.name === "note.md"),
+		false,
+	);
 });

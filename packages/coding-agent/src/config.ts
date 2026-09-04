@@ -565,3 +565,8 @@ export function getSessionsDir(): string {
 export function getDebugLogPath(): string {
 	return join(getAgentDir(), `${APP_NAME}-debug.log`);
 }
+
+/** Get path to generated-images directory (output of the generate_image tool) */
+export function getGeneratedImagesDir(): string {
+	return join(getAgentDir(), "generated-images");
+}

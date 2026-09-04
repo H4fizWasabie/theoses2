@@ -64,9 +64,10 @@ function formatResults(response: TavilyResponse): string {
 	return parts.length > 0 ? parts.join("\n\n") : "No results found.";
 }
 
-export function createWebSearchToolDefinition(
-	options?: { operations?: WebSearchOperations; apiKeys?: string[] },
-): ToolDefinition<typeof webSearchSchema, undefined> {
+export function createWebSearchToolDefinition(options?: {
+	operations?: WebSearchOperations;
+	apiKeys?: string[];
+}): ToolDefinition<typeof webSearchSchema, undefined> {
 	const apiKeys = (options?.apiKeys ?? [process.env.TAVILY_API_KEY, process.env.TAVILY_API_KEY_2]).filter(
 		(key): key is string => !!key,
 	);

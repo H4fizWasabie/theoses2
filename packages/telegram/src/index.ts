@@ -1,4 +1,4 @@
-import { Bot, type Context } from "grammy";
+import { Bot, type Context, InputFile } from "grammy";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
@@ -27,6 +27,7 @@ const TELEGRAM_TOOLS = [
 	"save_note",
 	"convert_doc",
 	"web_search",
+	"generate_image",
 ];
 
 function chatId(ctx: Context): string | undefined {
@@ -51,6 +52,15 @@ function assistantText(event: AgentSessionEvent): string | undefined {
 		.join("")
 		.trim();
 	return text || undefined;
+}
+
+/** Pulls image attachments (e.g. from generate_image) out of a raw tool result for delivery as Telegram photos. */
+function extractGeneratedImages(result: unknown): Buffer[] {
+	const content = (result as { content?: unknown } | undefined)?.content;
+	if (!Array.isArray(content)) return [];
+	return content
+		.filter((part): part is { type: "image"; data: string } => (part as { type?: string })?.type === "image")
+		.map((part) => Buffer.from(part.data, "base64"));
 }
 
 /**
@@ -211,10 +221,14 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			};
 
 			const toolNames: string[] = [];
+			const generatedImages: Buffer[] = [];
 			const unsubscribe = session.subscribe((event) => {
 				response = assistantText(event) ?? response;
 				if (event.type === "tool_execution_start") setStatus(`Running ${event.toolName}...`);
-				if (event.type === "tool_execution_end") toolNames.push(event.toolName);
+				if (event.type === "tool_execution_end") {
+					toolNames.push(event.toolName);
+					generatedImages.push(...extractGeneratedImages(event.result));
+				}
 			});
 			const abortController = new AbortController();
 			startTypingIndicator(bot, ctx.chat.id, abortController.signal);
@@ -233,6 +247,9 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				await sendTelegramReply(bot, ctx.chat.id, response, toolNames, ctx.message.message_id, statusMessageId);
 			} else if (statusMessageId !== undefined) {
 				await bot.api.deleteMessage(ctx.chat.id, statusMessageId).catch(() => {});
+			}
+			for (const image of generatedImages) {
+				await bot.api.sendPhoto(ctx.chat.id, new InputFile(image));
 			}
 
 			const channelSessionKey = session.sessionManager.getChannelSessionKey();
