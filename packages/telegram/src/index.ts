@@ -3,6 +3,7 @@ import {
 	type AgentSession,
 	type AgentSessionEvent,
 	createAgentSession,
+	maybeRunConsolidation,
 	type SessionInfo,
 	SessionManager,
 } from "theoses-coding-agent";
@@ -217,6 +218,16 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			} else if (statusMessageId !== undefined) {
 				await bot.api.deleteMessage(ctx.chat.id, statusMessageId).catch(() => {});
 			}
+
+			const channelSessionKey = session.sessionManager.getChannelSessionKey();
+			maybeRunConsolidation({
+				cwd: session.sessionManager.getCwd(),
+				channel: channelSessionKey.channel,
+				channelSessionId: channelSessionKey.channelSessionId,
+				userMessageText: messageText(ctx),
+				mainSessionManager: session.sessionManager,
+				modelRuntime: session.modelRuntime,
+			});
 		});
 		queues.set(
 			chat,
