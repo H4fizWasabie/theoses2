@@ -469,7 +469,7 @@ function layoutGraphClusters(nodes, edges) {
   const clusters = computeGraphClusters(nodes, edges);
   clusters.forEach((cluster, index) => {
     const color = cluster.length > 1 ? CLUSTER_COLORS[index % CLUSTER_COLORS.length] : SOLO_NODE_COLOR;
-    const spread = 90 * Math.sqrt(index + 1);
+    const spread = 26 * Math.sqrt(index);
     const angle = index * GRAPH_GOLDEN_ANGLE;
     const anchorX = index === 0 ? 0 : Math.cos(angle) * spread;
     const anchorY = index === 0 ? 0 : Math.sin(angle) * spread;
@@ -551,7 +551,10 @@ function drawGraph(graph) {
   }
 
   const showLabels = graphView.scale >= GRAPH_LABEL_ZOOM;
-  const radius = Math.min(3 + Math.max(graphView.scale, 0.4) * 2, 8);
+  // Node dots are sized in screen pixels, not graph space, so they stay visible at any zoom
+  // level instead of shrinking toward invisible when the view is fit zoomed all the way out.
+  const screenRadius = Math.min(3 + graphView.scale * 2, 8);
+  const radius = screenRadius / graphView.scale;
   for (const node of graph.nodes) {
     ctx.beginPath();
     ctx.fillStyle = node.clusterColor || SOLO_NODE_COLOR;
