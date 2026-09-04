@@ -97,7 +97,10 @@ async function login(request: IncomingMessage, response: ServerResponse, accessT
 		return;
 	}
 	const secure = request.headers["x-forwarded-proto"] === "https";
-	const flags = `Path=/; HttpOnly; SameSite=Strict${secure ? "; Secure" : ""}`;
+	// Without Max-Age this is a session cookie: browsers drop it on their own
+	// schedule (tab/process restart), forcing a re-login unrelated to whether the
+	// token is still valid. One year keeps sign-in persistent like a normal app.
+	const flags = `Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict${secure ? "; Secure" : ""}`;
 	response.setHeader("Set-Cookie", `${DASHBOARD_TOKEN_COOKIE}=${encodeURIComponent(accessToken)}; ${flags}`);
 	json(response, 200, { ok: true });
 }

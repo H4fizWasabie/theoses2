@@ -12,6 +12,12 @@ const CHANNEL = "telegram";
 const TELEGRAM_MESSAGE_LIMIT = 4000;
 const TYPING_INTERVAL_MS = 4000; // Telegram's typing indicator expires after ~5s, so it must be re-sent.
 
+// Mirrors createAgentSession's own default tool set, plus convert_doc: Telegram
+// document uploads are stored as artifacts (see the `ctx.message.document` branch
+// below) and need convert_doc enabled to ever be read, since no channel enables it
+// by default.
+const TELEGRAM_TOOLS = ["read", "bash", "edit", "write", "working_note", "remember", "save_note", "convert_doc"];
+
 function chatId(ctx: Context): string | undefined {
 	return ctx.chat?.id.toString();
 }
@@ -126,7 +132,7 @@ async function sessionFor(
 		const sessionManager = matches[0]
 			? SessionManager.open(matches[0].path)
 			: SessionManager.create(cwd, undefined, key);
-		const { session } = await createAgentSession({ sessionManager });
+		const { session } = await createAgentSession({ sessionManager, tools: TELEGRAM_TOOLS });
 		return session;
 	})();
 	sessions.set(chat, created);
