@@ -50,7 +50,19 @@ async function generateWithCloudflare(prompt: string, signal?: AbortSignal): Pro
 	const body = (await response.json()) as { result?: { image?: string; images?: string[] } };
 	const base64 = body.result?.image ?? body.result?.images?.[0];
 	if (!base64) throw new Error("Cloudflare Workers AI: no image in response");
-	return { data: Buffer.from(base64, "base64"), mimeType: "image/png", provider: `Cloudflare Workers AI (${model})` };
+	const data = Buffer.from(base64, "base64");
+	return { data, mimeType: sniffMimeType(data), provider: `Cloudflare Workers AI (${model})` };
+}
+
+/** Cloudflare's base64 envelope doesn't say which format it packed (flux models return JPEG bytes despite the PNG-sounding name), so sniff the magic bytes instead of guessing. */
+function sniffMimeType(data: Buffer): string {
+	if (data[0] === 0xff && data[1] === 0xd8) return "image/jpeg";
+	if (data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47) return "image/png";
+	if (data.subarray(0, 4).toString("ascii") === "RIFF" && data.subarray(8, 12).toString("ascii") === "WEBP") {
+		return "image/webp";
+	}
+	if (data.subarray(0, 3).toString("ascii") === "GIF") return "image/gif";
+	return "image/jpeg";
 }
 
 async function generateWithOpenRouter(prompt: string, signal?: AbortSignal): Promise<GeneratedImage> {
