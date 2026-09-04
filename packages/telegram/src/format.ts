@@ -174,8 +174,23 @@ export function formatTelegramHtml(reply: string, toolNames: string[] = []): str
 	// 7. Pipe tables -> aligned <pre> (runs last: cells already inline-formatted).
 	text = formatPipeTables(text);
 
-	if (toolNames.length > 0) text += `\n\n<code>${toolNames.join(" → ")}</code>`;
+	if (toolNames.length > 0) text += `\n\n<code>${collapseToolNames(toolNames).join(" → ")}</code>`;
 	return text;
+}
+
+/** Collapses consecutive repeats of the same tool name, e.g. bash,bash,bash -> "bash ×3". */
+function collapseToolNames(toolNames: string[]): string[] {
+	const collapsed: string[] = [];
+	for (const name of toolNames) {
+		const last = collapsed.at(-1);
+		if (last === name || last?.startsWith(`${name} ×`)) {
+			const count = last?.startsWith(`${name} ×`) ? Number(last.slice(name.length + 2)) + 1 : 2;
+			collapsed[collapsed.length - 1] = `${name} ×${count}`;
+		} else {
+			collapsed.push(name);
+		}
+	}
+	return collapsed;
 }
 
 /**

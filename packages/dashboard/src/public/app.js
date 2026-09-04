@@ -1,4 +1,4 @@
-const state = { sessions: [], active: null, history: [], reply: null, tabs: [], activeTab: null, pending: 0, preview: false, filesRoot: "/" };
+const state = { sessions: [], active: null, history: [], reply: null, tabs: [], activeTab: null, pending: 0, preview: false, filesRoot: "/home" };
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
 
