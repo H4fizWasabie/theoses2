@@ -1,4 +1,4 @@
-const state = { sessions: [], active: null, history: [], reply: null, tabs: [], activeTab: null, pending: 0, preview: false, filesRoot: "/home" };
+const state = { sessions: [], active: null, history: [], reply: null, tabs: [], activeTab: null, pending: 0, preview: false, filesRoot: "/home", graph: null };
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
 
@@ -196,12 +196,22 @@ function parentPath(path) {
 }
 
 function renderDirectory(entries, target) {
-  target.innerHTML = entries.map((entry) => `<div class="tree-row"><span class="tree-kind">${entry.kind === "directory" ? "▸" : "·"}</span><button class="tree-name" data-open="${escapeHtml(entry.path)}">${escapeHtml(entry.name)}</button><button class="tree-rename" data-rename="${escapeHtml(entry.path)}" title="Rename">rename</button></div>`).join("");
+  target.innerHTML = entries.map((entry) => `<div class="tree-row"><span class="tree-kind">${entry.kind === "directory" ? "▸" : "·"}</span><button class="tree-name" data-open="${escapeHtml(entry.path)}">${escapeHtml(entry.name)}</button><button class="tree-rename" data-rename="${escapeHtml(entry.path)}" title="Rename">rename</button><button class="tree-delete" data-delete="${escapeHtml(entry.path)}" title="Delete">delete</button></div>`).join("");
   target.querySelectorAll("[data-open]").forEach((button) => button.addEventListener("click", () => {
     const entry = entries.find((item) => item.path === button.dataset.open);
     if (entry?.kind === "directory") void loadTree(entry.path); else openFile(entry.path);
   }));
   target.querySelectorAll("[data-rename]").forEach((button) => button.addEventListener("click", () => renameEntry(button.dataset.rename)));
+  target.querySelectorAll("[data-delete]").forEach((button) => button.addEventListener("click", () => deleteEntry(button.dataset.delete)));
+}
+
+async function deleteEntry(path) {
+  if (!window.confirm(`Delete ${path}? This cannot be undone.`)) return;
+  try {
+    await request(`/api/file?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+    closeTab(path);
+    await loadTree();
+  } catch (error) { window.alert(error.message); }
 }
 
 async function loadTree(path = state.filesRoot) {
@@ -412,6 +422,203 @@ $("path-form").addEventListener("submit", (event) => {
   event.preventDefault();
   void loadTree($("path-input").value.trim() || "/");
 });
+
+// --- Obsidian-style force-directed memory graph view ---
+
+const GRAPH_REPULSION = 2600;
+const GRAPH_SPRING_LENGTH = 90;
+const GRAPH_SPRING_STRENGTH = 0.02;
+const GRAPH_DAMPING = 0.85;
+const GRAPH_CENTER_STRENGTH = 0.01;
+let graphAnimationFrame = null;
+let graphDrag = null; // { node, pointerId } | { pan: true, pointerId, startX, startY, originX, originY }
+const graphView = { offsetX: 0, offsetY: 0, scale: 1 };
+
+function graphCanvas() { return $("graph-canvas"); }
+
+function layoutGraphNodes(nodes) {
+  const canvas = graphCanvas();
+  const cx = canvas.clientWidth / 2 || 400;
+  const cy = canvas.clientHeight / 2 || 300;
+  nodes.forEach((node, index) => {
+    if (node.x !== undefined) return;
+    const angle = (index / Math.max(nodes.length, 1)) * Math.PI * 2;
+    const radius = 120 + (index % 5) * 40;
+    node.x = cx + Math.cos(angle) * radius;
+    node.y = cy + Math.sin(angle) * radius;
+    node.vx = 0; node.vy = 0;
+  });
+}
+
+function stepGraphSimulation(graph) {
+  const { nodes, edges } = graph;
+  for (const node of nodes) {
+    if (node.pinned) continue;
+    let fx = 0, fy = 0;
+    for (const other of nodes) {
+      if (other === node) continue;
+      const dx = node.x - other.x, dy = node.y - other.y;
+      const distSq = Math.max(dx * dx + dy * dy, 25);
+      const force = GRAPH_REPULSION / distSq;
+      const dist = Math.sqrt(distSq);
+      fx += (dx / dist) * force; fy += (dy / dist) * force;
+    }
+    node._fx = fx; node._fy = fy;
+  }
+  for (const edge of edges) {
+    const source = nodes.find((n) => n.id === edge.source);
+    const target = nodes.find((n) => n.id === edge.target);
+    if (!source || !target) continue;
+    const dx = target.x - source.x, dy = target.y - source.y;
+    const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
+    const stretch = dist - GRAPH_SPRING_LENGTH;
+    const force = stretch * GRAPH_SPRING_STRENGTH;
+    const fx = (dx / dist) * force, fy = (dy / dist) * force;
+    if (!source.pinned) { source._fx += fx; source._fy += fy; }
+    if (!target.pinned) { target._fx -= fx; target._fy -= fy; }
+  }
+  const canvas = graphCanvas();
+  const cx = canvas.clientWidth / 2 || 400;
+  const cy = canvas.clientHeight / 2 || 300;
+  for (const node of nodes) {
+    if (node.pinned) continue;
+    node._fx += (cx - node.x) * GRAPH_CENTER_STRENGTH;
+    node._fy += (cy - node.y) * GRAPH_CENTER_STRENGTH;
+    node.vx = (node.vx + node._fx) * GRAPH_DAMPING;
+    node.vy = (node.vy + node._fy) * GRAPH_DAMPING;
+    node.x += node.vx; node.y += node.vy;
+  }
+}
+
+function drawGraph(graph) {
+  const canvas = graphCanvas();
+  const ctx = canvas.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth, height = canvas.clientHeight;
+  if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
+    canvas.width = width * dpr; canvas.height = height * dpr;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  ctx.save();
+  ctx.translate(graphView.offsetX, graphView.offsetY);
+  ctx.scale(graphView.scale, graphView.scale);
+
+  ctx.strokeStyle = "#c7cac6";
+  ctx.lineWidth = 1;
+  for (const edge of graph.edges) {
+    const source = graph.nodes.find((n) => n.id === edge.source);
+    const target = graph.nodes.find((n) => n.id === edge.target);
+    if (!source || !target) continue;
+    ctx.beginPath();
+    ctx.moveTo(source.x, source.y);
+    ctx.lineTo(target.x, target.y);
+    ctx.stroke();
+  }
+
+  for (const node of graph.nodes) {
+    ctx.beginPath();
+    ctx.fillStyle = "#4d6b58";
+    ctx.arc(node.x, node.y, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#202321";
+    ctx.font = "11px Inter, sans-serif";
+    ctx.fillText((node.subject || node.id).slice(0, 40), node.x + 12, node.y + 4);
+  }
+  ctx.restore();
+}
+
+function graphTick() {
+  if (!state.graph) return;
+  stepGraphSimulation(state.graph);
+  drawGraph(state.graph);
+  graphAnimationFrame = requestAnimationFrame(graphTick);
+}
+
+function toGraphSpace(clientX, clientY) {
+  const canvas = graphCanvas();
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (clientX - rect.left - graphView.offsetX) / graphView.scale,
+    y: (clientY - rect.top - graphView.offsetY) / graphView.scale,
+  };
+}
+
+function findGraphNodeAt(x, y) {
+  if (!state.graph) return null;
+  return state.graph.nodes.find((node) => (node.x - x) ** 2 + (node.y - y) ** 2 <= 144);
+}
+
+async function loadMemoryGraph() {
+  $("graph-status").textContent = "Loading…";
+  try {
+    const data = await request("/api/memory-graph");
+    layoutGraphNodes(data.nodes);
+    state.graph = data;
+    $("graph-empty").hidden = data.nodes.length > 0;
+    $("graph-status").textContent = `${data.nodes.length} nodes · ${data.edges.length} edges`;
+    if (!graphAnimationFrame) graphTick();
+  } catch (error) {
+    $("graph-status").textContent = error.message;
+  }
+}
+
+function openGraphView() {
+  $("graph-view").hidden = false;
+  void loadMemoryGraph();
+}
+
+function closeGraphView() {
+  $("graph-view").hidden = true;
+  if (graphAnimationFrame) { cancelAnimationFrame(graphAnimationFrame); graphAnimationFrame = null; }
+}
+
+$("graph-view-button").addEventListener("click", openGraphView);
+$("graph-close").addEventListener("click", closeGraphView);
+$("graph-refresh").addEventListener("click", () => { if (state.graph) state.graph.nodes.forEach((n) => { n.x = undefined; }); void loadMemoryGraph(); });
+
+graphCanvas().addEventListener("pointerdown", (event) => {
+  const point = toGraphSpace(event.clientX, event.clientY);
+  const node = findGraphNodeAt(point.x, point.y);
+  graphCanvas().setPointerCapture(event.pointerId);
+  if (node) {
+    node.pinned = true;
+    graphDrag = { node, pointerId: event.pointerId, moved: false, startX: event.clientX, startY: event.clientY };
+  } else {
+    graphDrag = { pan: true, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: graphView.offsetX, originY: graphView.offsetY };
+  }
+});
+
+graphCanvas().addEventListener("pointermove", (event) => {
+  if (!graphDrag || graphDrag.pointerId !== event.pointerId) return;
+  if (graphDrag.pan) {
+    graphView.offsetX = graphDrag.originX + (event.clientX - graphDrag.startX);
+    graphView.offsetY = graphDrag.originY + (event.clientY - graphDrag.startY);
+    return;
+  }
+  const point = toGraphSpace(event.clientX, event.clientY);
+  graphDrag.node.x = point.x; graphDrag.node.y = point.y;
+  graphDrag.node.vx = 0; graphDrag.node.vy = 0;
+  if (Math.abs(event.clientX - graphDrag.startX) > 3 || Math.abs(event.clientY - graphDrag.startY) > 3) graphDrag.moved = true;
+});
+
+graphCanvas().addEventListener("pointerup", (event) => {
+  if (!graphDrag || graphDrag.pointerId !== event.pointerId) return;
+  if (!graphDrag.pan) {
+    graphDrag.node.pinned = false;
+    if (!graphDrag.moved) {
+      closeGraphView();
+      openFile(graphDrag.node.path);
+    }
+  }
+  graphDrag = null;
+});
+
+graphCanvas().addEventListener("wheel", (event) => {
+  event.preventDefault();
+  const factor = event.deltaY < 0 ? 1.1 : 0.9;
+  graphView.scale = Math.min(Math.max(graphView.scale * factor, 0.2), 3);
+}, { passive: false });
 
 async function start() {
   try {

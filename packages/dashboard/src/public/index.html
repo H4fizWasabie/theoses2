@@ -21,6 +21,7 @@
     <header class="topbar">
       <div class="brand">Theoses</div>
       <button id="new-session" class="button">+ New</button>
+      <button id="graph-view-button" class="button">Graph</button>
       <button id="telegram-settings-button" class="button">Settings</button>
       <button id="toggle-sidebar" class="icon-button" title="Collapse conversations and files">☰</button>
       <button id="toggle-files" class="icon-button" title="Collapse file editor">▣</button>
@@ -66,6 +67,16 @@
         </div>
       </section>
     </main>
+  </div>
+  <div id="graph-view" class="graph-view" hidden>
+    <div class="graph-head">
+      <strong>Memory graph</strong>
+      <span id="graph-status" class="file-status"></span>
+      <button id="graph-refresh" class="icon-button" title="Refresh">↻</button>
+      <button id="graph-close" class="icon-button" title="Close">×</button>
+    </div>
+    <canvas id="graph-canvas"></canvas>
+    <div id="graph-empty" class="empty file-empty" hidden>No memory nodes yet.</div>
   </div>
   <dialog id="telegram-settings" class="settings-dialog">
     <form id="telegram-settings-form" class="settings-card" method="dialog">

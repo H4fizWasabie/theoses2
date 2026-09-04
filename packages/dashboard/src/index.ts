@@ -13,7 +13,8 @@ import {
 	type SessionInfo,
 	SessionManager,
 } from "theoses-coding-agent";
-import { FileConflictError, listDirectory, readTextFile, renamePath, writeTextFile } from "./files.ts";
+import { deletePath, FileConflictError, listDirectory, readTextFile, renamePath, writeTextFile } from "./files.ts";
+import { readMemoryGraph } from "./memory-graph.ts";
 import { saveTelegramConfig, telegramConfigStatus } from "./telegram-config.ts";
 
 const DASHBOARD_CHANNEL = "dashboard";
@@ -445,9 +446,17 @@ async function api(
 		);
 		return true;
 	}
+	if (url.pathname === "/api/file" && request.method === "DELETE") {
+		json(response, 200, await deletePath(stringField({ path: url.searchParams.get("path") }, "path")));
+		return true;
+	}
 	if (url.pathname === "/api/rename" && request.method === "POST") {
 		const input = await body(request);
 		json(response, 200, await renamePath(stringField(input, "path"), stringField(input, "newName")));
+		return true;
+	}
+	if (url.pathname === "/api/memory-graph" && request.method === "GET") {
+		json(response, 200, await readMemoryGraph());
 		return true;
 	}
 	return false;

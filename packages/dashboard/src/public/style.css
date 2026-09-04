@@ -139,8 +139,17 @@ button { color: inherit; }
 .tree-kind { color: var(--muted); width: 14px; text-align: center; flex: 0 0 auto; }
 .tree-rename { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
 .tree-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; border: 0; background: transparent; cursor: pointer; }
-.tree-rename { opacity: 0; font-size: 11px; }
-.tree-row:hover .tree-rename { opacity: 1; }
+.tree-rename, .tree-delete { opacity: 0; font-size: 11px; }
+.tree-row:hover .tree-rename, .tree-row:hover .tree-delete { opacity: 1; }
+.tree-delete { border: 0; background: transparent; color: var(--danger); cursor: pointer; }
+
+.graph-view { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; background: var(--bg); }
+.graph-view[hidden] { display: none; }
+.graph-head { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.graph-head .file-status { border: 0; min-height: 0; flex: 1; }
+#graph-canvas { flex: 1; width: 100%; cursor: grab; }
+#graph-canvas:active { cursor: grabbing; }
+#graph-empty { flex: 1; }
 
 @media (max-width: 900px) {
   .shell { grid-template-columns: 240px 7px minmax(320px, 1fr); }
