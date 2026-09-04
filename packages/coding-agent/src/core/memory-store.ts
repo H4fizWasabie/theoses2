@@ -1,9 +1,40 @@
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { stringify } from "yaml";
 import { CONFIG_DIR_NAME } from "../config.ts";
+import { parseFrontmatter } from "../utils/frontmatter.ts";
 
+/** Closed vocabulary for semantic-graph edges. Extend only on a real, recurring gap. */
+export const EDGE_RELATIONS = [
+	"prefers",
+	"attributed_to",
+	"depends_on",
+	"located_at",
+	"requires",
+	"supersedes",
+	"used_in",
+	"maintains",
+] as const;
+export type EdgeRelation = (typeof EDGE_RELATIONS)[number];
+
+export interface MemoryEdge {
+	target: string;
+	rel: EdgeRelation;
+}
+
+export interface MemoryNode {
+	id: string;
+	/** Always "semantic" today — episodic memory lives in a separate SQLite store, not this graph. */
+	type: "semantic";
+	subject: string;
+	at: string;
+	edges: MemoryEdge[];
+	body?: string;
+}
+
+/** Flat view of a node, for callers that only need id/timestamp/text (e.g. the `remember` tool's output). */
 export interface MemoryRecord {
 	id: string;
 	createdAt: string;
@@ -15,40 +46,201 @@ export interface MemoryStore {
 	saveNote(text: string): MemoryRecord;
 }
 
-function defaultMemoryPath(): string {
+function defaultMemoryDir(): string {
+	return process.env.THEOSES_MEMORY_DIR ?? join(homedir(), CONFIG_DIR_NAME, "memories");
+}
+
+function legacyMemoryFilePath(): string {
 	return process.env.THEOSES_MEMORY_FILE ?? join(homedir(), CONFIG_DIR_NAME, "memory.jsonl");
 }
 
+interface LegacyMemoryRecord {
+	id?: string;
+	createdAt?: string;
+	text?: string;
+}
+
+function slugify(subject: string): string {
+	const base = subject
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "_")
+		.replace(/^_+|_+$/g, "")
+		.slice(0, 48);
+	return base || "note";
+}
+
+function nodeToRecord(node: MemoryNode): MemoryRecord {
+	return { id: node.id, createdAt: node.at, text: node.subject };
+}
+
+interface NodeFrontmatter {
+	id: string;
+	type: "semantic";
+	subject: string;
+	at: string;
+	edges: MemoryEdge[];
+}
+
+function serializeNode(node: MemoryNode): string {
+	const frontmatter: NodeFrontmatter = {
+		id: node.id,
+		type: node.type,
+		subject: node.subject,
+		at: node.at,
+		edges: node.edges,
+	};
+	return `---\n${stringify(frontmatter)}---\n${node.body ? `${node.body}\n` : ""}`;
+}
+
+function parseNode(raw: string): MemoryNode | undefined {
+	const { frontmatter, body } = parseFrontmatter<Partial<NodeFrontmatter>>(raw);
+	if (!frontmatter.id || !frontmatter.at || frontmatter.subject === undefined) return undefined;
+	return {
+		id: frontmatter.id,
+		type: "semantic",
+		subject: frontmatter.subject,
+		at: frontmatter.at,
+		edges: frontmatter.edges ?? [],
+		body: body ? body : undefined,
+	};
+}
+
 export class FileMemoryStore implements MemoryStore {
-	private readonly filePath: string;
+	private readonly dir: string;
 
-	constructor(filePath = defaultMemoryPath()) {
-		this.filePath = filePath;
+	constructor(dir = defaultMemoryDir()) {
+		this.dir = dir;
+		this.migrateLegacyStore();
 	}
 
-	remember(query: string): MemoryRecord[] {
-		if (!existsSync(this.filePath)) return [];
-		const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-		return readFileSync(this.filePath, "utf8")
-			.split("\n")
-			.flatMap((line) => {
-				try {
-					const record = JSON.parse(line) as MemoryRecord;
-					return typeof record.text === "string" && terms.every((term) => record.text.toLowerCase().includes(term))
-						? [record]
-						: [];
-				} catch {
-					return [];
-				}
-			})
-			.slice(-8)
-			.reverse();
+	/**
+	 * One-time migration from the old flat `memory.jsonl` (pre-graph) store: each line becomes a
+	 * bare node, same as the live `save_note` path, preserving the original id/timestamp so it
+	 * doesn't silently disappear on deploy. Only runs once — if this store's directory already
+	 * exists, migration has already happened (or there was never anything to migrate).
+	 */
+	private migrateLegacyStore(): void {
+		if (existsSync(this.dir)) return;
+		const legacyPath = legacyMemoryFilePath();
+		if (!existsSync(legacyPath)) return;
+		const lines = readFileSync(legacyPath, "utf8").split("\n").filter(Boolean);
+		if (lines.length === 0) return;
+		mkdirSync(this.dir, { recursive: true });
+		for (const line of lines) {
+			try {
+				const legacy = JSON.parse(line) as LegacyMemoryRecord;
+				if (typeof legacy.text !== "string") continue;
+				this.writeNode({
+					id: legacy.id ?? randomUUID(),
+					type: "semantic",
+					subject: legacy.text,
+					at: legacy.createdAt ?? new Date().toISOString(),
+					edges: [],
+				});
+			} catch {
+				// Skip malformed legacy lines rather than aborting the whole migration.
+			}
+		}
 	}
 
+	private nodePath(id: string): string {
+		return join(this.dir, `${id}.md`);
+	}
+
+	/** All nodes currently on disk, malformed files silently skipped. */
+	listNodes(): MemoryNode[] {
+		if (!existsSync(this.dir)) return [];
+		return readdirSync(this.dir)
+			.filter((name) => name.endsWith(".md"))
+			.flatMap((name) => {
+				const node = parseNode(readFileSync(join(this.dir, name), "utf8"));
+				return node ? [node] : [];
+			});
+	}
+
+	getNode(id: string): MemoryNode | undefined {
+		const path = this.nodePath(id);
+		if (!existsSync(path)) return undefined;
+		return parseNode(readFileSync(path, "utf8"));
+	}
+
+	writeNode(node: MemoryNode): void {
+		mkdirSync(this.dir, { recursive: true });
+		writeFileSync(this.nodePath(node.id), serializeNode(node));
+	}
+
+	addEdge(nodeId: string, edge: MemoryEdge): void {
+		const node = this.getNode(nodeId);
+		if (!node) throw new Error(`Cannot add edge: node ${nodeId} not found`);
+		if (node.edges.some((e) => e.target === edge.target && e.rel === edge.rel)) return;
+		this.writeNode({ ...node, edges: [...node.edges, edge] });
+	}
+
+	/** Consolidation path: a full node with edges/body, id chosen by the caller (or generated here). */
+	createNode(input: { id?: string; subject: string; at?: string; edges?: MemoryEdge[]; body?: string }): MemoryNode {
+		const id = input.id ?? `${slugify(input.subject)}_${randomUUID().slice(0, 8)}`;
+		const node: MemoryNode = {
+			id,
+			type: "semantic",
+			subject: input.subject.trim(),
+			at: input.at ?? new Date().toISOString(),
+			edges: input.edges ?? [],
+			body: input.body,
+		};
+		this.writeNode(node);
+		return node;
+	}
+
+	/** Live path: a bare node, no edges, no dedup — the next consolidation pass backfills both. */
 	saveNote(text: string): MemoryRecord {
-		const record: MemoryRecord = { id: randomUUID(), createdAt: new Date().toISOString(), text: text.trim() };
-		mkdirSync(dirname(this.filePath), { recursive: true });
-		appendFileSync(this.filePath, `${JSON.stringify(record)}\n`);
-		return record;
+		return nodeToRecord(this.createNode({ subject: text }));
+	}
+
+	/**
+	 * Keyword entry-point match, then a 1-2 hop edge walk (both directions) from every match.
+	 * Deterministic, zero-LLM-call floor — the graph enriches recall, never gates it.
+	 * Nodes superseded by a newer node (i.e. targeted by another node's `supersedes` edge) are
+	 * hidden by default; they stay reachable by explicit traversal, just not surfaced unprompted.
+	 */
+	remember(query: string): MemoryRecord[] {
+		const nodes = this.listNodes();
+		if (nodes.length === 0) return [];
+		const byId = new Map(nodes.map((n) => [n.id, n]));
+		const superseded = new Set(
+			nodes.flatMap((n) => n.edges.filter((e) => e.rel === "supersedes").map((e) => e.target)),
+		);
+
+		const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+		const matches = (n: MemoryNode) => {
+			const haystack = `${n.subject} ${n.body ?? ""}`.toLowerCase();
+			return terms.every((term) => haystack.includes(term));
+		};
+
+		const entryIds = nodes.filter(matches).map((n) => n.id);
+		if (entryIds.length === 0) return [];
+
+		const depth = new Map<string, number>();
+		const queue: Array<{ id: string; d: number }> = entryIds.map((id) => ({ id, d: 0 }));
+		while (queue.length > 0) {
+			const item = queue.shift();
+			if (!item) break;
+			const { id, d } = item;
+			if (depth.has(id)) continue;
+			depth.set(id, d);
+			if (d >= 2) continue;
+			const node = byId.get(id);
+			if (!node) continue;
+			for (const edge of node.edges) if (!depth.has(edge.target)) queue.push({ id: edge.target, d: d + 1 });
+			for (const other of nodes)
+				if (!depth.has(other.id) && other.edges.some((e) => e.target === id))
+					queue.push({ id: other.id, d: d + 1 });
+		}
+
+		return [...depth.entries()]
+			.map(([id, d]) => ({ node: byId.get(id), d }))
+			.filter((entry): entry is { node: MemoryNode; d: number } => !!entry.node && !superseded.has(entry.node.id))
+			.sort((a, b) => a.d - b.d || b.node.at.localeCompare(a.node.at))
+			.slice(0, 8)
+			.map((entry) => nodeToRecord(entry.node));
 	}
 }

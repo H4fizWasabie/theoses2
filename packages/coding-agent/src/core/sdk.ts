@@ -108,6 +108,7 @@ export interface CreateAgentSessionResult {
 // Re-exports
 
 export * from "./agent-session-runtime.ts";
+export { type EpisodeRecord, EpisodicStore } from "./episodic-store.ts";
 export type {
 	ExtensionAPI,
 	ExtensionCommandContext,
@@ -118,6 +119,22 @@ export type {
 	SlashCommandSource,
 	ToolDefinition,
 } from "./extensions/index.ts";
+export {
+	type BackfillOptions,
+	backfillFromSessionLog,
+	CONSOLIDATION_TRIGGER_PHRASES,
+	CONSOLIDATION_TURN_CEILING,
+	type MaybeRunConsolidationOptions,
+	maybeRunConsolidation,
+	shouldTriggerConsolidation,
+} from "./memory-consolidation.ts";
+export {
+	EDGE_RELATIONS,
+	type EdgeRelation,
+	FileMemoryStore,
+	type MemoryEdge,
+	type MemoryNode,
+} from "./memory-store.ts";
 export type { PromptTemplate } from "./prompt-templates.ts";
 export type { Skill } from "./skills.ts";
 export type {

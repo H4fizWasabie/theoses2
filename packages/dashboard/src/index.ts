@@ -9,6 +9,7 @@ import {
 	type AgentSessionEvent,
 	createAgentSession,
 	getAgentDir,
+	maybeRunConsolidation,
 	type SessionInfo,
 	SessionManager,
 } from "theoses-coding-agent";
@@ -343,6 +344,15 @@ async function streamChat(info: SessionInfo, request: IncomingMessage, response:
 	try {
 		await work;
 		sseSend(response, "done", {});
+		const channelSessionKey = record.session.sessionManager.getChannelSessionKey();
+		maybeRunConsolidation({
+			cwd: record.session.sessionManager.getCwd(),
+			channel: channelSessionKey.channel,
+			channelSessionId: channelSessionKey.channelSessionId,
+			userMessageText: message,
+			mainSessionManager: record.session.sessionManager,
+			modelRuntime: record.session.modelRuntime,
+		});
 	} catch (error) {
 		sseSend(response, "error", { message: error instanceof Error ? error.message : String(error) });
 	} finally {
