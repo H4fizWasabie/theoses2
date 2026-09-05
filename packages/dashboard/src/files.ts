@@ -78,13 +78,6 @@ export async function writeTextFile(path: string, content: string, expectedVersi
 	return readTextFile(filePath);
 }
 
-export async function deletePath(path: string): Promise<{ path: string }> {
-	const target = resolve(path);
-	const metadata = await stat(target);
-	await rm(target, { recursive: metadata.isDirectory() });
-	return { path: target };
-}
-
 export async function renamePath(path: string, newName: string): Promise<{ oldPath: string; newPath: string }> {
 	const oldPath = resolve(path);
 	if (!newName || newName === "." || newName === ".." || newName.includes("/") || newName.includes("\\")) {

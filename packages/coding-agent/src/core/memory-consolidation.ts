@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { contentText, type Api, type Model, type ToolCall, type ToolResultMessage } from "theoses-ai";
+import { type Api, contentText, type Model, type ToolCall, type ToolResultMessage } from "theoses-ai";
 import { type Static, Type } from "typebox";
 import { CONFIG_DIR_NAME } from "../config.ts";
 import type { AgentSession } from "./agent-session.ts";

@@ -22,7 +22,6 @@ button { color: inherit; }
 
 .app { height: 100%; display: flex; flex-direction: column; }
 .login { min-height: 100%; display: grid; place-items: center; padding: 20px; }
-.app[hidden], .login[hidden] { display: none; }
 .login-card { width: min(360px, 100%); display: grid; gap: 10px; padding: 24px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 30px rgb(32 35 33 / 8%); }
 .login-card h1, .login-card p { margin: 0; }
 .login-card p { color: var(--muted); }
@@ -53,11 +52,7 @@ button { color: inherit; }
 .section-title, .pane-head, .editor-head { height: 40px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .icon-button { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 4px 6px; font-size: 16px; }
 .icon-button:hover { color: var(--text); }
-.session-list { overflow: auto; height: calc(100% - 40px); padding: 5px; }
-.path-bar { display: flex; align-items: center; gap: 4px; height: 32px; padding: 0 8px; border-bottom: 1px solid var(--border); }
-.path-bar input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font-size: 12px; font-family: ui-monospace, monospace; }
-.path-bar input:focus { outline: none; }
-.tree { overflow: auto; height: calc(100% - 72px); padding: 5px; }
+.session-list, .tree { overflow: auto; height: calc(100% - 40px); padding: 5px; }
 .session { width: 100%; display: block; text-align: left; border: 0; border-radius: 6px; background: transparent; padding: 9px 9px 8px; cursor: pointer; }
 .session:hover, .session.active { background: var(--accent-soft); }
 .session-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
@@ -77,45 +72,17 @@ button { color: inherit; }
 .pane-head span { color: var(--muted); font-size: 11px; }
 .messages { min-height: 0; flex: 1; overflow: auto; padding: 20px max(20px, 7vw); }
 .message { margin: 0 auto 18px; max-width: 72ch; }
-.message + .message { padding-top: 18px; border-top: 1px solid var(--border); }
-.message-label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; margin-bottom: 4px; }
-.message-body { line-height: 1.55; }
-.message-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 6px; }
+.message-label { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+.message-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
 .message-tools { margin-top: 5px; opacity: 0; }
 .message:hover .message-tools, .message:focus-within .message-tools { opacity: 1; }
 .reply { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 11px; padding: 0; }
 .reply:hover { color: var(--accent); }
-
-.usage-badge { font-size: 10px; color: var(--muted); background: var(--panel-muted); border-radius: 4px; padding: 1px 6px; }
-
-.tool-call { margin: 0 0 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-muted); }
-.tool-call summary { cursor: pointer; list-style: none; padding: 6px 10px; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
-.tool-call summary::-webkit-details-marker { display: none; }
-.tool-call[open] summary { border-bottom: 1px solid var(--border); }
-.tool-call .tool-icon { font-size: 11px; }
-.tool-call.running .tool-icon { animation: spin 1s linear infinite; display: inline-block; }
-.tool-call.error .tool-icon { color: var(--danger); }
-.tool-call.done .tool-icon { color: var(--accent); }
-.tool-args, .tool-result { margin: 0; padding: 8px 10px; font-size: 11px; font-family: ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
-.tool-result { border-top: 1px solid var(--border); color: var(--muted); }
-.tool-result.error { color: var(--danger); }
-.tool-pending { padding: 6px 10px; font-size: 11px; color: var(--muted); }
-
-.queued-note { padding: 4px 0; font-size: 11px; color: var(--muted); font-style: italic; }
-
-.thinking { display: inline-flex; gap: 4px; padding: 4px 0; }
-.thinking span { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: thinking-bounce 1.1s infinite ease-in-out; }
-.thinking span:nth-child(2) { animation-delay: .15s; }
-.thinking span:nth-child(3) { animation-delay: .3s; }
-@keyframes thinking-bounce { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .composer { display: flex; align-items: flex-end; gap: 8px; padding: 12px max(20px, 7vw) 16px; border-top: 1px solid var(--border); }
 .composer textarea { flex: 1; resize: vertical; min-height: 42px; max-height: 180px; border: 1px solid var(--border); border-radius: 7px; padding: 10px; color: var(--text); background: var(--panel); outline: none; }
 .composer textarea:focus { border-color: var(--accent); }
 .send { border: 1px solid var(--accent); border-radius: 7px; background: var(--accent); color: white; padding: 10px 14px; cursor: pointer; }
 .send:disabled { opacity: .45; cursor: default; }
-.stop { border: 1px solid var(--danger); border-radius: 7px; background: transparent; color: var(--danger); padding: 10px 14px; cursor: pointer; }
-.stop[hidden] { display: none; }
 .reply-bar { margin: 0 max(20px, 7vw); padding: 7px 9px; color: var(--muted); border: 1px solid var(--border); border-bottom: 0; border-radius: 6px 6px 0 0; font-size: 11px; }
 
 .file-pane { display: flex; flex-direction: column; }
@@ -129,27 +96,17 @@ button { color: inherit; }
 #file-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, monospace; }
 #file-content { min-height: 0; flex: 1; border: 0; resize: none; padding: 16px; color: var(--text); background: var(--panel); font: 12px/1.6 ui-monospace, SFMono-Regular, monospace; outline: none; }
 #file-preview { min-height: 0; flex: 1; overflow: auto; margin: 0; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 ui-monospace, SFMono-Regular, monospace; }
-.file-preview-html { min-height: 0; flex: 1; border: 0; background: #fff; }
 .file-status { min-height: 28px; padding: 6px 12px; color: var(--muted); border-top: 1px solid var(--border); font-size: 11px; }
 .file-status.error { color: var(--danger); }
 .reply-bar[hidden], .editor[hidden] { display: none; }
 
 .tree-row { display: flex; align-items: center; gap: 4px; min-height: 28px; padding: 2px 4px; border-radius: 5px; }
 .tree-row:hover { background: var(--panel-muted); }
-.tree-kind { color: var(--muted); width: 14px; text-align: center; flex: 0 0 auto; }
-.tree-rename { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.tree-toggle, .tree-rename { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
 .tree-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; border: 0; background: transparent; cursor: pointer; }
-.tree-rename, .tree-delete { opacity: 0; font-size: 11px; }
-.tree-row:hover .tree-rename, .tree-row:hover .tree-delete { opacity: 1; }
-.tree-delete { border: 0; background: transparent; color: var(--danger); cursor: pointer; }
-
-.graph-view { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; background: var(--bg); }
-.graph-view[hidden] { display: none; }
-.graph-head { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
-.graph-head .file-status { border: 0; min-height: 0; flex: 1; }
-#graph-canvas { flex: 1; width: 100%; cursor: grab; }
-#graph-canvas:active { cursor: grabbing; }
-#graph-empty { flex: 1; }
+.tree-rename { opacity: 0; font-size: 11px; }
+.tree-row:hover .tree-rename { opacity: 1; }
+.tree-children { margin-left: 14px; }
 
 @media (max-width: 900px) {
   .shell { grid-template-columns: 240px 7px minmax(320px, 1fr); }

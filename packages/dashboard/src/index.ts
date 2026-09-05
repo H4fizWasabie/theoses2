@@ -6,15 +6,12 @@ import { fileURLToPath } from "node:url";
 import type { AgentMessage } from "theoses-agent-core";
 import {
 	type AgentSession,
-	type AgentSessionEvent,
 	createAgentSession,
 	getAgentDir,
-	maybeRunConsolidation,
 	type SessionInfo,
 	SessionManager,
 } from "theoses-coding-agent";
-import { deletePath, FileConflictError, listDirectory, readTextFile, renamePath, writeTextFile } from "./files.ts";
-import { readMemoryGraph } from "./memory-graph.ts";
+import { FileConflictError, listDirectory, readTextFile, renamePath, writeTextFile } from "./files.ts";
 import { saveTelegramConfig, telegramConfigStatus } from "./telegram-config.ts";
 
 const DASHBOARD_CHANNEL = "dashboard";
@@ -154,6 +151,7 @@ interface UsageSummary {
 
 interface HistoryTurn {
 	role: "user" | "assistant";
+	content: string;
 	segments: HistorySegment[];
 	usage?: UsageSummary;
 }
@@ -173,7 +171,11 @@ function sessionHistory(manager: SessionManager): HistoryTurn[] {
 		if (entry.type !== "message") continue;
 		const message = entry.message;
 		if (message.role === "user") {
-			turns.push({ role: "user", segments: [{ type: "text", text: messageText(message) }] });
+			turns.push({
+				role: "user",
+				content: messageText(message),
+				segments: [{ type: "text", text: messageText(message) }],
+			});
 			continue;
 		}
 		if (message.role === "assistant") {
@@ -183,7 +185,15 @@ function sessionHistory(manager: SessionManager): HistoryTurn[] {
 				else if (part.type === "toolCall")
 					segments.push({ type: "tool_call", id: part.id, name: part.name, args: part.arguments });
 			}
-			turns.push({ role: "assistant", segments, usage: usageSummary(message.usage) });
+			turns.push({
+				role: "assistant",
+				content: segments
+					.filter((segment): segment is { type: "text"; text: string } => segment.type === "text")
+					.map((segment) => segment.text)
+					.join(""),
+				segments,
+				usage: usageSummary(message.usage),
+			});
 			continue;
 		}
 		if (message.role === "toolResult") {
@@ -196,7 +206,7 @@ function sessionHistory(manager: SessionManager): HistoryTurn[] {
 			};
 			const last = turns.at(-1);
 			if (last?.role === "assistant") last.segments.push(segment);
-			else turns.push({ role: "assistant", segments: [segment] });
+			else turns.push({ role: "assistant", content: "", segments: [segment] });
 		}
 	}
 	return turns;
@@ -288,20 +298,6 @@ async function newDashboardSession(cwd: string): Promise<SessionView> {
 	};
 }
 
-function sseSend(response: ServerResponse, event: string, data: unknown): void {
-	response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-}
-
-function toolResultText(result: unknown): string {
-	if (typeof result === "string") return result;
-	if (result && typeof result === "object" && Array.isArray((result as { content?: unknown }).content)) {
-		return (result as { content: Array<{ type: string; text?: string }> }).content
-			.map((part) => (part.type === "text" ? (part.text ?? "") : "[image]"))
-			.join("");
-	}
-	return JSON.stringify(result);
-}
-
 async function streamChat(info: SessionInfo, request: IncomingMessage, response: ServerResponse): Promise<void> {
 	if (info.channel !== DASHBOARD_CHANNEL) throw new Error("Telegram sessions are read-only");
 	const record = await dashboardSession(info.path);
@@ -310,54 +306,15 @@ async function streamChat(info: SessionInfo, request: IncomingMessage, response:
 	if (!message) throw new Error("message is required");
 	const replyContext = optionalStringField(input, "replyContext");
 
-	response.writeHead(200, {
-		"Content-Type": "text/event-stream; charset=utf-8",
-		"Cache-Control": "no-cache, no-store",
-		Connection: "keep-alive",
-		"X-Accel-Buffering": "no",
-	});
-
 	const work = record.queue.then(async () => {
-		const unsubscribe = record.session.subscribe((event: AgentSessionEvent) => {
-			if (event.type === "message_update" && event.message.role === "assistant") {
-				const delta = event.assistantMessageEvent;
-				if (delta.type === "text_delta") sseSend(response, "delta", { text: delta.delta });
-			} else if (event.type === "tool_execution_start") {
-				sseSend(response, "tool_call", { id: event.toolCallId, name: event.toolName, args: event.args });
-			} else if (event.type === "tool_execution_end") {
-				sseSend(response, "tool_result", {
-					id: event.toolCallId,
-					name: event.toolName,
-					result: toolResultText(event.result),
-					isError: event.isError,
-				});
-			} else if (event.type === "message_end" && event.message.role === "assistant") {
-				sseSend(response, "usage", usageSummary(event.message.usage));
-			}
-		});
-		try {
-			await record.session.prompt(message, { replyContext, source: "interactive" });
-		} finally {
-			unsubscribe();
-		}
+		await record.session.prompt(message, { replyContext, source: "interactive" });
 	});
 	setQueue(record, work);
 	try {
 		await work;
-		sseSend(response, "done", {});
-		const channelSessionKey = record.session.sessionManager.getChannelSessionKey();
-		maybeRunConsolidation({
-			cwd: record.session.sessionManager.getCwd(),
-			channel: channelSessionKey.channel,
-			channelSessionId: channelSessionKey.channelSessionId,
-			userMessageText: message,
-			mainSessionManager: record.session.sessionManager,
-			modelRuntime: record.session.modelRuntime,
-		});
+		json(response, 200, { history: sessionHistory(record.manager) });
 	} catch (error) {
-		sseSend(response, "error", { message: error instanceof Error ? error.message : String(error) });
-	} finally {
-		response.end();
+		json(response, 400, { error: error instanceof Error ? error.message : String(error) });
 	}
 }
 
@@ -446,17 +403,9 @@ async function api(
 		);
 		return true;
 	}
-	if (url.pathname === "/api/file" && request.method === "DELETE") {
-		json(response, 200, await deletePath(stringField({ path: url.searchParams.get("path") }, "path")));
-		return true;
-	}
 	if (url.pathname === "/api/rename" && request.method === "POST") {
 		const input = await body(request);
 		json(response, 200, await renamePath(stringField(input, "path"), stringField(input, "newName")));
-		return true;
-	}
-	if (url.pathname === "/api/memory-graph" && request.method === "GET") {
-		json(response, 200, await readMemoryGraph());
 		return true;
 	}
 	return false;
