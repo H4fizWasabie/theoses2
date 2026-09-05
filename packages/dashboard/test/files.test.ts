@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { FileConflictError, listDirectory, readTextFile, renamePath, writeTextFile } from "../src/files.ts";
+import { deletePath, FileConflictError, listDirectory, readTextFile, renamePath, writeTextFile } from "../src/files.ts";
 
 test("dashboard file workbench edits safely and renames paths", async () => {
 	const root = await mkdtemp(join(tmpdir(), "theoses-dashboard-"));
@@ -21,4 +21,11 @@ test("dashboard file workbench edits safely and renames paths", async () => {
 	const renamed = await renamePath(folder, "renamed");
 	assert.equal(renamed.newPath, join(root, "renamed"));
 	assert.equal(await readFile(join(root, "note.md"), "utf8"), "after\n");
+
+	await deletePath(join(root, "note.md"));
+	const remaining = await listDirectory(root);
+	assert.equal(
+		remaining.some((entry) => entry.name === "note.md"),
+		false,
+	);
 });

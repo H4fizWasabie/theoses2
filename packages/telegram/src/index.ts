@@ -1,11 +1,13 @@
-import { Bot, type Context } from "grammy";
+import { Bot, type Context, InputFile } from "grammy";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
 	createAgentSession,
+	maybeRunConsolidation,
 	type SessionInfo,
 	SessionManager,
 } from "theoses-coding-agent";
+import { chunkHtml, formatTelegramHtml, splitSections } from "./format.ts";
 
 const CHANNEL = "telegram";
 const TELEGRAM_MESSAGE_LIMIT = 4000;
@@ -15,7 +17,18 @@ const TYPING_INTERVAL_MS = 4000; // Telegram's typing indicator expires after ~5
 // document uploads are stored as artifacts (see the `ctx.message.document` branch
 // below) and need convert_doc enabled to ever be read, since no channel enables it
 // by default.
-const TELEGRAM_TOOLS = ["read", "bash", "edit", "write", "working_note", "remember", "save_note", "convert_doc"];
+const TELEGRAM_TOOLS = [
+	"read",
+	"bash",
+	"edit",
+	"write",
+	"working_note",
+	"remember",
+	"save_note",
+	"convert_doc",
+	"web_search",
+	"generate_image",
+];
 
 function chatId(ctx: Context): string | undefined {
 	return ctx.chat?.id.toString();
@@ -41,36 +54,72 @@ function assistantText(event: AgentSessionEvent): string | undefined {
 	return text || undefined;
 }
 
+/** Pulls image attachments (e.g. from generate_image) out of a raw tool result for delivery as Telegram photos. */
+function extractGeneratedImages(result: unknown): Buffer[] {
+	const content = (result as { content?: unknown } | undefined)?.content;
+	if (!Array.isArray(content)) return [];
+	return content
+		.filter((part): part is { type: "image"; data: string } => (part as { type?: string })?.type === "image")
+		.map((part) => Buffer.from(part.data, "base64"));
+}
+
+/**
+ * Single exit point for outbound Telegram text: section-split on --- lines ->
+ * format -> chunk -> send. Each section threads to the previous one (the
+ * caller's message for the first) so multi-part replies read as one chain.
+ * A chunk Telegram rejects (malformed HTML -> 400) is resent as plain text -
+ * stray tags beat a lost message. Ported from Mino's sendTelegramReply.
+ *
+ * If `statusMessageId` is given (a live "Running <tool>..." status message),
+ * the very first chunk edits it in place instead of sending a new message,
+ * so the status message becomes the final answer rather than being replaced
+ * by a separate one.
+ */
 async function sendTelegramReply(
 	bot: Bot,
 	chatId: number,
 	reply: string,
+	toolNames: string[],
 	replyTo: number | undefined,
 	statusMessageId: number | undefined,
 ): Promise<void> {
-	const sections = reply
-		.split(/\n\s*---\s*\n/)
-		.map((section) => section.trim())
-		.filter(Boolean);
+	const sections = splitSections(reply);
 	let lastId = replyTo;
 	let pendingEditId = statusMessageId;
-	for (const section of sections) {
-		for (let offset = 0; offset < section.length; offset += TELEGRAM_MESSAGE_LIMIT) {
-			const chunk = section.slice(offset, offset + TELEGRAM_MESSAGE_LIMIT);
+	for (const [index, section] of sections.entries()) {
+		const names = index === sections.length - 1 ? toolNames : [];
+		const html = formatTelegramHtml(section, names);
+		for (const chunk of chunkHtml(html, TELEGRAM_MESSAGE_LIMIT)) {
 			const editId = pendingEditId;
 			pendingEditId = undefined; // only the very first chunk overall replaces the status message
 			if (editId !== undefined) {
 				try {
-					await bot.api.editMessageText(chatId, editId, chunk);
+					await bot.api.editMessageText(chatId, editId, chunk, { parse_mode: "HTML" });
 					lastId = editId;
 					continue;
 				} catch {
-					// Status message may have been deleted or rate-limited; fall through to sending fresh.
+					try {
+						await bot.api.editMessageText(chatId, editId, chunk);
+						lastId = editId;
+						continue;
+					} catch {
+						// Status message may have been deleted or rate-limited; fall through to sending fresh.
+					}
 				}
 			}
 			const replyParameters = lastId ? { message_id: lastId } : undefined;
-			const sent = await bot.api.sendMessage(chatId, chunk, { reply_parameters: replyParameters });
-			lastId = sent.message_id;
+			try {
+				const sent = await bot.api.sendMessage(chatId, chunk, {
+					parse_mode: "HTML",
+					reply_parameters: replyParameters,
+				});
+				lastId = sent.message_id;
+			} catch {
+				const sent = await bot.api
+					.sendMessage(chatId, chunk, { reply_parameters: replyParameters })
+					.catch(() => undefined);
+				if (sent) lastId = sent.message_id;
+			}
 		}
 	}
 }
@@ -171,9 +220,15 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				});
 			};
 
+			const toolNames: string[] = [];
+			const generatedImages: Buffer[] = [];
 			const unsubscribe = session.subscribe((event) => {
 				response = assistantText(event) ?? response;
 				if (event.type === "tool_execution_start") setStatus(`Running ${event.toolName}...`);
+				if (event.type === "tool_execution_end") {
+					toolNames.push(event.toolName);
+					generatedImages.push(...extractGeneratedImages(event.result));
+				}
 			});
 			const abortController = new AbortController();
 			startTypingIndicator(bot, ctx.chat.id, abortController.signal);
@@ -189,10 +244,23 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			}
 			await statusPending;
 			if (response) {
-				await sendTelegramReply(bot, ctx.chat.id, response, ctx.message.message_id, statusMessageId);
+				await sendTelegramReply(bot, ctx.chat.id, response, toolNames, ctx.message.message_id, statusMessageId);
 			} else if (statusMessageId !== undefined) {
 				await bot.api.deleteMessage(ctx.chat.id, statusMessageId).catch(() => {});
 			}
+			for (const image of generatedImages) {
+				await bot.api.sendPhoto(ctx.chat.id, new InputFile(image));
+			}
+
+			const channelSessionKey = session.sessionManager.getChannelSessionKey();
+			maybeRunConsolidation({
+				cwd: session.sessionManager.getCwd(),
+				channel: channelSessionKey.channel,
+				channelSessionId: channelSessionKey.channelSessionId,
+				userMessageText: messageText(ctx),
+				mainSessionManager: session.sessionManager,
+				modelRuntime: session.modelRuntime,
+			});
 		});
 		queues.set(
 			chat,
