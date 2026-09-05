@@ -1,5 +1,4 @@
-import type { SQLInputValue } from "node:sqlite";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { sql } from "./sqlite/sql.ts";
 import type { SqliteDatabase, SqliteDatabaseFactory, SqliteRunResult, SqliteStatement } from "./sqlite/types.ts";
 
@@ -104,7 +103,11 @@ export function wrapNodeSqliteDatabase(db: DatabaseSync): SqliteDatabase {
 
 export function createNodeSqliteFactory(): SqliteDatabaseFactory {
 	return {
+		// node:sqlite is a Node-only experimental module that Bun's compiled binaries cannot
+		// resolve; a dynamic import here (instead of a static top-level import) defers
+		// resolution to actual use so a bun-compiled binary that never opens a database still runs.
 		async open(path: string): Promise<SqliteDatabase> {
+			const { DatabaseSync } = await import("node:sqlite");
 			return new NodeSqliteDatabase(new DatabaseSync(path));
 		},
 	};
