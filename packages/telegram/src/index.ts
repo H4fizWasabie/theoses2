@@ -153,7 +153,7 @@ async function sessionFor(
 		const sessionManager = matches[0]
 			? SessionManager.open(matches[0].path)
 			: SessionManager.create(cwd, undefined, key);
-		const { session } = await createAgentSession({ sessionManager, tools: TELEGRAM_TOOLS });
+		const { session } = await createAgentSession({ sessionManager, tools: TELEGRAM_TOOLS, thinkingLevel: "high" });
 		return session;
 	})();
 	sessions.set(chat, created);
