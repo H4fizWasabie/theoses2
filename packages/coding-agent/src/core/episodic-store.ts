@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import { CONFIG_DIR_NAME } from "../config.ts";
 
 export interface EpisodeRecord {
@@ -49,10 +49,21 @@ function rowToRecord(row: EpisodeRow): EpisodeRecord {
 export class EpisodicStore {
 	private readonly db: DatabaseSync;
 
-	constructor(path = defaultEpisodicDbPath()) {
+	private constructor(db: DatabaseSync) {
+		this.db = db;
+	}
+
+	/**
+	 * node:sqlite is a Node-only experimental module that Bun's compiled binaries cannot
+	 * resolve. Importing it dynamically here (rather than as a static top-level import) means
+	 * the module is only resolved when an EpisodicStore is actually created, not at binary
+	 * startup - so a bun-compiled CLI that never touches episodic memory still runs.
+	 */
+	static async create(path = defaultEpisodicDbPath()): Promise<EpisodicStore> {
+		const { DatabaseSync } = await import("node:sqlite");
 		mkdirSync(dirname(path), { recursive: true });
-		this.db = new DatabaseSync(path);
-		this.db.exec(`
+		const db = new DatabaseSync(path);
+		db.exec(`
 			CREATE TABLE IF NOT EXISTS episodes (
 				id TEXT PRIMARY KEY,
 				started_at TEXT NOT NULL,
@@ -64,6 +75,7 @@ export class EpisodicStore {
 			CREATE INDEX IF NOT EXISTS idx_episodes_started_at ON episodes(started_at);
 			CREATE INDEX IF NOT EXISTS idx_episodes_ended_at ON episodes(ended_at);
 		`);
+		return new EpisodicStore(db);
 	}
 
 	/** Consolidation-only write path — there is no live/explicit path for episodic memory. */

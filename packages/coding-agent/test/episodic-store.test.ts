@@ -9,11 +9,11 @@ describe("EpisodicStore", () => {
 	let dbPath: string;
 	let store: EpisodicStore;
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		dir = join(tmpdir(), `theoses-episodic-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(dir, { recursive: true });
 		dbPath = join(dir, "episodes.db");
-		store = new EpisodicStore(dbPath);
+		store = await EpisodicStore.create(dbPath);
 	});
 
 	afterEach(() => {

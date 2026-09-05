@@ -439,7 +439,7 @@ async function runConsolidationPass(params: {
 async function runIfTriggered(options: MaybeRunConsolidationOptions): Promise<void> {
 	const { cwd, channel, channelSessionId, userMessageText, mainSessionManager, modelRuntime } = options;
 	const memoryStore = options.memoryStore ?? new FileMemoryStore();
-	const episodicStore = options.episodicStore ?? new EpisodicStore();
+	const episodicStore = options.episodicStore ?? (await EpisodicStore.create());
 
 	const key = channelSessionKey(channel, channelSessionId);
 	const checkpoints = readCheckpoints();
@@ -490,7 +490,7 @@ export async function backfillFromSessionLog(path: string, options: BackfillOpti
 	if (window.length === 0) return;
 
 	const memoryStore = options.memoryStore ?? new FileMemoryStore();
-	const episodicStore = options.episodicStore ?? new EpisodicStore();
+	const episodicStore = options.episodicStore ?? (await EpisodicStore.create());
 
 	for (let start = 0; start < window.length; start += CONSOLIDATION_TURN_CEILING) {
 		const chunk = window.slice(start, start + CONSOLIDATION_TURN_CEILING);
