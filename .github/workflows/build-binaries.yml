@@ -187,7 +187,11 @@ jobs:
           esac
 
           mkdir -p extracted
-          tar -xf "${archive}" -C extracted
+          if [[ "${archive}" == *.zip ]]; then
+            unzip -q "${archive}" -d extracted
+          else
+            tar -xf "${archive}" -C extracted
+          fi
           echo "root=${root}" >> "${GITHUB_OUTPUT}"
           echo "binary=${binary}" >> "${GITHUB_OUTPUT}"
 
