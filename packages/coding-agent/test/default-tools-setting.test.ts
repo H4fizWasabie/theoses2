@@ -68,6 +68,7 @@ describe("defaultTools setting", () => {
 			"convert_doc",
 			"edit",
 			"find",
+			"generate_image",
 			"grep",
 			"ls",
 			"powershell",
@@ -76,6 +77,7 @@ describe("defaultTools setting", () => {
 			"save_note",
 			"tool_call",
 			"tool_search",
+			"web_search",
 			"working_note",
 			"write",
 		]);
@@ -179,6 +181,7 @@ describe("defaultTools setting", () => {
 			"convert_doc",
 			"edit",
 			"find",
+			"generate_image",
 			"grep",
 			"ls",
 			"powershell",
@@ -187,6 +190,7 @@ describe("defaultTools setting", () => {
 			"save_note",
 			"tool_call",
 			"tool_search",
+			"web_search",
 			"working_note",
 			"write",
 		]);
