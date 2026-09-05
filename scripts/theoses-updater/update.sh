@@ -34,11 +34,15 @@ log() {
     echo "[theoses-updater] $*"
 }
 
+# Pull only the two Telegram vars out of the services' env file - sourcing it
+# wholesale would clobber this script's own HOME/PATH with values meant for
+# the theoses-owned dashboard/telegram services (e.g. theoses.env sets
+# HOME=/home/theoses, which breaks gh's ability to find /root/.config/gh
+# when this runs as root).
 if [[ -f "$ENV_FILE" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$ENV_FILE"
-    set +a
+    THEOSES_TELEGRAM_BOT_TOKEN="$(grep -m1 '^THEOSES_TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2-)"
+    THEOSES_TELEGRAM_CHAT_ID="$(grep -m1 '^THEOSES_TELEGRAM_CHAT_ID=' "$ENV_FILE" | cut -d= -f2-)"
+    export THEOSES_TELEGRAM_BOT_TOKEN THEOSES_TELEGRAM_CHAT_ID
 fi
 
 mkdir -p "$RELEASES_ROOT"
