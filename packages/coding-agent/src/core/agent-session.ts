@@ -2974,7 +2974,9 @@ export class AgentSession {
 	 * the TUI needs to render the retry and recreate the underlying indicator.
 	 */
 	private _summarizationRetryCallbacks(
-		source: { source: "branchSummary" } | { source: "compaction"; reason: "manual" | "threshold" | "overflow" | "turns" },
+		source:
+			| { source: "branchSummary" }
+			| { source: "compaction"; reason: "manual" | "threshold" | "overflow" | "turns" },
 	): RetryCallbacks {
 		return {
 			onRetryScheduled: (attempt, maxAttempts, delayMs, errorMessage) => {

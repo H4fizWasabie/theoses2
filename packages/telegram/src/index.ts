@@ -1,9 +1,8 @@
-import { Bot, type Context, InputFile } from "grammy";
+import { Bot, type Context } from "grammy";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
 	createAgentSession,
-	maybeRunConsolidation,
 	type SessionInfo,
 	SessionManager,
 } from "theoses-coding-agent";
@@ -17,18 +16,7 @@ const TYPING_INTERVAL_MS = 4000; // Telegram's typing indicator expires after ~5
 // document uploads are stored as artifacts (see the `ctx.message.document` branch
 // below) and need convert_doc enabled to ever be read, since no channel enables it
 // by default.
-const TELEGRAM_TOOLS = [
-	"read",
-	"bash",
-	"edit",
-	"write",
-	"working_note",
-	"remember",
-	"save_note",
-	"convert_doc",
-	"web_search",
-	"generate_image",
-];
+const TELEGRAM_TOOLS = ["read", "bash", "edit", "write", "working_note", "remember", "save_note", "convert_doc"];
 
 function chatId(ctx: Context): string | undefined {
 	return ctx.chat?.id.toString();
@@ -52,15 +40,6 @@ function assistantText(event: AgentSessionEvent): string | undefined {
 		.join("")
 		.trim();
 	return text || undefined;
-}
-
-/** Pulls image attachments (e.g. from generate_image) out of a raw tool result for delivery as Telegram photos. */
-function extractGeneratedImages(result: unknown): Buffer[] {
-	const content = (result as { content?: unknown } | undefined)?.content;
-	if (!Array.isArray(content)) return [];
-	return content
-		.filter((part): part is { type: "image"; data: string } => (part as { type?: string })?.type === "image")
-		.map((part) => Buffer.from(part.data, "base64"));
 }
 
 /**
@@ -221,14 +200,10 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			};
 
 			const toolNames: string[] = [];
-			const generatedImages: Buffer[] = [];
 			const unsubscribe = session.subscribe((event) => {
 				response = assistantText(event) ?? response;
 				if (event.type === "tool_execution_start") setStatus(`Running ${event.toolName}...`);
-				if (event.type === "tool_execution_end") {
-					toolNames.push(event.toolName);
-					generatedImages.push(...extractGeneratedImages(event.result));
-				}
+				if (event.type === "tool_execution_end") toolNames.push(event.toolName);
 			});
 			const abortController = new AbortController();
 			startTypingIndicator(bot, ctx.chat.id, abortController.signal);
@@ -248,19 +223,6 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			} else if (statusMessageId !== undefined) {
 				await bot.api.deleteMessage(ctx.chat.id, statusMessageId).catch(() => {});
 			}
-			for (const image of generatedImages) {
-				await bot.api.sendPhoto(ctx.chat.id, new InputFile(image));
-			}
-
-			const channelSessionKey = session.sessionManager.getChannelSessionKey();
-			maybeRunConsolidation({
-				cwd: session.sessionManager.getCwd(),
-				channel: channelSessionKey.channel,
-				channelSessionId: channelSessionKey.channelSessionId,
-				userMessageText: messageText(ctx),
-				mainSessionManager: session.sessionManager,
-				modelRuntime: session.modelRuntime,
-			});
 		});
 		queues.set(
 			chat,

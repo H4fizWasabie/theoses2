@@ -9,12 +9,10 @@ import {
 	type AgentSessionEvent,
 	createAgentSession,
 	getAgentDir,
-	maybeRunConsolidation,
 	type SessionInfo,
 	SessionManager,
 } from "theoses-coding-agent";
-import { deletePath, FileConflictError, listDirectory, readTextFile, renamePath, writeTextFile } from "./files.ts";
-import { readMemoryGraph } from "./memory-graph.ts";
+import { FileConflictError, listDirectory, readTextFile, renamePath, writeTextFile } from "./files.ts";
 import { saveTelegramConfig, telegramConfigStatus } from "./telegram-config.ts";
 
 const DASHBOARD_CHANNEL = "dashboard";
@@ -345,15 +343,6 @@ async function streamChat(info: SessionInfo, request: IncomingMessage, response:
 	try {
 		await work;
 		sseSend(response, "done", {});
-		const channelSessionKey = record.session.sessionManager.getChannelSessionKey();
-		maybeRunConsolidation({
-			cwd: record.session.sessionManager.getCwd(),
-			channel: channelSessionKey.channel,
-			channelSessionId: channelSessionKey.channelSessionId,
-			userMessageText: message,
-			mainSessionManager: record.session.sessionManager,
-			modelRuntime: record.session.modelRuntime,
-		});
 	} catch (error) {
 		sseSend(response, "error", { message: error instanceof Error ? error.message : String(error) });
 	} finally {
@@ -446,17 +435,9 @@ async function api(
 		);
 		return true;
 	}
-	if (url.pathname === "/api/file" && request.method === "DELETE") {
-		json(response, 200, await deletePath(stringField({ path: url.searchParams.get("path") }, "path")));
-		return true;
-	}
 	if (url.pathname === "/api/rename" && request.method === "POST") {
 		const input = await body(request);
 		json(response, 200, await renamePath(stringField(input, "path"), stringField(input, "newName")));
-		return true;
-	}
-	if (url.pathname === "/api/memory-graph" && request.method === "GET") {
-		json(response, 200, await readMemoryGraph());
 		return true;
 	}
 	return false;

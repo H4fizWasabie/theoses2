@@ -4,7 +4,7 @@ import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
 
 const workingNoteSchema = Type.Object({
-	note: Type.String({ description: "The complete replacement Working Note, capped at 4000 characters" }),
+	note: Type.String({ description: "The complete replacement Working Note, capped at 2000 characters" }),
 });
 
 export type WorkingNoteToolInput = Static<typeof workingNoteSchema>;

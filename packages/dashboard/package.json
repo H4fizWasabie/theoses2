@@ -13,7 +13,7 @@
 	},
 	"files": ["dist", "README.md", "CHANGELOG.md"],
 	"scripts": {
-		"build": "tsgo -p tsconfig.json && shx rm -rf dist/public && shx cp -r src/public dist/public",
+		"build": "tsgo -p tsconfig.json && shx cp -r src/public dist/public",
 		"test": "node --experimental-strip-types --test test/*.test.ts"
 	},
 	"dependencies": {
