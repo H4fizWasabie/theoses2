@@ -64,6 +64,7 @@ import {
 	generateBranchSummary,
 	prepareCompaction,
 	shouldCompact,
+	shouldCompactByTurns,
 } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS } from "./defaults.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
@@ -163,13 +164,13 @@ export type AgentSessionEvent =
 			steering: readonly string[];
 			followUp: readonly string[];
 	  }
-	| { type: "compaction_start"; reason: "manual" | "threshold" | "overflow" }
+	| { type: "compaction_start"; reason: "manual" | "threshold" | "overflow" | "turns" }
 	| { type: "entry_appended"; entry: SessionEntry }
 	| { type: "session_info_changed"; name: string | undefined }
 	| { type: "thinking_level_changed"; level: ThinkingLevel }
 	| {
 			type: "compaction_end";
-			reason: "manual" | "threshold" | "overflow";
+			reason: "manual" | "threshold" | "overflow" | "turns";
 			result: CompactionResult | undefined;
 			aborted: boolean;
 			willRetry: boolean;
@@ -188,7 +189,7 @@ export type AgentSessionEvent =
 	| {
 			type: "summarization_retry_attempt_start";
 			source: "compaction";
-			reason: "manual" | "threshold" | "overflow";
+			reason: "manual" | "threshold" | "overflow" | "turns";
 	  }
 	| { type: "summarization_retry_finished" }
 	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
@@ -1888,7 +1889,7 @@ export class AgentSession {
 		customInstructions: string | undefined,
 		signal: AbortSignal,
 		env: Record<string, string> | undefined,
-		reason: "manual" | "threshold" | "overflow",
+		reason: "manual" | "threshold" | "overflow" | "turns",
 	): Promise<CompactionResult> {
 		return compact(
 			preparation,
@@ -2255,6 +2256,9 @@ export class AgentSession {
 		if (shouldCompact(contextTokens, contextWindow, settings)) {
 			return await this._runAutoCompaction("threshold", false);
 		}
+		if (shouldCompactByTurns(this.sessionManager.getBranch(), settings)) {
+			return await this._runAutoCompaction("turns", false);
+		}
 		return false;
 	}
 
@@ -2268,7 +2272,7 @@ export class AgentSession {
 	 * @param willRetry Whether to continue the interrupted turn after overflow compaction
 	 * @returns Whether the post-run loop should call `agent.continue()`
 	 */
-	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
+	private async _runAutoCompaction(reason: "overflow" | "threshold" | "turns", willRetry: boolean): Promise<boolean> {
 		const settings = this.settingsManager.getCompactionSettings();
 		let started = false;
 		let fromExtension = false;
@@ -2282,7 +2286,7 @@ export class AgentSession {
 
 			const pathEntries = this.sessionManager.getBranch();
 
-			const preparation = prepareCompaction(pathEntries, settings);
+			const preparation = prepareCompaction(pathEntries, settings, reason === "turns" ? "turns" : "tokens");
 			if (!preparation) {
 				return false;
 			}
@@ -2970,7 +2974,7 @@ export class AgentSession {
 	 * the TUI needs to render the retry and recreate the underlying indicator.
 	 */
 	private _summarizationRetryCallbacks(
-		source: { source: "branchSummary" } | { source: "compaction"; reason: "manual" | "threshold" | "overflow" },
+		source: { source: "branchSummary" } | { source: "compaction"; reason: "manual" | "threshold" | "overflow" | "turns" },
 	): RetryCallbacks {
 		return {
 			onRetryScheduled: (attempt, maxAttempts, delayMs, errorMessage) => {

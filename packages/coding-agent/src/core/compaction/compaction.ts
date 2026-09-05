@@ -127,13 +127,42 @@ export interface CompactionSettings {
 	enabled: boolean;
 	reserveTokens: number;
 	keepRecentTokens: number;
+	maxHistoryTurns: number;
 }
 
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 	enabled: true,
 	reserveTokens: 16384,
 	keepRecentTokens: 20000,
+	maxHistoryTurns: 5,
 };
+
+/** Count user turns in `pathEntries[startIndex..]`. Mirrors the counting logic in
+ * `limitActiveContextMessages`, but over session entries instead of runtime messages. */
+export function countUserTurnsSince(pathEntries: SessionEntry[], startIndex: number): number {
+	let count = 0;
+	for (let i = startIndex; i < pathEntries.length; i++) {
+		const entry = pathEntries[i];
+		if (entry.type === "message" && entry.message.role === "user") count++;
+	}
+	return count;
+}
+
+/** Index right after the most recent compaction entry, or 0 if there isn't one. */
+export function lastCompactionBoundary(pathEntries: SessionEntry[]): number {
+	for (let i = pathEntries.length - 1; i >= 0; i--) {
+		if (pathEntries[i].type === "compaction") return i + 1;
+	}
+	return 0;
+}
+
+/** Whether enough user turns have accumulated since the last compaction to trigger another pass. */
+export function shouldCompactByTurns(pathEntries: SessionEntry[], settings: CompactionSettings): boolean {
+	if (settings.maxHistoryTurns <= 0) return false;
+	if (pathEntries.length > 0 && pathEntries[pathEntries.length - 1].type === "compaction") return false;
+	const boundary = lastCompactionBoundary(pathEntries);
+	return countUserTurnsSince(pathEntries, boundary) > settings.maxHistoryTurns;
+}
 
 // ============================================================================
 // Token calculation
@@ -400,6 +429,34 @@ export interface CutPointResult {
  *
  * Only considers entries between `startIndex` and `endIndex` (exclusive).
  */
+/**
+ * Shared tail logic for both cut-point strategies: snaps `cutIndex` back over adjacent
+ * metadata entries that carry no context-visible content, then determines whether the
+ * resulting cut lands mid-turn.
+ */
+function finalizeCutPoint(entries: SessionEntry[], startIndex: number, cutIndex: number): CutPointResult {
+	// Scan backwards from cutIndex to include adjacent metadata entries that do not affect context.
+	while (cutIndex > startIndex) {
+		const prevEntry = entries[cutIndex - 1];
+		// Stop at compaction boundaries or context-visible entries.
+		if (prevEntry.type === "compaction" || sessionEntryToContextMessages(prevEntry).length > 0) {
+			break;
+		}
+		cutIndex--;
+	}
+
+	// Determine if this is a split turn
+	const cutEntry = entries[cutIndex];
+	const startsTurn = isTurnStartEntry(cutEntry);
+	const turnStartIndex = startsTurn ? -1 : findTurnStartIndex(entries, cutIndex, startIndex);
+
+	return {
+		firstKeptEntryIndex: cutIndex,
+		turnStartIndex,
+		isSplitTurn: !startsTurn && turnStartIndex !== -1,
+	};
+}
+
 export function findCutPoint(
 	entries: SessionEntry[],
 	startIndex: number,
@@ -438,26 +495,50 @@ export function findCutPoint(
 		}
 	}
 
-	// Scan backwards from cutIndex to include adjacent metadata entries that do not affect context.
-	while (cutIndex > startIndex) {
-		const prevEntry = entries[cutIndex - 1];
-		// Stop at compaction boundaries or context-visible entries.
-		if (prevEntry.type === "compaction" || sessionEntryToContextMessages(prevEntry).length > 0) {
-			break;
-		}
-		cutIndex--;
+	return finalizeCutPoint(entries, startIndex, cutIndex);
+}
+
+/**
+ * Find the cut point that keeps exactly the last `maxTurns` turns raw, regardless of their
+ * token size. Unlike `findCutPoint` (token-budget-driven — keeps whatever fits in
+ * `keepRecentTokens`, which can silently keep far more or fewer than N turns depending on
+ * their size), this counts turn boundaries directly, the same way `limitActiveContextMessages`
+ * counts user messages for the active-context window.
+ *
+ * Walks backwards counting turn-start entries (user-like messages). The `maxTurns`-th turn
+ * start encountered from the end becomes the kept boundary; everything before it is eligible
+ * to summarize.
+ */
+export function findCutPointByTurns(
+	entries: SessionEntry[],
+	startIndex: number,
+	endIndex: number,
+	maxTurns: number,
+): CutPointResult {
+	const cutPoints = findValidCutPoints(entries, startIndex, endIndex);
+
+	if (cutPoints.length === 0) {
+		return { firstKeptEntryIndex: startIndex, turnStartIndex: -1, isSplitTurn: false };
 	}
 
-	// Determine if this is a split turn
-	const cutEntry = entries[cutIndex];
-	const startsTurn = isTurnStartEntry(cutEntry);
-	const turnStartIndex = startsTurn ? -1 : findTurnStartIndex(entries, cutIndex, startIndex);
+	let turnsSeen = 0;
+	let cutIndex = cutPoints[0]; // Default: keep everything if fewer than maxTurns turns exist
 
-	return {
-		firstKeptEntryIndex: cutIndex,
-		turnStartIndex,
-		isSplitTurn: !startsTurn && turnStartIndex !== -1,
-	};
+	for (let i = endIndex - 1; i >= startIndex; i--) {
+		if (!isTurnStartEntry(entries[i])) continue;
+		turnsSeen++;
+		if (turnsSeen === maxTurns) {
+			for (let c = 0; c < cutPoints.length; c++) {
+				if (cutPoints[c] >= i) {
+					cutIndex = cutPoints[c];
+					break;
+				}
+			}
+			break;
+		}
+	}
+
+	return finalizeCutPoint(entries, startIndex, cutIndex);
 }
 
 // ============================================================================
@@ -825,6 +906,7 @@ export interface CompactionPreparation {
 export function prepareCompaction(
 	pathEntries: SessionEntry[],
 	settings: CompactionSettings,
+	cutStrategy: "tokens" | "turns" = "tokens",
 ): CompactionPreparation | undefined {
 	if (pathEntries.length > 0 && pathEntries[pathEntries.length - 1].type === "compaction") {
 		return undefined;
@@ -850,7 +932,10 @@ export function prepareCompaction(
 
 	const tokensBefore = estimateContextTokens(buildSessionContext(pathEntries).messages).tokens;
 
-	const cutPoint = findCutPoint(pathEntries, boundaryStart, boundaryEnd, settings.keepRecentTokens);
+	const cutPoint =
+		cutStrategy === "turns"
+			? findCutPointByTurns(pathEntries, boundaryStart, boundaryEnd, settings.maxHistoryTurns)
+			: findCutPoint(pathEntries, boundaryStart, boundaryEnd, settings.keepRecentTokens);
 
 	// Get UUID of first kept entry
 	const firstKeptEntry = pathEntries[cutPoint.firstKeptEntryIndex];
