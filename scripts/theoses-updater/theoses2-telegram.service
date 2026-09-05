@@ -1,0 +1,19 @@
+[Unit]
+Description=Theoses2 Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/theoses2-releases/current
+EnvironmentFile=/home/theoses/.theoses/agent/theoses.env
+Environment=THEOSES_CODING_AGENT_DIR=/home/theoses/.theoses/agent
+ExecStart=/usr/bin/node /opt/theoses2-releases/current/packages/telegram/dist/index.js
+Restart=always
+RestartSec=5
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
