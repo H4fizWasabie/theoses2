@@ -26,6 +26,59 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const MAX_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000;
 
+const RTK_REWRITE_TIMEOUT_MS = 2_000;
+let rtkAvailable: boolean | undefined;
+
+/**
+ * Rewrite a bash command through `rtk rewrite` for token-optimized output, when rtk is
+ * installed. Fails open: any missing binary, timeout, or error leaves the command untouched.
+ * `rtk rewrite` itself already handles `&&`/`;`-chained commands by rewriting each segment.
+ */
+async function rewriteCommandWithRtk(command: string): Promise<string> {
+	if (process.env.RTK_DISABLED === "1") return command;
+	if (rtkAvailable === false) return command;
+	if (/(^|[;&|]\s*)rtk\s/.test(command)) return command;
+
+	return new Promise((resolve) => {
+		let settled = false;
+		const finish = (result: string) => {
+			if (settled) return;
+			settled = true;
+			resolve(result);
+		};
+
+		let child: ReturnType<typeof spawn>;
+		try {
+			child = spawn("rtk", ["rewrite", command], { stdio: ["ignore", "pipe", "ignore"] });
+		} catch {
+			rtkAvailable = false;
+			finish(command);
+			return;
+		}
+
+		const timer = setTimeout(() => {
+			child.kill();
+			finish(command);
+		}, RTK_REWRITE_TIMEOUT_MS);
+
+		let stdout = "";
+		child.stdout?.on("data", (chunk) => {
+			stdout += chunk;
+		});
+		child.on("error", () => {
+			clearTimeout(timer);
+			rtkAvailable = false;
+			finish(command);
+		});
+		child.on("close", (code) => {
+			clearTimeout(timer);
+			rtkAvailable = true;
+			const rewritten = stdout.trim();
+			finish((code === 0 || code === 3) && rewritten ? rewritten : command);
+		});
+	});
+}
+
 function resolveTimeoutMs(timeout: number | undefined): number | undefined {
 	if (timeout === undefined) return undefined;
 	if (!Number.isFinite(timeout) || timeout <= 0) {
@@ -359,7 +412,8 @@ export function createShellToolDefinition(
 			onUpdate?,
 			ctx?,
 		) {
-			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;
+			const rewrittenCommand = await rewriteCommandWithRtk(command);
+			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${rewrittenCommand}` : rewrittenCommand;
 			const spawnContext = resolveSpawnContext(resolvedCommand, cwd, spawnHook, exposeSessionEnvironment, ctx);
 			const output = new OutputAccumulator({ tempFilePrefix: config.tempFilePrefix });
 			let acceptingOutput = true;
