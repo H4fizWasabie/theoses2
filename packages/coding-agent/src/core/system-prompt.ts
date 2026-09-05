@@ -42,7 +42,11 @@ The Working Note is a provisional model-written orientation for this channel ses
 
 <remember_guidance>
 Use remember only when the user explicitly asks you to recall durable information. Do not silently promote ordinary conversation into long-term memory.
-</remember_guidance>`;
+</remember_guidance>
+
+<tool_call_efficiency>
+Every tool call you make stays in this session's context for several turns, so unnecessary or sequential-when-independent tool calls compound into real cost. Batch aggressively: when you need to run several independent checks (e.g. reading multiple files, checking several paths, running unrelated lookups), issue all of those tool calls together in the same turn instead of one call, waiting, then the next. Only sequence tool calls when a later one genuinely depends on an earlier one's result. Before running a bash command, prefer a purpose-built tool (read, grep, find, ls, edit) when one exists for the job — reach for bash only for things no specialized tool covers (running scripts, chaining shell logic, one-off system commands). Combine multiple related shell steps into a single bash call with && or ; rather than one bash call per step.
+</tool_call_efficiency>`;
 
 function getPersona(contextFiles: Array<{ path: string; content: string }>): string {
 	return contextFiles
@@ -151,6 +155,8 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		} else {
 			addGuideline("Use bash for file operations like ls, rg, find");
 		}
+	} else if (hasBash && (hasGrep || hasFind || hasLs)) {
+		addGuideline("Prefer grep/find/ls/read over bash for search and file operations; use bash only when no specialized tool covers the job");
 	}
 
 	for (const guideline of promptGuidelines ?? []) {
