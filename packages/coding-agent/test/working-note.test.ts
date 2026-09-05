@@ -31,6 +31,7 @@ describe("Theoses2 Working Note", () => {
 		manager.newSession({ channel: "telegram", channelSessionId: "chat-1" });
 
 		expect(manager.getChannelSessionKey()).toEqual({ channel: "telegram", channelSessionId: "chat-1" });
+		expect(WORKING_NOTE_WRITE_CAP).toBe(2000);
 		expect(WORKING_NOTE_INJECTION_CAP).toBe(2000);
 	});
 });
