@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { Api, Model } from "theoses-ai";
+import { contentText, type Api, type Model, type ToolCall, type ToolResultMessage } from "theoses-ai";
 import { type Static, Type } from "typebox";
 import { CONFIG_DIR_NAME } from "../config.ts";
 import type { AgentSession } from "./agent-session.ts";
@@ -305,12 +305,74 @@ export function maybeRunConsolidation(options: MaybeRunConsolidationOptions): vo
 	});
 }
 
+/** Tool-result bodies (file contents, command output, API responses) can be arbitrarily large;
+ * consolidation only needs enough to know what the outcome was, not the full payload. */
+const MAX_TOOL_RESULT_CHARS = 500;
+/** Tool-call arguments (a whole file write, a long bash command) are rarely a durable fact by
+ * themselves — keep just enough to identify what was attempted. */
+const MAX_TOOL_ARGS_CHARS = 200;
+
+function truncate(text: string, maxChars: number): string {
+	return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+}
+
+function summarizeToolCall(call: ToolCall): string {
+	return `called ${call.name}(${truncate(JSON.stringify(call.arguments ?? {}), MAX_TOOL_ARGS_CHARS)})`;
+}
+
+function summarizeToolResult(message: ToolResultMessage): string {
+	return `${message.isError ? "FAILED" : "OK"} — ${truncate(contentText(message.content), MAX_TOOL_RESULT_CHARS)}`;
+}
+
+/**
+ * Builds the consolidation transcript from a window of session messages. Keeps user and assistant
+ * text in full (that's where durable facts and outcomes live) but condenses tool calls down to
+ * "which tool, brief args", tool results down to "succeeded/failed, brief result", and bash
+ * executions down to the command plus a brief snippet of output — the full raw tool-call arguments
+ * and tool-result payloads (bash output, file contents, API responses) were previously included
+ * verbatim, which is what pushed a single consolidation pass's transcript into the hundreds of
+ * thousands of tokens for tool-heavy windows.
+ */
 function entriesToTranscript(entries: SessionMessageEntry[]): string {
 	return entries
 		.map((entry) => {
-			const content = (entry.message as { content?: unknown }).content;
-			const text = typeof content === "string" ? content : JSON.stringify(content);
-			return `[${entry.timestamp}] ${entry.message.role}: ${text}`;
+			const message = entry.message;
+			let text: string;
+			switch (message.role) {
+				case "user":
+					text = contentText(message.content);
+					break;
+				case "assistant":
+					text = message.content
+						.map((block) => {
+							if (block.type === "text") return block.text;
+							if (block.type === "toolCall") return summarizeToolCall(block);
+							return undefined; // drop thinking blocks — internal reasoning, not a durable fact source
+						})
+						.filter((value): value is string => Boolean(value))
+						.join("\n");
+					break;
+				case "toolResult":
+					text = summarizeToolResult(message);
+					break;
+				case "bashExecution":
+					text = `ran \`${truncate(message.command, MAX_TOOL_ARGS_CHARS)}\` — ${
+						message.cancelled
+							? "cancelled"
+							: `exit ${message.exitCode ?? "?"}: ${truncate(message.output, MAX_TOOL_RESULT_CHARS)}`
+					}`;
+					break;
+				case "branchSummary":
+				case "compactionSummary":
+					text = message.summary;
+					break;
+				case "custom":
+					text = contentText(message.content);
+					break;
+				default:
+					text = "";
+			}
+			return `[${entry.timestamp}] ${message.role}: ${text}`;
 		})
 		.join("\n");
 }
