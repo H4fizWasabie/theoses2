@@ -1,0 +1,10 @@
+[Unit]
+Description=Theoses2 self-update check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/theoses-updater/update.sh

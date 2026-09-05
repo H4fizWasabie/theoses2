@@ -75,6 +75,9 @@ jobs:
             --offline-model-data \
             --out "${GITHUB_WORKSPACE}/packages/coding-agent/binaries"
 
+          "${build_root}/theoses-${VERSION}/scripts/build-services.sh" \
+            --out "${GITHUB_WORKSPACE}/release-services"
+
       - name: Prepare GitHub release payload
         run: |
           set -euo pipefail
@@ -87,6 +90,7 @@ jobs:
           node scripts/generate-coding-agent-install-lock.mjs --check
           cp packages/coding-agent/install-lock/package.json release-assets/theoses-coding-agent-install-package.json
           cp packages/coding-agent/install-lock/package-lock.json release-assets/theoses-coding-agent-install-package-lock.json
+          cp release-services/theoses-services-linux-x64.tar.gz release-assets/
 
           cd packages/coding-agent/binaries
 
@@ -115,6 +119,7 @@ jobs:
             theoses-linux-arm64.tar.gz
             theoses-windows-x64.zip
             theoses-windows-arm64.zip
+            theoses-services-linux-x64.tar.gz
             theoses-coding-agent-install-package.json
             theoses-coding-agent-install-package-lock.json
           )
@@ -226,6 +231,7 @@ jobs:
             theoses-linux-arm64.tar.gz
             theoses-windows-x64.zip
             theoses-windows-arm64.zip
+            theoses-services-linux-x64.tar.gz
             theoses-coding-agent-install-package.json
             theoses-coding-agent-install-package-lock.json
             SHA256SUMS
@@ -256,6 +262,7 @@ jobs:
             theoses-linux-arm64.tar.gz
             theoses-windows-x64.zip
             theoses-windows-arm64.zip
+            theoses-services-linux-x64.tar.gz
             theoses-coding-agent-install-package.json
             theoses-coding-agent-install-package-lock.json
             SHA256SUMS

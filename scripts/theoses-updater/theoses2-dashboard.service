@@ -1,0 +1,20 @@
+[Unit]
+Description=Theoses2 dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/theoses2-releases/current
+EnvironmentFile=/home/theoses/.theoses/agent/theoses.env
+Environment=THEOSES_DASHBOARD_HOST=127.0.0.1
+Environment=THEOSES_DASHBOARD_PORT=30144
+ExecStart=/usr/bin/node /opt/theoses2-releases/current/packages/dashboard/dist/index.js
+Restart=always
+RestartSec=5
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
