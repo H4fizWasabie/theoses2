@@ -300,6 +300,11 @@ jobs:
   publish-npm:
     runs-on: ubuntu-latest
     needs: stage-github-release
+    # npm trusted publishing isn't configured yet for these packages (first
+    # publish needs a bootstrap step npm's UI doesn't support smoothly for a
+    # personal, org-less account - see issue #71). Disabled until that's
+    # sorted out; the GitHub Release no longer waits on this job.
+    if: false
     environment: npm-publish
     permissions:
       contents: read
@@ -351,7 +356,6 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - stage-github-release
-      - publish-npm
     permissions:
       contents: write
     env:
@@ -381,9 +385,8 @@ jobs:
     needs:
       - build
       - stage-github-release
-      - publish-npm
       - publish-github-release
-    if: ${{ always() && needs.stage-github-release.result != 'skipped' && (needs.stage-github-release.result != 'success' || needs.publish-npm.result != 'success' || needs.publish-github-release.result != 'success') }}
+    if: ${{ always() && needs.stage-github-release.result != 'skipped' && (needs.stage-github-release.result != 'success' || needs.publish-github-release.result != 'success') }}
     permissions:
       contents: write
     env:
