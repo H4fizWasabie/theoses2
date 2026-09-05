@@ -412,6 +412,10 @@ export function createShellToolDefinition(
 			onUpdate?,
 			ctx?,
 		) {
+			if (onUpdate) {
+				onUpdate({ content: [], details: undefined });
+			}
+
 			const rewrittenCommand = await rewriteCommandWithRtk(command);
 			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${rewrittenCommand}` : rewrittenCommand;
 			const spawnContext = resolveSpawnContext(resolvedCommand, cwd, spawnHook, exposeSessionEnvironment, ctx);
@@ -456,10 +460,6 @@ export function createShellToolDefinition(
 					emitOutputUpdate();
 				}, delay);
 			};
-
-			if (onUpdate) {
-				onUpdate({ content: [], details: undefined });
-			}
 
 			const handleData = (data: Buffer) => {
 				if (!acceptingOutput) return;

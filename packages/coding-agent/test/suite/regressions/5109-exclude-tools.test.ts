@@ -55,10 +55,12 @@ describe("regression #5109: exclude tools", () => {
 				"convert_doc",
 				"dynamic_tool",
 				"edit",
+				"generate_image",
 				"remember",
 				"save_note",
 				"tool_call",
 				"tool_search",
+				"web_search",
 				"working_note",
 				"write",
 			]);
