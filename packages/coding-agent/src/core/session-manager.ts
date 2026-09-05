@@ -30,7 +30,7 @@ import { type SessionLookupKey, sessionLookupKey } from "./session-cwd.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
 
-export const WORKING_NOTE_WRITE_CAP = 4000;
+export const WORKING_NOTE_WRITE_CAP = 2000;
 export const WORKING_NOTE_INJECTION_CAP = 2000;
 
 export interface ChannelSessionKey {

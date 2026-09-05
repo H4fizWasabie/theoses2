@@ -277,6 +277,7 @@ describe("shouldCompact", () => {
 			enabled: true,
 			reserveTokens: 10000,
 			keepRecentTokens: 20000,
+			maxHistoryTurns: 5,
 		};
 
 		expect(shouldCompact(95000, 100000, settings)).toBe(true);
@@ -288,6 +289,7 @@ describe("shouldCompact", () => {
 			enabled: false,
 			reserveTokens: 10000,
 			keepRecentTokens: 20000,
+			maxHistoryTurns: 5,
 		};
 
 		expect(shouldCompact(95000, 100000, settings)).toBe(false);

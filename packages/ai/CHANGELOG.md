@@ -13,7 +13,6 @@
 ### Changed
 
 - Renamed the package and executable to `theoses-ai` and removed the hosted Radius gateway default ([#19](https://github.com/H4fizWasabie/theoses2/issues/19)).
-- Enabled session-affinity headers by default for OpenRouter requests, so OpenRouter can pin a session to the same backing provider across turns instead of relying only on its weaker automatic-hashing fallback, improving prompt-cache hit consistency for automatic-caching providers.
 
 ## [0.84.3] - 2026-08-24
 

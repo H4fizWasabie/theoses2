@@ -1615,10 +1615,7 @@ function detectCompat(model: Model<"openai-completions">): ResolvedOpenAIComplet
 		supportsStrictMode: !isMoonshot && !isTogether && !isCloudflareAiGateway && !isNvidia,
 		supportsOpenAIGrammarTools: false,
 		cacheControlFormat,
-		// OpenRouter uses this to pin a session's requests to the same backing
-		// provider (of potentially many) for a given model, which automatic-caching
-		// providers (e.g. z.ai) need for their cache to actually hit across turns.
-		sendSessionAffinityHeaders: isOpenRouter,
+		sendSessionAffinityHeaders: false,
 		deferredToolsMode: undefined,
 		sessionAffinityFormat: isOpenRouter ? "openrouter" : "openai",
 		supportsLongCacheRetention: !(

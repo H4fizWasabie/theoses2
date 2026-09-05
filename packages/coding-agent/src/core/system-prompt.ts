@@ -156,7 +156,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 			addGuideline("Use bash for file operations like ls, rg, find");
 		}
 	} else if (hasBash && (hasGrep || hasFind || hasLs)) {
-		addGuideline("Prefer grep/find/ls/read over bash for search and file operations; use bash only when no specialized tool covers the job");
+		addGuideline(
+			"Prefer grep/find/ls/read over bash for search and file operations; use bash only when no specialized tool covers the job",
+		);
 	}
 
 	for (const guideline of promptGuidelines ?? []) {
