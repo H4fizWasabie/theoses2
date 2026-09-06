@@ -7,8 +7,8 @@
 import type { ExtensionAPI } from "theoses-coding-agent";
 import { Text } from "theoses-tui";
 
-export default function (pi: ExtensionAPI) {
-	pi.registerCommand("tui", {
+export default function (theoses: ExtensionAPI) {
+	theoses.registerCommand("tui", {
 		description: "Show TUI stats",
 		handler: async (_args, ctx) => {
 			if (!ctx.hasUI) return;

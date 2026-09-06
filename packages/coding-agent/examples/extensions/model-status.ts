@@ -9,8 +9,8 @@
 
 import type { ExtensionAPI } from "theoses-coding-agent";
 
-export default function (pi: ExtensionAPI) {
-	pi.on("model_select", async (event, ctx) => {
+export default function (theoses: ExtensionAPI) {
+	theoses.on("model_select", async (event, ctx) => {
 		const { model, previousModel, source } = event;
 
 		// Format model identifiers

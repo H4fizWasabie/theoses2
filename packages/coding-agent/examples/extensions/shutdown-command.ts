@@ -8,9 +8,9 @@
 import type { ExtensionAPI } from "theoses-coding-agent";
 import { Type } from "typebox";
 
-export default function (pi: ExtensionAPI) {
+export default function (theoses: ExtensionAPI) {
 	// Register a /quit command that cleanly exits pi
-	pi.registerCommand("quit", {
+	theoses.registerCommand("quit", {
 		description: "Exit pi cleanly",
 		handler: async (_args, ctx) => {
 			ctx.shutdown();
@@ -18,7 +18,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// You can also create a tool that shuts down after completing work
-	pi.registerTool({
+	theoses.registerTool({
 		name: "finish_and_exit",
 		label: "Finish and Exit",
 		description: "Complete a task and exit pi",
@@ -37,7 +37,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// You could also create a more complex tool with parameters
-	pi.registerTool({
+	theoses.registerTool({
 		name: "deploy_and_exit",
 		label: "Deploy and Exit",
 		description: "Deploy the application and exit pi",

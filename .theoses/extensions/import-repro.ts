@@ -275,8 +275,8 @@ async function fetchGistSession(gistId: string): Promise<{ header: SessionHeader
 	throw new Error(`gist ${gistId} has no .jsonl or .html session file`);
 }
 
-export default function (pi: ExtensionAPI) {
-	pi.registerCommand("ir", {
+export default function (theoses: ExtensionAPI) {
+	theoses.registerCommand("ir", {
 		description: "Import a CI issue-analysis session from a gist ID, share URL, or issue URL and switch to it",
 		handler: async (args: string, ctx: ExtensionCommandContext) => {
 			const ref = args.trim();

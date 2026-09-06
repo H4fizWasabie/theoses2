@@ -10,7 +10,7 @@
 import type { ExtensionAPI } from "theoses-coding-agent";
 import { createBashTool } from "theoses-coding-agent";
 
-export default function (pi: ExtensionAPI) {
+export default function (theoses: ExtensionAPI) {
 	const cwd = process.cwd();
 
 	const bashTool = createBashTool(cwd, {
@@ -21,7 +21,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 	});
 
-	pi.registerTool({
+	theoses.registerTool({
 		...bashTool,
 		execute: async (id, params, signal, onUpdate, _ctx) => {
 			return bashTool.execute(id, params, signal, onUpdate);

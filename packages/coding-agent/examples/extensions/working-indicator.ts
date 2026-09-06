@@ -83,7 +83,7 @@ function describeMode(mode: WorkingIndicatorMode): string {
 	}
 }
 
-export default function (pi: ExtensionAPI) {
+export default function (theoses: ExtensionAPI) {
 	let mode: WorkingIndicatorMode = "spinner";
 
 	const applyIndicator = (ctx: ExtensionContext) => {
@@ -91,11 +91,11 @@ export default function (pi: ExtensionAPI) {
 		ctx.ui.setStatus("working-indicator", ctx.ui.theme.fg("dim", `Indicator: ${describeMode(mode)}`));
 	};
 
-	pi.on("session_start", async (_event, ctx) => {
+	theoses.on("session_start", async (_event, ctx) => {
 		applyIndicator(ctx);
 	});
 
-	pi.registerCommand("working-indicator", {
+	theoses.registerCommand("working-indicator", {
 		description: "Set the streaming working indicator: dot, pulse, none, spinner, or reset.",
 		handler: async (args, ctx) => {
 			const nextMode = args.trim().toLowerCase();

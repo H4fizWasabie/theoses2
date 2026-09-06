@@ -17,8 +17,8 @@ import { uuidv7 } from "theoses-ai";
 import type { ExtensionAPI } from "theoses-coding-agent";
 import { convertToLlm, serializeConversation } from "theoses-coding-agent";
 
-export default function (pi: ExtensionAPI) {
-	pi.on("session_before_compact", async (event, ctx) => {
+export default function (theoses: ExtensionAPI) {
+	theoses.on("session_before_compact", async (event, ctx) => {
 		ctx.ui.notify("Custom compaction extension triggered", "info");
 
 		const { preparation, branchEntries: _, signal } = event;

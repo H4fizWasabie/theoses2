@@ -12,10 +12,10 @@ import type { AssistantMessage } from "theoses-ai";
 import type { ExtensionAPI } from "theoses-coding-agent";
 import { truncateToWidth, visibleWidth } from "theoses-tui";
 
-export default function (pi: ExtensionAPI) {
+export default function (theoses: ExtensionAPI) {
 	let enabled = false;
 
-	pi.registerCommand("footer", {
+	theoses.registerCommand("footer", {
 		description: "Toggle custom footer",
 		handler: async (_args, ctx) => {
 			enabled = !enabled;

@@ -4,8 +4,8 @@ import type { ExtensionAPI } from "theoses-coding-agent";
 
 const baseDir = dirname(fileURLToPath(import.meta.url));
 
-export default function (pi: ExtensionAPI) {
-	pi.on("resources_discover", () => {
+export default function (theoses: ExtensionAPI) {
+	theoses.on("resources_discover", () => {
 		return {
 			skillPaths: [join(baseDir, "SKILL.md")],
 			promptPaths: [join(baseDir, "dynamic.md")],
