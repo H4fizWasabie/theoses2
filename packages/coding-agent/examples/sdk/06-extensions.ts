@@ -10,7 +10,7 @@
  * - Paths specified in settings.json "extensions" array
  *
  * An extension is a TypeScript file that exports a default function:
- *   export default function (pi: ExtensionAPI) { ... }
+ *   export default function (theoses: ExtensionAPI) { ... }
  */
 
 import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager } from "theoses-coding-agent";
@@ -54,23 +54,23 @@ try {
 /*
 import type { ExtensionAPI } from "theoses-coding-agent";
 
-export default function (pi: ExtensionAPI) {
-	pi.on("agent_start", async () => {
+export default function (theoses: ExtensionAPI) {
+	theoses.on("agent_start", async () => {
 		console.log("[Extension] Agent starting");
 	});
 
-	pi.on("tool_call", async (event) => {
+	theoses.on("tool_call", async (event) => {
 		console.log(\`[Extension] Tool: \${event.toolName}\`);
 		// Return { block: true, reason: "..." } to block execution
 		return undefined;
 	});
 
-	pi.on("agent_end", async (event) => {
+	theoses.on("agent_end", async (event) => {
 		console.log(\`[Extension] Low-level run ended, \${event.messages.length} messages\`);
 	});
 
 	// Register a custom tool
-	pi.registerTool({
+	theoses.registerTool({
 		name: "my_tool",
 		label: "My Tool",
 		description: "Does something useful",
@@ -84,7 +84,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// Register a command
-	pi.registerCommand("mycommand", {
+	theoses.registerCommand("mycommand", {
 		description: "Do something",
 		handler: async (args, ctx) => {
 			ctx.ui.notify(\`Command executed with: \${args}\`);
