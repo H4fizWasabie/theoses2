@@ -36,15 +36,15 @@ output.
 ## Writing evals
 
 Follow [`vitest-evals`](https://github.com/getsentry/vitest-evals) for general suite, judge, assertion, and normalized
-trace guidance. Theoses-specific evals use `createPiCodingAgentHarness(...)` from `src/theoses-harness.ts`, with one harness bound
+trace guidance. Theoses-specific evals use `createTheosesCodingAgentHarness(...)` from `src/theoses-harness.ts`, with one harness bound
 to each `describeEval(...)` suite:
 
 ```ts
 import { expect } from "vitest";
 import { describeEval } from "vitest-evals";
-import { createPiCodingAgentHarness } from "./theoses-harness.ts";
+import { createTheosesCodingAgentHarness } from "./theoses-harness.ts";
 
-const harness = createPiCodingAgentHarness({ noTools: "all" });
+const harness = createTheosesCodingAgentHarness({ noTools: "all" });
 
 describeEval("Theoses smoke", { harness }, (it) => {
 	it("answers a factual question", async ({ run }) => {
@@ -56,7 +56,7 @@ describeEval("Theoses smoke", { harness }, (it) => {
 
 ### Configuring the Theoses harness
 
-`createPiCodingAgentHarness(...)` accepts:
+`createTheosesCodingAgentHarness(...)` accepts:
 
 - `name`: stable harness identity used by reports and comparisons.
 - `model`: optional `{ provider, id }` selection. It overrides the runner's default model.
@@ -67,7 +67,7 @@ describeEval("Theoses smoke", { harness }, (it) => {
 An explicitly selected model makes model-comparison harnesses independent of the runner default:
 
 ```ts
-const harness = createPiCodingAgentHarness({
+const harness = createTheosesCodingAgentHarness({
 	name: "claude-opus-4-6",
 	model: { provider: "anthropic", id: "claude-opus-4-6" },
 });
@@ -89,7 +89,7 @@ const result = await run([
 Use `output` to expose scenario-specific, JSON-safe behavior without adding that behavior to the generic Theoses adapter:
 
 ```ts
-const harness = createPiCodingAgentHarness({
+const harness = createTheosesCodingAgentHarness({
 	output: ({ response, session }) => ({
 		response,
 		activeTools: session.getActiveToolNames(),

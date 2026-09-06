@@ -10,12 +10,12 @@ import {
 } from "vitest";
 import type { HarnessRun } from "vitest-evals/harness";
 
-export const THEOSES_SESSION_SNAPSHOT_ARTIFACT = "piSessionJsonl";
+export const THEOSES_SESSION_SNAPSHOT_ARTIFACT = "theosesSessionJsonl";
 
 const evalSessionArtifactKey = Symbol("theoses-evals-session-artifact");
 const evalSourceArtifactKey = Symbol("theoses-evals-source-artifact");
 
-interface PiSessionAttachment extends TestAttachment {
+interface TheosesSessionAttachment extends TestAttachment {
 	name: "session.jsonl";
 	contentType: "application/jsonl";
 	body: string;
@@ -29,10 +29,10 @@ export interface SourceAttachment extends TestAttachment {
 	bodyEncoding: "utf-8";
 }
 
-interface PiSessionArtifact extends TestArtifactBase {
+interface TheosesSessionArtifact extends TestArtifactBase {
 	type: "theoses-evals:session";
 	runId: string;
-	attachments: [PiSessionAttachment] | [];
+	attachments: [TheosesSessionAttachment] | [];
 }
 
 interface SourceArtifact extends TestArtifactBase {
@@ -43,7 +43,7 @@ interface SourceArtifact extends TestArtifactBase {
 
 declare module "vitest" {
 	interface TestArtifactRegistry {
-		[evalSessionArtifactKey]: PiSessionArtifact;
+		[evalSessionArtifactKey]: TheosesSessionArtifact;
 		[evalSourceArtifactKey]: SourceArtifact;
 	}
 }
@@ -56,7 +56,7 @@ export async function recordEvalSessionArtifact(
 	const session = run.artifacts?.[THEOSES_SESSION_SNAPSHOT_ARTIFACT];
 	if (session === undefined) return;
 	if (typeof runId !== "string" || typeof session !== "string") {
-		throw new TypeError("Pi eval session artifact metadata is invalid.");
+		throw new TypeError("Theoses eval session artifact metadata is invalid.");
 	}
 	await recordArtifact(task, {
 		type: "theoses-evals:session",

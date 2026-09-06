@@ -13,7 +13,7 @@ export class TheosesServerError extends Error {
 }
 
 export class TheosesDisconnectedError extends Error {
-	constructor(message = "Pi client is disconnected") {
+	constructor(message = "Theoses client is disconnected") {
 		super(message);
 		this.name = "TheosesDisconnectedError";
 	}
@@ -21,7 +21,7 @@ export class TheosesDisconnectedError extends Error {
 
 export class TheosesClientDisposedError extends Error {
 	constructor() {
-		super("Pi client is disposed");
+		super("Theoses client is disposed");
 		this.name = "TheosesClientDisposedError";
 	}
 }

@@ -25,28 +25,28 @@ import {
 } from "vitest-evals/harness";
 import { THEOSES_SESSION_SNAPSHOT_ARTIFACT } from "./vitest-evals/artifacts.ts";
 
-export type PiCodingAgentInput = string | Array<{ type: "prompt"; content: string } | { type: "reload" }>;
+export type TheosesCodingAgentInput = string | Array<{ type: "prompt"; content: string } | { type: "reload" }>;
 
-type PiCodingAgentModelSelection = {
+type TheosesCodingAgentModelSelection = {
 	provider: string;
 	id: string;
 };
 
-type PiCodingAgentHarnessOptions = {
+type TheosesCodingAgentHarnessOptions = {
 	name?: string;
-	model?: PiCodingAgentModelSelection;
+	model?: TheosesCodingAgentModelSelection;
 	noTools?: CreateAgentSessionOptions["noTools"];
 	transformSystemPrompt?: (defaultPrompt: string) => string;
 };
 
-type PiCodingAgentHarnessWithOutput<TOutput extends JsonValue> = PiCodingAgentHarnessOptions & {
+type TheosesCodingAgentHarnessWithOutput<TOutput extends JsonValue> = TheosesCodingAgentHarnessOptions & {
 	output: (args: { response: string; session: AgentSession }) => TOutput | Promise<TOutput>;
 };
 
 export function resolveModelSelection(
-	explicitModel: PiCodingAgentModelSelection | undefined,
+	explicitModel: TheosesCodingAgentModelSelection | undefined,
 	environment: { THEOSES_PROVIDER?: string; THEOSES_MODEL?: string } = process.env,
-): PiCodingAgentModelSelection {
+): TheosesCodingAgentModelSelection {
 	const provider = (explicitModel?.provider ?? environment.THEOSES_PROVIDER)?.trim();
 	const id = (explicitModel?.id ?? environment.THEOSES_MODEL)?.trim();
 	if (!provider || !id) {
@@ -106,11 +106,11 @@ async function promptAgent(session: AgentSession, input: string, signal: AbortSi
 	return output;
 }
 
-async function runPiCodingAgent<TOutput extends JsonValue>(
-	input: PiCodingAgentInput,
+async function runTheosesCodingAgent<TOutput extends JsonValue>(
+	input: TheosesCodingAgentInput,
 	signal: AbortSignal | undefined,
 	setArtifact: HarnessContext["setArtifact"],
-	options: PiCodingAgentHarnessOptions | PiCodingAgentHarnessWithOutput<TOutput>,
+	options: TheosesCodingAgentHarnessOptions | TheosesCodingAgentHarnessWithOutput<TOutput>,
 ): Promise<SimpleHarnessResult<string | TOutput>> {
 	const startedAt = performance.now();
 	signal?.throwIfAborted();
@@ -175,7 +175,7 @@ async function runPiCodingAgent<TOutput extends JsonValue>(
 					await evalSession.reload();
 				}
 			}
-			if (response === undefined) throw new Error("Pi eval input must include at least one prompt step.");
+			if (response === undefined) throw new Error("Theoses eval input must include at least one prompt step.");
 			const output = "output" in options ? await options.output({ response, session: evalSession }) : response;
 			const stats = evalSession.getSessionStats();
 			const hasPricing = [model.cost, ...(model.cost.tiers ?? [])].some(
@@ -243,15 +243,17 @@ async function runPiCodingAgent<TOutput extends JsonValue>(
 	};
 }
 
-export function createPiCodingAgentHarness<TOutput extends JsonValue>(
-	options: PiCodingAgentHarnessWithOutput<TOutput>,
-): Harness<PiCodingAgentInput, TOutput>;
-export function createPiCodingAgentHarness(options?: PiCodingAgentHarnessOptions): Harness<PiCodingAgentInput, string>;
-export function createPiCodingAgentHarness<TOutput extends JsonValue>(
-	options: PiCodingAgentHarnessOptions | PiCodingAgentHarnessWithOutput<TOutput> = {},
+export function createTheosesCodingAgentHarness<TOutput extends JsonValue>(
+	options: TheosesCodingAgentHarnessWithOutput<TOutput>,
+): Harness<TheosesCodingAgentInput, TOutput>;
+export function createTheosesCodingAgentHarness(
+	options?: TheosesCodingAgentHarnessOptions,
+): Harness<TheosesCodingAgentInput, string>;
+export function createTheosesCodingAgentHarness<TOutput extends JsonValue>(
+	options: TheosesCodingAgentHarnessOptions | TheosesCodingAgentHarnessWithOutput<TOutput> = {},
 ) {
-	return createHarness<PiCodingAgentInput, string | TOutput>({
-		name: options.name ?? "pi-coding-agent",
-		run: ({ input, signal, setArtifact }) => runPiCodingAgent(input, signal, setArtifact, options),
+	return createHarness<TheosesCodingAgentInput, string | TOutput>({
+		name: options.name ?? "theoses-coding-agent",
+		run: ({ input, signal, setArtifact }) => runTheosesCodingAgent(input, signal, setArtifact, options),
 	});
 }
