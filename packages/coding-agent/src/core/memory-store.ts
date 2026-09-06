@@ -108,6 +108,10 @@ interface LegacyMemoryRecord {
 	text?: string;
 }
 
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function slugify(subject: string): string {
 	const base = subject
 		.toLowerCase()
@@ -258,22 +262,34 @@ export class FileMemoryStore implements MemoryStore {
 			nodes.flatMap((n) => n.edges.filter((e) => e.rel === "supersedes").map((e) => e.target)),
 		);
 
+		// Drop very short tokens ("i", "am") before matching: as bare substrings they match almost any
+		// text (e.g. "i" inside "prefers"), which drowns out genuinely relevant hits once ranked by
+		// term-overlap score below.
 		const allTerms = query
 			.toLowerCase()
 			.split(/[^a-z0-9]+/)
-			.filter(Boolean);
+			.filter((term) => term.length >= 3);
 		const significantTerms = allTerms.filter((term) => !QUERY_STOPWORDS.has(term));
 		// Free-text queries ("who am I", "what do you know about my preferences") are mostly stopwords
 		// and connective words that won't appear verbatim in a stored fact's subject/body, so requiring
 		// every term to match (as opposed to any significant term) made `remember` return nothing for
 		// exactly the kind of natural-language question it's meant to answer.
 		const terms = significantTerms.length > 0 ? significantTerms : allTerms;
-		const matches = (n: MemoryNode) => {
+		if (terms.length === 0) return [];
+
+		// Word-boundary matches so a term like "user" doesn't also count as a hit inside unrelated words,
+		// and scores by distinct-term overlap so a note matching several query terms outranks one that
+		// only incidentally contains a single common term.
+		const termPattern = new Map(terms.map((term) => [term, new RegExp(`\\b${escapeRegExp(term)}\\b`)]));
+		const scoreOf = (n: MemoryNode): number => {
 			const haystack = `${n.subject} ${n.body ?? ""}`.toLowerCase();
-			return terms.some((term) => haystack.includes(term));
+			let score = 0;
+			for (const pattern of termPattern.values()) if (pattern.test(haystack)) score++;
+			return score;
 		};
 
-		const entryIds = nodes.filter(matches).map((n) => n.id);
+		const scores = new Map(nodes.map((n) => [n.id, scoreOf(n)]));
+		const entryIds = nodes.filter((n) => (scores.get(n.id) ?? 0) > 0).map((n) => n.id);
 		if (entryIds.length === 0) return [];
 
 		const depth = new Map<string, number>();
@@ -294,9 +310,12 @@ export class FileMemoryStore implements MemoryStore {
 		}
 
 		return [...depth.entries()]
-			.map(([id, d]) => ({ node: byId.get(id), d }))
-			.filter((entry): entry is { node: MemoryNode; d: number } => !!entry.node && !superseded.has(entry.node.id))
-			.sort((a, b) => a.d - b.d || b.node.at.localeCompare(a.node.at))
+			.map(([id, d]) => ({ node: byId.get(id), d, score: scores.get(id) ?? 0 }))
+			.filter(
+				(entry): entry is { node: MemoryNode; d: number; score: number } =>
+					!!entry.node && !superseded.has(entry.node.id),
+			)
+			.sort((a, b) => a.d - b.d || b.score - a.score || b.node.at.localeCompare(a.node.at))
 			.slice(0, 8)
 			.map((entry) => nodeToRecord(entry.node));
 	}
