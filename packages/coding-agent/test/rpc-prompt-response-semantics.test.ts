@@ -229,6 +229,26 @@ describe("RPC prompt response semantics", () => {
 		}
 	});
 
+	it("returns an error for a JSON null command without crashing", async () => {
+		const { lineHandler, cleanup } = await startRpcMode({ withAuth: false, responseDelayMs: 0 });
+
+		try {
+			lineHandler("null");
+
+			await vi.waitFor(() => {
+				expect(parseOutputLines(rpcIo.outputLines)).toContainEqual(
+					expect.objectContaining({
+						type: "response",
+						success: false,
+						error: "Invalid RPC command: expected a JSON object with a string type",
+					}),
+				);
+			});
+		} finally {
+			await cleanup();
+		}
+	});
+
 	it("emits one success response when prompt preflight succeeds", async () => {
 		const { lineHandler, cleanup } = await startRpcMode({ withAuth: true, responseDelayMs: 0 });
 

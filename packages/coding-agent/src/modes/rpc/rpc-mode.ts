@@ -38,6 +38,8 @@ import type {
 	RpcSlashCommand,
 } from "./rpc-types.ts";
 
+const EXTENSION_EDITOR_TIMEOUT_MS = 5 * 60 * 1000;
+
 // Re-export types for consumers
 export type {
 	RpcCommand,
@@ -252,22 +254,17 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		},
 
 		async editor(title: string, prefill?: string): Promise<string | undefined> {
-			const id = crypto.randomUUID();
-			return new Promise((resolve, reject) => {
-				pendingExtensionRequests.set(id, {
-					resolve: (response: RpcExtensionUIResponse) => {
-						if ("cancelled" in response && response.cancelled) {
-							resolve(undefined);
-						} else if ("value" in response) {
-							resolve(response.value);
-						} else {
-							resolve(undefined);
-						}
-					},
-					reject,
-				});
-				output({ type: "extension_ui_request", id, method: "editor", title, prefill } as RpcExtensionUIRequest);
-			});
+			return createDialogPromise(
+				{ timeout: EXTENSION_EDITOR_TIMEOUT_MS },
+				undefined,
+				{ method: "editor", title, prefill },
+				(response) =>
+					"cancelled" in response && response.cancelled
+						? undefined
+						: "value" in response
+							? response.value
+							: undefined,
+			);
 		},
 
 		addAutocompleteProvider(): void {
@@ -777,6 +774,12 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			return;
 		}
 
+		if (typeof parsed !== "object" || parsed === null || !("type" in parsed) || typeof parsed.type !== "string") {
+			output(error(undefined, "unknown", "Invalid RPC command: expected a JSON object with a string type"));
+			await waitForRawStdoutBackpressure();
+			return;
+		}
+
 		const command = parsed as RpcCommand;
 		try {
 			const response = await handleCommand(command);
@@ -797,6 +800,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		}
 	};
 
+	let inputQueue = Promise.resolve();
 	const onInputEnd = () => {
 		void shutdown();
 	};
@@ -804,7 +808,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 
 	detachInput = (() => {
 		const detachJsonl = attachJsonlLineReader(process.stdin, (line) => {
-			void handleInputLine(line);
+			inputQueue = inputQueue.then(() => handleInputLine(line));
 		});
 		return () => {
 			detachJsonl();

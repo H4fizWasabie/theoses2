@@ -10,6 +10,7 @@ import { fetchWithRetry } from "./management-http.ts";
 const TOOLS_DIR = getBinDir();
 const NETWORK_TIMEOUT_MS = 10_000;
 const DOWNLOAD_TIMEOUT_MS = 120_000;
+const downloadLocks = new Map<"fd" | "rg", Promise<string>>();
 
 function isOfflineModeEnabled(): boolean {
 	const value = process.env.THEOSES_OFFLINE;
@@ -360,8 +361,11 @@ export async function ensureTool(
 	// Tool not found - download it
 	onStatus?.({ type: "info", message: `${config.name} not found. Downloading...` });
 
+	const existingDownload = downloadLocks.get(tool);
+	const downloadPromise = existingDownload ?? downloadTool(tool);
+	if (!existingDownload) downloadLocks.set(tool, downloadPromise);
 	try {
-		const path = await downloadTool(tool);
+		const path = await downloadPromise;
 		onStatus?.({ type: "info", message: `${config.name} installed to ${path}` });
 		return path;
 	} catch (e) {
@@ -370,5 +374,7 @@ export async function ensureTool(
 			message: `Failed to download ${config.name}: ${e instanceof Error ? e.message : e}`,
 		});
 		return undefined;
+	} finally {
+		if (!existingDownload) downloadLocks.delete(tool);
 	}
 }

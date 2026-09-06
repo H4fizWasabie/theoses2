@@ -50,26 +50,21 @@ export async function processFileArguments(fileArgs: string[], options?: Process
 
 		if (mimeType) {
 			// Handle image file
-			const content = await readFile(absolutePath);
-			const processed = await processImage(content, mimeType, { autoResizeImages });
+			try {
+				const content = await readFile(absolutePath);
+				const processed = await processImage(content, mimeType, { autoResizeImages });
 
-			if (!processed.ok) {
-				text += `<file name="${absolutePath}">${processed.message}</file>\n`;
-				continue;
-			}
+				if (!processed.ok) {
+					text += `<file name="${absolutePath}">${processed.message}</file>\n`;
+					continue;
+				}
 
-			const attachment: ImageContent = {
-				type: "image",
-				mimeType: processed.mimeType,
-				data: processed.data,
-			};
-			images.push(attachment);
-
-			// Add text reference to image with optional processing hints
-			if (processed.hints.length > 0) {
+				images.push({ type: "image", mimeType: processed.mimeType, data: processed.data });
 				text += `<file name="${absolutePath}">${processed.hints.join("\n")}</file>\n`;
-			} else {
-				text += `<file name="${absolutePath}"></file>\n`;
+			} catch (error: unknown) {
+				const message = error instanceof Error ? error.message : String(error);
+				console.error(chalk.red(`Error: Could not read file ${absolutePath}: ${message}`));
+				process.exit(1);
 			}
 		} else {
 			// Handle text file
