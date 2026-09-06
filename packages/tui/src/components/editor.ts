@@ -2341,6 +2341,10 @@ export class Editor implements Component, Focusable {
 		this.autocompleteAbort = undefined;
 	}
 
+	dispose(): void {
+		this.cancelAutocompleteRequest();
+	}
+
 	private clearAutocompleteUi(): void {
 		this.autocompleteState = null;
 		this.autocompleteList = undefined;

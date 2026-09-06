@@ -28,6 +28,7 @@ export class BashExecutionComponent extends Container {
 	private fullOutputPath?: string;
 	private expanded = false;
 	private contentContainer: Container;
+	private borderColor: (str: string) => string;
 
 	constructor(command: string, ui: TUI, excludeFromContext = false) {
 		super();
@@ -35,13 +36,13 @@ export class BashExecutionComponent extends Container {
 
 		// Use dim border for excluded-from-context commands (!! prefix)
 		const colorKey = excludeFromContext ? "dim" : "bashMode";
-		const borderColor = (str: string) => theme.fg(colorKey, str);
+		this.borderColor = (str: string) => theme.fg(colorKey, str);
 
 		// Add spacer
 		this.addChild(new Spacer(1));
 
 		// Top border
-		this.addChild(new DynamicBorder(borderColor));
+		this.addChild(new DynamicBorder(this.borderColor));
 
 		// Content container (holds dynamic content between borders)
 		this.contentContainer = new Container();
@@ -61,7 +62,7 @@ export class BashExecutionComponent extends Container {
 		this.contentContainer.addChild(this.loader);
 
 		// Bottom border
-		this.addChild(new DynamicBorder(borderColor));
+		this.addChild(new DynamicBorder(this.borderColor));
 	}
 
 	/**
@@ -135,7 +136,7 @@ export class BashExecutionComponent extends Container {
 		this.contentContainer.clear();
 
 		// Command header
-		const header = new Text(theme.fg("bashMode", theme.bold(`$ ${this.command}`)), 1, 0);
+		const header = new Text(this.borderColor(theme.bold(`$ ${this.command}`)), 1, 0);
 		this.contentContainer.addChild(header);
 
 		// Output
