@@ -4,13 +4,13 @@ import { join } from "node:path";
 import { ServerMessageDecoder } from "theoses-protocol";
 import { afterEach, expect, test, vi } from "vitest";
 import type { ByteConnection } from "../src/connection.ts";
-import { PiServer } from "../src/index.ts";
+import { TheosesServer } from "../src/index.ts";
 import { TestServerService } from "../src/testing/index.ts";
 import { createUnixServer } from "../src/transports/unix/index.ts";
 
 const service = new TestServerService();
 
-let server: PiServer | undefined;
+let server: TheosesServer | undefined;
 let tempDirectory: string | undefined;
 
 async function makeSocketPath(): Promise<string> {
@@ -26,7 +26,7 @@ afterEach(async () => {
 });
 
 test("requires explicit listeners", () => {
-	expect(() => Reflect.construct(PiServer, [service, {}])).toThrow(/listeners/);
+	expect(() => Reflect.construct(TheosesServer, [service, {}])).toThrow(/listeners/);
 });
 
 test("rejects Unix socket paths that cannot fit in sockaddr_un", () => {
@@ -67,7 +67,7 @@ test("handshake timeout cleanup does not wait for a blocked output queue", async
 			this.closed = true;
 		}
 	}
-	const core = new PiServer(service, {
+	const core = new TheosesServer(service, {
 		listeners: [],
 		maxFrameLength: 1024,
 		handshakeTimeoutMs: 10,
