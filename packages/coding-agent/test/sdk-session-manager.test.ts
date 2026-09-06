@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getModel } from "theoses-ai/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createAgentSession } from "../src/core/sdk.ts";
-import { SessionManager } from "../src/core/session-manager.ts";
+import { getDefaultSessionDir, SessionManager } from "../src/core/session-manager.ts";
 
 describe("createAgentSession session manager defaults", () => {
 	let tempDir: string;
@@ -58,6 +58,21 @@ describe("createAgentSession session manager defaults", () => {
 
 		expect(session.sessionManager.usesDefaultSessionDir()).toBe(true);
 		session.dispose();
+	});
+
+	it("recognizes a resumed default session path when opened with a custom agentDir", () => {
+		const created = SessionManager.create(
+			cwd,
+			getDefaultSessionDir(cwd, agentDir),
+			{ id: "resumed-session" },
+			agentDir,
+		);
+		const sessionFile = created.getSessionFile();
+		expect(sessionFile).toBeTruthy();
+		writeFileSync(sessionFile!, `${JSON.stringify(created.getHeader())}\n`);
+
+		const resumed = SessionManager.open(sessionFile!, undefined, undefined, agentDir);
+		expect(resumed.usesDefaultSessionDir()).toBe(true);
 	});
 
 	it("keeps an explicit sessionManager override", async () => {

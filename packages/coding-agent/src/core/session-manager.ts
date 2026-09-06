@@ -1778,8 +1778,14 @@ export class SessionManager {
 	 * @param path Path to session file
 	 * @param sessionDir Optional session directory for /new or /branch. If omitted, derives from file's parent.
 	 * @param cwdOverride Optional cwd override instead of the session header cwd.
+	 * @param agentDir Optional agent directory used to identify the default session directory.
 	 */
-	static open(path: string, sessionDir?: string, cwdOverride?: string): SessionManager {
+	static open(
+		path: string,
+		sessionDir?: string,
+		cwdOverride?: string,
+		agentDir: string = getDefaultAgentDir(),
+	): SessionManager {
 		const resolvedPath = resolvePath(path);
 		let header: SessionHeader | null = null;
 		let preloadedFileEntries: FileEntry[] | undefined;
@@ -1798,25 +1804,50 @@ export class SessionManager {
 		const cwd = cwdOverride ?? (header ? getSessionHeaderCwd(header) : undefined) ?? process.cwd();
 		// If no sessionDir provided, derive from file's parent directory
 		const dir = sessionDir ? normalizePath(sessionDir) : resolve(resolvedPath, "..");
-		return new SessionManager(cwd, dir, resolvedPath, true, undefined, preloadedFileEntries);
+		return new SessionManager(
+			cwd,
+			dir,
+			resolvedPath,
+			true,
+			undefined,
+			preloadedFileEntries,
+			getDefaultSessionDirPath(cwd, agentDir),
+		);
 	}
 
 	/**
 	 * Continue the most recent session, or create new if none.
 	 * @param cwd Working directory
 	 * @param sessionDir Optional session directory. If omitted, uses default (~/.theoses/agent/sessions/<encoded-cwd>/).
+	 * @param agentDir Optional agent directory used to identify the default session directory.
 	 */
-	static continueRecent(cwd: string, sessionDir?: string): SessionManager {
-		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
-		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath(cwd);
+	static continueRecent(cwd: string, sessionDir?: string, agentDir: string = getDefaultAgentDir()): SessionManager {
+		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd, agentDir);
+		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath(cwd, agentDir);
 		const mostRecent = findMostRecentSession(dir, filterCwd ? cwd : undefined, {
 			channel: "cli",
 			channelSessionId: resolvePath(cwd),
 		});
 		if (mostRecent) {
-			return new SessionManager(cwd, dir, mostRecent, true);
+			return new SessionManager(
+				cwd,
+				dir,
+				mostRecent,
+				true,
+				undefined,
+				undefined,
+				getDefaultSessionDirPath(cwd, agentDir),
+			);
 		}
-		return new SessionManager(cwd, dir, undefined, true);
+		return new SessionManager(
+			cwd,
+			dir,
+			undefined,
+			true,
+			undefined,
+			undefined,
+			getDefaultSessionDirPath(cwd, agentDir),
+		);
 	}
 
 	/** Create an in-memory session (no file persistence) */
