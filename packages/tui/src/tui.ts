@@ -44,6 +44,9 @@ export interface Component {
 	 * Called when theme changes or when component needs to re-render from scratch.
 	 */
 	invalidate(): void;
+
+	/** Release timers and other resources before removal from the component tree. */
+	dispose?(): void;
 }
 
 export type TuiInputListenerResult = { consume?: boolean; data?: string } | undefined;
@@ -223,6 +226,7 @@ export class Container implements Component {
 	}
 
 	clear(): void {
+		for (const child of this.children) child.dispose?.();
 		this.children = [];
 	}
 
