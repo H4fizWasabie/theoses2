@@ -12,27 +12,27 @@ import {
 } from "theoses-protocol";
 import { Connection } from "./connection.ts";
 import {
-	PiClientDisposedError,
-	PiDisconnectedError,
-	PiServerError,
-	PiSessionDetachedError,
-	PiSessionOwnershipError,
+	TheosesClientDisposedError,
+	TheosesDisconnectedError,
+	TheosesServerError,
+	TheosesSessionDetachedError,
+	TheosesSessionOwnershipError,
 	toError,
 } from "./errors.ts";
 import { createPromiseResolvers } from "./promise.ts";
 import {
 	type AcquireSessionOptions,
-	type PiSessionHandle,
 	SessionHandle,
 	type SessionHandleCallbacks,
 	type SessionLeaseMode,
+	type TheosesSessionHandle,
 } from "./session-handle.ts";
 import { ClientState } from "./state.ts";
 import type {
 	ConnectionState,
 	ConnectionStateChange,
 	CreateSessionOptions,
-	PiClientOptions,
+	TheosesClientOptions,
 	Unsubscribe,
 } from "./types.ts";
 
@@ -48,8 +48,8 @@ interface PendingRequest {
 	reject(error: Error): void;
 }
 
-export class PiClient {
-	readonly #options: PiClientOptions;
+export class TheosesClient {
+	readonly #options: TheosesClientOptions;
 	readonly #connection: Connection;
 	readonly #state: ClientState;
 	readonly #pendingRequests = new Map<string, PendingRequest>();
@@ -65,7 +65,7 @@ export class PiClient {
 	#disposed = false;
 	#disposePromise: Promise<void> | undefined;
 
-	constructor(options: PiClientOptions) {
+	constructor(options: TheosesClientOptions) {
 		this.#options = options;
 		this.#state = new ClientState(options.onListenerError);
 		this.#connection = new Connection({
@@ -93,8 +93,8 @@ export class PiClient {
 		return this.#state.snapshot;
 	}
 
-	static async connect(options: PiClientOptions): Promise<PiClient> {
-		const client = new PiClient(options);
+	static async connect(options: TheosesClientOptions): Promise<TheosesClient> {
+		const client = new TheosesClient(options);
 		try {
 			await client.connect();
 			return client;
@@ -105,7 +105,7 @@ export class PiClient {
 	}
 
 	connect(): Promise<ServerSnapshot> {
-		if (this.#disposed) return Promise.reject(new PiClientDisposedError());
+		if (this.#disposed) return Promise.reject(new TheosesClientDisposedError());
 		if (this.#connection.state === "disconnected") this.#state.reset();
 		return this.#connection.connect();
 	}
@@ -138,17 +138,17 @@ export class PiClient {
 		return (await this.#request({ command: "list" })).sessions;
 	}
 
-	async createSession(options: CreateSessionOptions = {}): Promise<PiSessionHandle> {
+	async createSession(options: CreateSessionOptions = {}): Promise<TheosesSessionHandle> {
 		const result = await this.#request({ command: "create", ...options });
 		const token = this.#reserveSessionLease(result.session.id, "exclusive");
 		return this.#createSessionLease(result.session.id, token);
 	}
 
-	async attachSession(sessionId: string): Promise<PiSessionHandle> {
+	async attachSession(sessionId: string): Promise<TheosesSessionHandle> {
 		return this.acquireSession(sessionId, { mode: "shared" });
 	}
 
-	async acquireSession(sessionId: string, options: AcquireSessionOptions): Promise<PiSessionHandle> {
+	async acquireSession(sessionId: string, options: AcquireSessionOptions): Promise<TheosesSessionHandle> {
 		this.#assertNotDisposed();
 		const token = this.#reserveSessionLease(sessionId, options.mode);
 		try {
@@ -187,8 +187,8 @@ export class PiClient {
 	}
 
 	#request<const TCommand extends Command>(command: TCommand): Promise<ResultForCommand<TCommand>> {
-		if (this.#disposed) return Promise.reject(new PiClientDisposedError());
-		if (!this.connected) return Promise.reject(new PiDisconnectedError());
+		if (this.#disposed) return Promise.reject(new TheosesClientDisposedError());
+		if (!this.connected) return Promise.reject(new TheosesDisconnectedError());
 		const id = `request-${++this.#requestSequence}`;
 		const { promise, resolve, reject } = createPromiseResolvers<CommandResult>();
 		this.#pendingRequests.set(id, { command, resolve, reject });
@@ -206,7 +206,7 @@ export class PiClient {
 		return promise as Promise<ResultForCommand<TCommand>>;
 	}
 
-	#createSessionLease(sessionId: string, token: SessionLeaseToken): PiSessionHandle {
+	#createSessionLease(sessionId: string, token: SessionLeaseToken): TheosesSessionHandle {
 		const generation = this.#sessionLeaseGenerations.get(sessionId) ?? 0;
 		this.#sessionLeaseGenerations.set(sessionId, generation);
 		let state: SessionLeaseState = "active";
@@ -225,8 +225,8 @@ export class PiClient {
 		};
 		const assertActive = () => {
 			this.#assertNotDisposed();
-			if (!this.connected) throw new PiDisconnectedError();
-			if (!isActive()) throw new PiSessionDetachedError(sessionId);
+			if (!this.connected) throw new TheosesDisconnectedError();
+			if (!isActive()) throw new TheosesSessionDetachedError(sessionId);
 		};
 		const release = (relinquishOnFailure: boolean): Promise<void> => {
 			refreshState();
@@ -303,7 +303,7 @@ export class PiClient {
 			return;
 		}
 		if (!message.ok) {
-			pending.reject(new PiServerError(message.error));
+			pending.reject(new TheosesServerError(message.error));
 			return;
 		}
 		if (message.result.command !== pending.command.command) {
@@ -322,7 +322,7 @@ export class PiClient {
 		if (change.state === "disconnected") {
 			this.#state.clearAttachments();
 			this.#invalidateAllSessionLeases();
-			this.#rejectPendingRequests(change.error ?? new PiDisconnectedError());
+			this.#rejectPendingRequests(change.error ?? new TheosesDisconnectedError());
 		}
 		this.#notifyConnectionStateListeners(change);
 	}
@@ -343,7 +343,7 @@ export class PiClient {
 		if (this.#disposePromise) return this.#disposePromise;
 		this.#disposed = true;
 		this.#disposePromise = Promise.resolve();
-		const error = new PiClientDisposedError();
+		const error = new TheosesClientDisposedError();
 		this.#rejectPendingRequests(error);
 		this.#connection.disconnect(error);
 		this.#state.dispose();
@@ -357,7 +357,7 @@ export class PiClient {
 	}
 
 	#assertNotDisposed(): void {
-		if (this.#disposed) throw new PiClientDisposedError();
+		if (this.#disposed) throw new TheosesClientDisposedError();
 	}
 
 	async #reconcileSessionCleanup(sessionId: string): Promise<boolean> {
@@ -381,10 +381,10 @@ export class PiClient {
 	#reserveSessionLease(sessionId: string, mode: SessionLeaseMode): SessionLeaseToken {
 		const count = this.#sessionLeaseCounts.get(sessionId) ?? 0;
 		if (mode === "exclusive" && count > 0) {
-			throw new PiSessionOwnershipError(sessionId, `Session ${sessionId} already has an active lease`);
+			throw new TheosesSessionOwnershipError(sessionId, `Session ${sessionId} already has an active lease`);
 		}
 		if (mode === "shared" && this.#exclusiveSessionLeases.has(sessionId)) {
-			throw new PiSessionOwnershipError(sessionId, `Session ${sessionId} has an exclusive lease`);
+			throw new TheosesSessionOwnershipError(sessionId, `Session ${sessionId} has an exclusive lease`);
 		}
 		const token: SessionLeaseToken = { mode };
 		this.#sessionLeaseCounts.set(sessionId, count + 1);
