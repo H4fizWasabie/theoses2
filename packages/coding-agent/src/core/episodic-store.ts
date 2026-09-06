@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { getAgentDir } from "../config.ts";
+import { QUERY_STOPWORDS } from "./memory-store.ts";
 
 export interface EpisodeRecord {
 	id: string;
@@ -113,11 +114,16 @@ export class EpisodicStore {
 
 	/** Keyword search over episode summaries, most recent first. */
 	search(query: string, limit = 8): EpisodeRecord[] {
-		const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+		const allTerms = query
+			.toLowerCase()
+			.split(/[^a-z0-9]+/)
+			.filter((term) => term.length >= 3);
+		const significantTerms = allTerms.filter((term) => !QUERY_STOPWORDS.has(term));
+		const terms = significantTerms.length > 0 ? significantTerms : allTerms;
 		if (terms.length === 0) return this.recent(limit);
 		const rows = this.db.prepare("SELECT * FROM episodes ORDER BY started_at DESC").all() as unknown as EpisodeRow[];
 		return rows
-			.filter((row) => terms.every((term) => row.summary.toLowerCase().includes(term)))
+			.filter((row) => terms.some((term) => row.summary.toLowerCase().includes(term)))
 			.slice(0, limit)
 			.map(rowToRecord);
 	}

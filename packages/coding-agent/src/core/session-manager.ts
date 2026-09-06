@@ -945,6 +945,7 @@ export class SessionManager {
 	private sessionId: string = "";
 	private sessionFile: string | undefined;
 	private sessionDir: string;
+	private defaultSessionDir: string;
 	private cwd: string;
 	private persist: boolean;
 	private flushed: boolean = false;
@@ -961,9 +962,11 @@ export class SessionManager {
 		persist: boolean,
 		newSessionOptions?: NewSessionOptions,
 		preloadedFileEntries?: FileEntry[],
+		defaultSessionDir?: string,
 	) {
 		this.cwd = resolvePath(cwd);
 		this.sessionDir = normalizePath(sessionDir);
+		this.defaultSessionDir = defaultSessionDir ? normalizePath(defaultSessionDir) : "";
 		this.persist = persist;
 		if (persist && this.sessionDir && !existsSync(this.sessionDir)) {
 			mkdirSync(this.sessionDir, { recursive: true });
@@ -1092,7 +1095,7 @@ export class SessionManager {
 	}
 
 	usesDefaultSessionDir(): boolean {
-		return this.sessionDir === getDefaultSessionDirPath(this.cwd);
+		return this.defaultSessionDir !== "" && this.sessionDir === this.defaultSessionDir;
 	}
 
 	getSessionId(): string {
@@ -1760,9 +1763,14 @@ export class SessionManager {
 	 * @param cwd Working directory (stored in session header)
 	 * @param sessionDir Optional session directory. If omitted, uses default (~/.theoses/agent/sessions/<encoded-cwd>/).
 	 */
-	static create(cwd: string, sessionDir?: string, options?: NewSessionOptions): SessionManager {
+	static create(
+		cwd: string,
+		sessionDir?: string,
+		options?: NewSessionOptions,
+		agentDir: string = getDefaultAgentDir(),
+	): SessionManager {
 		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
-		return new SessionManager(cwd, dir, undefined, true, options);
+		return new SessionManager(cwd, dir, undefined, true, options, undefined, getDefaultSessionDirPath(cwd, agentDir));
 	}
 
 	/**
