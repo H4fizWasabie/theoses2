@@ -1,4 +1,4 @@
-# Runs the repo's /is prompt against an issue when the `pi-analyze` label is added
+# Runs the repo's /is prompt against an issue when the `theoses-analyze` label is added
 # or when a staff member comments `@issuron analyze` anywhere on an issue.
 #
 # Comment triggers can include one `#run-on-*` tag anywhere in the text:
@@ -10,17 +10,17 @@
 # intentionally restricted to hardcoded aliases in the authorization step.
 #
 # Setup required before this works:
-#   1. Create a `pi-analyze` GitHub environment on the repo and add a
-#      `THEOSES_AUTH_JSON` secret containing the contents of a pi auth.json
+#   1. Create a `theoses-analyze` GitHub environment on the repo and add a
+#      `THEOSES_AUTH_JSON` secret containing the contents of a Theoses auth.json
 #      (~/.theoses/agent/auth.json).
-#   2. Create the `pi-analyze` label.
+#   2. Create the `theoses-analyze` label.
 #   3. Add a repository secret `EARENDIL_ORG_READ_TOKEN` with permission to
 #      read `earendil-works` org membership. The authorization job uses it to
 #      verify that the label actor is an active member of `earendil-works/staff`.
-#   4. Add an environment secret `THEOSES_GIST_TOKEN` on `pi-analyze` with gist
+#   4. Add an environment secret `THEOSES_GIST_TOKEN` on `theoses-analyze` with gist
 #      creation permission. The analysis job uses it to upload the exported
 #      session gist.
-#   5. Add an environment secret `THEOSES_AUTH_UPDATE_TOKEN` on `pi-analyze` with
+#   5. Add an environment secret `THEOSES_AUTH_UPDATE_TOKEN` on `theoses-analyze` with
 #      permission to update this repo's environment secrets. The analysis job
 #      uses it to write back refreshed `THEOSES_AUTH_JSON` contents. Fine-grained
 #      tokens need repository permission `Environments: read and write` on this
@@ -78,7 +78,7 @@ jobs:
           ORG_READ_TOKEN: ${{ secrets.EARENDIL_ORG_READ_TOKEN }}
         with:
           script: |
-            const ANALYZE_LABEL = 'pi-analyze';
+            const ANALYZE_LABEL = 'theoses-analyze';
             const TRIGGER_RE = /@issuron\s+analyze\b/i;
             const RUN_ON_TAG_RE = /#run-on-([a-z0-9][a-z0-9_-]*)\b/gi;
             const RUNNER_PROFILES = {
@@ -111,7 +111,7 @@ jobs:
 
             if (context.eventName === 'issues') {
               if (context.payload.action !== 'labeled' || context.payload.label?.name !== ANALYZE_LABEL) {
-                console.log('Not a pi-analyze label event');
+                console.log('Not a theoses-analyze label event');
                 return;
               }
             } else if (context.eventName === 'issue_comment') {
@@ -255,10 +255,10 @@ jobs:
     needs: authorize
     if: needs.authorize.outputs.should_run == 'true'
     runs-on: ${{ fromJSON(needs.authorize.outputs.runs_on) }}
-    environment: pi-analyze
+    environment: theoses-analyze
     timeout-minutes: 45
     concurrency:
-      group: issue-analysis-pi-auth
+      group: issue-analysis-theoses-auth
       cancel-in-progress: false
     env:
       ISSUE_ANALYSIS_MODEL: openai-codex/gpt-5.5
@@ -270,7 +270,7 @@ jobs:
         with:
           script: |
             const crypto = require('crypto');
-            core.setOutput('name', `pi-ci-${crypto.randomBytes(16).toString('hex')}`);
+            core.setOutput('name', `theoses-ci-${crypto.randomBytes(16).toString('hex')}`);
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -341,10 +341,10 @@ jobs:
 
             const authJson = process.env.THEOSES_AUTH_JSON;
             if (!authJson) {
-              throw new Error('THEOSES_AUTH_JSON secret is not configured for the pi-analyze environment');
+              throw new Error('THEOSES_AUTH_JSON secret is not configured for the theoses-analyze environment');
             }
 
-            const agentDir = path.join(process.env.RUNNER_TEMP, 'pi-agent');
+            const agentDir = path.join(process.env.RUNNER_TEMP, 'theoses-agent');
             fs.mkdirSync(agentDir, { recursive: true });
             const authPath = path.join(agentDir, 'auth.json');
             fs.writeFileSync(authPath, authJson, { mode: 0o600 });
@@ -353,10 +353,10 @@ jobs:
             }
 
       - name: Run theoses /is
-        id: run_pi
+        id: run_theoses
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          THEOSES_CODING_AGENT_DIR: ${{ runner.temp }}/pi-agent
+          THEOSES_CODING_AGENT_DIR: ${{ runner.temp }}/theoses-agent
           GH_TOKEN: ${{ github.token }}
           ISSUE_URL: ${{ github.event.issue.html_url }}
           EXTRA_INSTRUCTIONS: ${{ needs.authorize.outputs.extra_instructions }}
@@ -368,7 +368,7 @@ jobs:
             const { spawn } = require('child_process');
 
             const workdir = path.join(process.env.GITHUB_WORKSPACE, process.env.WORKDIR);
-            const outDir = path.join(process.env.RUNNER_TEMP, 'pi-out');
+            const outDir = path.join(process.env.RUNNER_TEMP, 'theoses-out');
             const sessionDir = path.join(outDir, 'session');
             fs.mkdirSync(sessionDir, { recursive: true });
 
@@ -421,7 +421,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.THEOSES_AUTH_UPDATE_TOKEN }}
           THEOSES_AUTH_JSON: ${{ secrets.THEOSES_AUTH_JSON }}
-          THEOSES_CODING_AGENT_DIR: ${{ runner.temp }}/pi-agent
+          THEOSES_CODING_AGENT_DIR: ${{ runner.temp }}/theoses-agent
         with:
           script: |
             const fs = require('fs');
@@ -429,7 +429,7 @@ jobs:
             const { spawn } = require('child_process');
 
             if (!process.env.GH_TOKEN) {
-              throw new Error('THEOSES_AUTH_UPDATE_TOKEN is not configured for the pi-analyze environment');
+              throw new Error('THEOSES_AUTH_UPDATE_TOKEN is not configured for the theoses-analyze environment');
             }
 
             const authPath = path.join(process.env.THEOSES_CODING_AGENT_DIR, 'auth.json');
@@ -459,7 +459,7 @@ jobs:
             await new Promise((resolve, reject) => {
               const child = spawn(
                 'gh',
-                ['secret', 'set', 'THEOSES_AUTH_JSON', '--env', 'pi-analyze', '--repo', process.env.GITHUB_REPOSITORY],
+                ['secret', 'set', 'THEOSES_AUTH_JSON', '--env', 'theoses-analyze', '--repo', process.env.GITHUB_REPOSITORY],
                 { env: process.env, stdio: ['pipe', 'inherit', 'pipe'] },
               );
               const stderrChunks = [];
@@ -489,7 +489,7 @@ jobs:
         if: always()
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          THEOSES_CODING_AGENT_DIR: ${{ runner.temp }}/pi-agent
+          THEOSES_CODING_AGENT_DIR: ${{ runner.temp }}/theoses-agent
           WORKDIR: ${{ steps.workdir.outputs.name }}
         with:
           script: |
@@ -512,7 +512,7 @@ jobs:
               return undefined;
             }
 
-            const outDir = path.join(process.env.RUNNER_TEMP, 'pi-out');
+            const outDir = path.join(process.env.RUNNER_TEMP, 'theoses-out');
             const sessionFile = findFirstJsonl(path.join(outDir, 'session'));
             if (!sessionFile) {
               throw new Error('No session jsonl file found');
@@ -552,7 +552,7 @@ jobs:
               throw new Error('THEOSES_GIST_TOKEN is not configured');
             }
 
-            const outDir = path.join(process.env.RUNNER_TEMP, 'pi-out');
+            const outDir = path.join(process.env.RUNNER_TEMP, 'theoses-out');
             const files = {};
             for (const filename of ['session.html', 'session.jsonl']) {
               files[filename] = { content: fs.readFileSync(path.join(outDir, filename), 'utf8') };
@@ -569,13 +569,13 @@ jobs:
             core.setOutput('share_url', gistUrl);
 
       - name: Comment with session import instructions
-        if: always() && steps.run_pi.outcome == 'success' && steps.gist.outcome == 'success'
+        if: always() && steps.run_theoses.outcome == 'success' && steps.gist.outcome == 'success'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           GIST_URL: ${{ steps.gist.outputs.url }}
           GIST_ID: ${{ steps.gist.outputs.id }}
           SHARE_URL: ${{ steps.gist.outputs.share_url }}
-          SESSION_JSONL: ${{ runner.temp }}/pi-out/session.jsonl
+          SESSION_JSONL: ${{ runner.temp }}/theoses-out/session.jsonl
         with:
           script: |
             const fs = require('fs');
@@ -648,7 +648,7 @@ jobs:
             });
 
       - name: Comment on analysis failure
-        if: always() && steps.run_pi.outcome == 'failure'
+        if: always() && steps.run_theoses.outcome == 'failure'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           GIST_URL: ${{ steps.gist.outputs.url }}
@@ -681,7 +681,7 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                name: 'pi-analyze',
+                name: 'theoses-analyze',
               });
             } catch (error) {
               if (error.status !== 404) throw error;
