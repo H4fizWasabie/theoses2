@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ClientMessageDecoder, encodeServerMessage, PROTOCOL_VERSION, type ServerSnapshot } from "theoses-protocol";
 import { describe, expect, test } from "vitest";
-import { PiClient } from "../src/index.ts";
+import { TheosesClient } from "../src/index.ts";
 import { createUnixTransportFactory } from "../src/unix.ts";
 
 const serverSnapshot: ServerSnapshot = {
@@ -39,7 +39,7 @@ test("rejects invalid Unix transport options", () => {
 });
 
 describe.runIf(process.platform !== "win32")("Unix-domain sockets", () => {
-	test("PiClient exchanges fragmented framed messages over a real Unix socket", async () => {
+	test("TheosesClient exchanges fragmented framed messages over a real Unix socket", async () => {
 		const directory = await mkdtemp(join(tmpdir(), "pi-client-"));
 		const socketPath = join(directory, "pi.sock");
 		const sockets = new Set<Socket>();
@@ -72,7 +72,7 @@ describe.runIf(process.platform !== "win32")("Unix-domain sockets", () => {
 			});
 		});
 		await listen(server, socketPath);
-		const client = new PiClient({
+		const client = new TheosesClient({
 			transportFactory: createUnixTransportFactory({ path: socketPath }),
 		});
 
@@ -159,7 +159,7 @@ describe.runIf(process.platform !== "win32")("Unix-domain sockets", () => {
 		}
 	});
 
-	test("PiClient rejects a truncated final frame from a real Unix socket", async () => {
+	test("TheosesClient rejects a truncated final frame from a real Unix socket", async () => {
 		const directory = await mkdtemp(join(tmpdir(), "pi-client-"));
 		const socketPath = join(directory, "pi.sock");
 		const sockets = new Set<Socket>();
@@ -185,7 +185,7 @@ describe.runIf(process.platform !== "win32")("Unix-domain sockets", () => {
 			});
 		});
 		await listen(server, socketPath);
-		const client = new PiClient({
+		const client = new TheosesClient({
 			transportFactory: createUnixTransportFactory({ path: socketPath }),
 		});
 

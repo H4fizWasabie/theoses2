@@ -1,21 +1,21 @@
-import { PiServer } from "../server.ts";
-import type { PiServerOptions, PiServerService } from "../types.ts";
+import { TheosesServer } from "../server.ts";
+import type { TheosesServerOptions, TheosesServerService } from "../types.ts";
 import { TestServerService } from "./service.ts";
 
-export interface TestServerOptions extends PiServerOptions {
-	service?: PiServerService;
+export interface TestServerOptions extends TheosesServerOptions {
+	service?: TheosesServerService;
 }
 
 export interface TestServer {
-	server: PiServer;
-	service: PiServerService;
+	server: TheosesServer;
+	service: TheosesServerService;
 }
 
-/** Create an unstarted PiServer with deterministic defaults for transport conformance tests. */
+/** Create an unstarted TheosesServer with deterministic defaults for transport conformance tests. */
 export function createTestServer(options: TestServerOptions): TestServer {
 	const service = options.service ?? new TestServerService();
 	return {
-		server: new PiServer(service, {
+		server: new TheosesServer(service, {
 			listeners: options.listeners,
 			maxFrameLength: options.maxFrameLength,
 			handshakeTimeoutMs: options.handshakeTimeoutMs,

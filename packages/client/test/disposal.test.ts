@@ -1,9 +1,9 @@
 import { PROTOCOL_VERSION } from "theoses-protocol";
 import { describe, expect, test } from "vitest";
-import { PiClient, PiClientDisposedError } from "../src/index.ts";
+import { TheosesClient, TheosesClientDisposedError } from "../src/index.ts";
 import { attachSession, baseServerSnapshot, connectClient, MemoryByteServer, sessionSnapshot } from "./support.ts";
 
-describe("PiClient disposal", () => {
+describe("TheosesClient disposal", () => {
 	test("connects through its ownership factory", async () => {
 		const server = new MemoryByteServer();
 		server.onMessage((message) => {
@@ -16,7 +16,7 @@ describe("PiClient disposal", () => {
 			});
 		});
 
-		const client = await PiClient.connect({
+		const client = await TheosesClient.connect({
 			transportFactory: (handlers) => server.connect(handlers),
 		});
 
@@ -37,8 +37,8 @@ describe("PiClient disposal", () => {
 		expect(client.disposed).toBe(true);
 		expect(client.connected).toBe(false);
 		expect(handle.attached).toBe(false);
-		await expect(pending).rejects.toBeInstanceOf(PiClientDisposedError);
-		await expect(handle.prompt("after disposal")).rejects.toBeInstanceOf(PiClientDisposedError);
+		await expect(pending).rejects.toBeInstanceOf(TheosesClientDisposedError);
+		await expect(handle.prompt("after disposal")).rejects.toBeInstanceOf(TheosesClientDisposedError);
 		await firstDisposal;
 	});
 
