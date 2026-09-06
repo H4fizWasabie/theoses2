@@ -352,7 +352,7 @@ jobs:
               fs.chmodSync(authPath, 0o600);
             }
 
-      - name: Run pi /is
+      - name: Run theoses /is
         id: run_pi
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
@@ -412,7 +412,7 @@ jobs:
             await new Promise((resolve) => output.end(resolve));
 
             if (exitCode !== 0) {
-              throw new Error(`pi /is failed with exit code ${exitCode}`);
+              throw new Error(`theoses /is failed with exit code ${exitCode}`);
             }
 
       - name: Persist refreshed auth.json
@@ -629,7 +629,7 @@ jobs:
               'Continue locally from a checkout with:',
               '',
               '```sh',
-              `pi "/ir ${gistId}"`,
+              `theoses "/ir ${gistId}"`,
               '```',
               '',
               '<details>',
