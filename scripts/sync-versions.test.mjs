@@ -26,7 +26,7 @@ function runSyncVersions(root) {
 }
 
 test("synchronizes private dependencies without touching registry aliases, generated manifests, or published lockstep", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-sync-versions-"));
+	const root = await mkdtemp(join(tmpdir(), "theoses-sync-versions-"));
 	try {
 		await writeManifest(root, "packages/ai", {
 			name: "theoses-ai",
@@ -42,7 +42,7 @@ test("synchronizes private dependencies without touching registry aliases, gener
 			private: true,
 			dependencies: {
 				"theoses-coding-agent": "^1.0.0",
-				"@mariozechner/pi-ai": "npm:theoses-ai@1.0.0",
+				"some-other-scope/theoses-ai": "npm:theoses-ai@1.0.0",
 			},
 		});
 		await writeManifest(root, "packages/coding-agent/install-lock", {
@@ -59,7 +59,7 @@ test("synchronizes private dependencies without touching registry aliases, gener
 
 		const evalsManifest = await readManifest(root, "packages/evals");
 		assert.equal(evalsManifest.dependencies["theoses-coding-agent"], "^2.0.0");
-		assert.equal(evalsManifest.dependencies["@mariozechner/pi-ai"], "npm:theoses-ai@1.0.0");
+		assert.equal(evalsManifest.dependencies["some-other-scope/theoses-ai"], "npm:theoses-ai@1.0.0");
 		const generatedManifest = await readManifest(root, "packages/coding-agent/install-lock");
 		assert.equal(generatedManifest.dependencies["theoses-coding-agent"], "^1.0.0");
 

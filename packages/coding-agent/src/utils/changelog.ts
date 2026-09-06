@@ -10,6 +10,8 @@ export interface ChangelogEntry {
 
 const GITHUB_REPO = "H4fizWasabie/theoses2";
 const CHANGELOG_LINK_BASE_PATH = "packages/coding-agent";
+// Rewrites links in changelog entries inherited from the real upstream repo this project
+// forked from; not renamable, it must keep matching that repo's actual URL to work.
 const LEGACY_REPO_RE = /^https:\/\/github\.com\/badlogic\/pi-mono(?=\/|$)/;
 const URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 const INLINE_MARKDOWN_LINK_RE = /(!?\[[^\]\n]+\]\()([^\s)]+)((?:\s+[^)]*)?\))/g;

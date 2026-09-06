@@ -1,12 +1,12 @@
 # Theoses2
 
-Theoses2 adapts Pi's coding-agent harness into a long-lived personal-assistant engine: autonomous, full-capability, bounded at the model-context boundary, with durable memory shared across channels.
+Theoses2 adapts the coding-agent harness into a long-lived personal-assistant engine: autonomous, full-capability, bounded at the model-context boundary, with durable memory shared across channels.
 
 ## Language
 
 **Channel Session**:
 The persistent conversational state for one channel (Telegram, CLI, dashboard WebUI) for one user. Each channel keeps its own history and Active Context Window; only durable memory is shared across channels.
-_Avoid_: session (ambiguous with Pi's own session log), conversation
+_Avoid_: session (ambiguous with the engine's own session log), conversation
 
 **Active Context Window**:
 The last five turns (ten user/assistant messages) of a Channel Session's history, sent to the model on every turn. Fixed by turn count, not token count.
@@ -21,11 +21,11 @@ The semantic/episodic fact store shared across all of a user's Channel Sessions,
 _Avoid_: long-term memory, graph memory
 
 **Working Note Entry**:
-The unit of change to a Working Note: one model-invoked append, persisted as its own record type in Pi's existing session log (not a separate store), so Pi's reducer-replay already recovers it on restart.
+The unit of change to a Working Note: one model-invoked append, persisted as its own record type in the engine's existing session log (not a separate store), so the engine's reducer-replay already recovers it on restart.
 _Avoid_: session note entry, note record
 
 **Abort Notice**:
-A rendering rule, not stored state: when the most recent operation's outcome is `aborted` (Pi's existing `OperationFinishedRecord`), the next turn's prompt is prefixed with an explicit notice that the prior task was cancelled and should not be resumed. No new persistence — reuses Pi's existing abort/outcome records.
+A rendering rule, not stored state: when the most recent operation's outcome is `aborted` (the engine's existing `OperationFinishedRecord`), the next turn's prompt is prefixed with an explicit notice that the prior task was cancelled and should not be resumed. No new persistence — reuses the engine's existing abort/outcome records.
 _Avoid_: stop marker, boundary marker
 
 **Owner**:

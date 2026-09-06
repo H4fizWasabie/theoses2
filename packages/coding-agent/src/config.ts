@@ -473,13 +473,13 @@ export function getBundledInteractiveAssetPath(name: string): string {
 }
 
 // =============================================================================
-// App Config (from package.json piConfig)
+// App Config (from package.json theosesConfig)
 // =============================================================================
 
 interface PackageJson {
 	name?: string;
 	version?: string;
-	piConfig?: {
+	theosesConfig?: {
 		name?: string;
 		configDir?: string;
 	};
@@ -493,11 +493,11 @@ try {
 	if (err.code !== "ENOENT") throw e;
 }
 
-const theosesConfigName: string | undefined = pkg.piConfig?.name;
+const theosesConfigName: string | undefined = pkg.theosesConfig?.name;
 export const PACKAGE_NAME: string = pkg.name || "theoses-coding-agent";
 export const APP_NAME: string = theosesConfigName || "theoses";
 export const APP_TITLE: string = theosesConfigName ? APP_NAME : "Theoses";
-export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".theoses";
+export const CONFIG_DIR_NAME: string = pkg.theosesConfig?.configDir || ".theoses";
 export const VERSION: string = pkg.version || "0.0.0";
 
 // e.g., THEOSES_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
