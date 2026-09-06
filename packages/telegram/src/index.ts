@@ -11,6 +11,9 @@ import { chunkHtml, formatTelegramHtml, splitSections } from "./format.ts";
 
 const CHANNEL = "telegram";
 const TELEGRAM_MESSAGE_LIMIT = 4000;
+const TELEGRAM_DOWNLOAD_TIMEOUT_MS = 120_000;
+const TELEGRAM_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024;
+const TELEGRAM_STOP_REQUEST_TTL_MS = 30_000;
 const TYPING_INTERVAL_MS = 4000; // Telegram's typing indicator expires after ~5s, so it must be re-sent.
 
 // Mirrors createAgentSession's own default tool set, plus convert_doc: Telegram
@@ -142,9 +145,38 @@ function startTypingIndicator(bot: Bot, chatId: number, signal: AbortSignal): vo
 async function downloadFile(bot: Bot, token: string, fileId: string): Promise<Uint8Array> {
 	const file = await bot.api.getFile(fileId);
 	if (!file.file_path) throw new Error("Telegram file has no download path");
-	const response = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
+	const response = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`, {
+		signal: AbortSignal.timeout(TELEGRAM_DOWNLOAD_TIMEOUT_MS),
+	});
 	if (!response.ok) throw new Error(`Telegram file download returned HTTP ${response.status}`);
-	return new Uint8Array(await response.arrayBuffer());
+	if (Number(response.headers.get("content-length")) > TELEGRAM_DOWNLOAD_MAX_BYTES) {
+		throw new Error("Telegram file is too large");
+	}
+	if (!response.body) {
+		const data = new Uint8Array(await response.arrayBuffer());
+		if (data.byteLength > TELEGRAM_DOWNLOAD_MAX_BYTES) throw new Error("Telegram file is too large");
+		return data;
+	}
+	const reader = response.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let size = 0;
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		size += value.byteLength;
+		if (size > TELEGRAM_DOWNLOAD_MAX_BYTES) {
+			await reader.cancel();
+			throw new Error("Telegram file is too large");
+		}
+		chunks.push(value);
+	}
+	const data = new Uint8Array(size);
+	let offset = 0;
+	for (const chunk of chunks) {
+		data.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return data;
 }
 
 async function sessionFor(
@@ -192,6 +224,32 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 	const runningTool = new Map<string, string | undefined>();
 	// Set right before abort() so the in-flight message handler skips sending its own (partial/empty) reply.
 	const haltedByStop = new Set<string>();
+	const stopRequested = new Map<string, { messageId: number; timer: ReturnType<typeof setTimeout> }>();
+	const queuedMessageIds = new Map<string, number[]>();
+	const queueDepth = new Map<string, number>();
+	const removeQueuedMessage = (chat: string, messageId: number): void => {
+		const queued = queuedMessageIds.get(chat);
+		if (!queued) return;
+		const remaining = queued.filter((id) => id !== messageId);
+		if (remaining.length > 0) queuedMessageIds.set(chat, remaining);
+		else queuedMessageIds.delete(chat);
+	};
+	const requestStop = (chat: string, messageId: number): void => {
+		const previous = stopRequested.get(chat);
+		if (previous) clearTimeout(previous.timer);
+		const timer = setTimeout(() => {
+			const request = stopRequested.get(chat);
+			if (request?.messageId === messageId) stopRequested.delete(chat);
+		}, TELEGRAM_STOP_REQUEST_TTL_MS);
+		stopRequested.set(chat, { messageId, timer });
+	};
+	const consumeStopRequest = (chat: string, messageId: number): boolean => {
+		const request = stopRequested.get(chat);
+		if (!request || request.messageId !== messageId) return false;
+		clearTimeout(request.timer);
+		stopRequested.delete(chat);
+		return true;
+	};
 
 	bot.on("message", async (ctx) => {
 		const chat = chatId(ctx);
@@ -201,22 +259,43 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 		if (isStopCommand(text)) {
 			const existing = sessions.get(chat);
 			const session = existing ? await existing : undefined;
-			if (!session?.isStreaming) {
+			if (session?.isStreaming) {
+				const queuedMessageId = queuedMessageIds.get(chat)?.[0];
+				if (queuedMessageId !== undefined) requestStop(chat, queuedMessageId);
+				haltedByStop.add(chat);
+				const activity = runningTool.get(chat);
+				await session.abort();
+				await bot.api.sendMessage(
+					ctx.chat.id,
+					activity
+						? `Halted. Was running: ${activity}.${queuedMessageId === undefined ? "" : " Also skipped your next queued message."}`
+						: `Halted the in-progress reply.${queuedMessageId === undefined ? "" : " Also skipped your next queued message."}`,
+				);
+				return;
+			}
+			if ((queueDepth.get(chat) ?? 0) === 0) {
 				await bot.api.sendMessage(ctx.chat.id, "Nothing is running.");
 				return;
 			}
-			const activity = runningTool.get(chat);
-			haltedByStop.add(chat);
-			await session.abort();
-			await bot.api.sendMessage(
-				ctx.chat.id,
-				activity ? `Halted. Was running: ${activity}.` : "Halted the in-progress reply.",
-			);
+			const queuedMessageId = queuedMessageIds.get(chat)?.[0];
+			if (queuedMessageId === undefined) {
+				await bot.api.sendMessage(ctx.chat.id, "Nothing is queued.");
+				return;
+			}
+			requestStop(chat, queuedMessageId);
+			await bot.api.sendMessage(ctx.chat.id, "Halted the queued message.");
 			return;
 		}
 
+		const messageId = ctx.message.message_id;
+		const queued = queuedMessageIds.get(chat) ?? [];
+		queued.push(messageId);
+		queuedMessageIds.set(chat, queued);
+		queueDepth.set(chat, (queueDepth.get(chat) ?? 0) + 1);
 		const previous = queues.get(chat) ?? Promise.resolve();
 		const next = previous.then(async () => {
+			removeQueuedMessage(chat, messageId);
+			if (consumeStopRequest(chat, messageId)) return;
 			const session = await sessionFor(chat, cwd, sessions);
 			const images: string[] = [];
 			if (ctx.message.photo?.length) {
@@ -311,6 +390,13 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			chat,
 			next.catch(() => {}),
 		);
+		void next
+			.finally(() => {
+				const depth = (queueDepth.get(chat) ?? 1) - 1;
+				if (depth > 0) queueDepth.set(chat, depth);
+				else queueDepth.delete(chat);
+			})
+			.catch(() => {});
 		await next;
 	});
 
