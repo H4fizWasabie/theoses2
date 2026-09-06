@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { stream, streamSimple, type TheosesMessagesOptions } from "../src/api/pi-messages.ts";
+import { stream, streamSimple, type TheosesMessagesOptions } from "../src/api/theoses-messages.ts";
 import type { Api, AssistantMessageEvent, Context, Model, StopReason } from "../src/types.ts";
 
 type RecordedRequest = {

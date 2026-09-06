@@ -42,71 +42,71 @@ export type {
 export const AI_TELEMETRY_SCHEMA = {
 	version: 1,
 	spans: {
-		"pi.ai.request": {
+		"theoses.ai.request": {
 			description: "One logical request to an AI provider",
 			parents: { kind: "any" },
 			startAttributes: {
-				"pi.ai.operation": {
+				"theoses.ai.operation": {
 					type: "string",
 					required: true,
 					values: ["stream", "fetch_deferred", "cancel_deferred", "generate_images"],
 					description: "Logical provider operation",
 				},
-				"pi.ai.provider": {
+				"theoses.ai.provider": {
 					type: "string",
 					required: true,
 					description: "Selected provider id",
 				},
-				"pi.ai.model": {
+				"theoses.ai.model": {
 					type: "string",
 					required: true,
 					description: "Requested model id",
 				},
-				"pi.ai.api": {
+				"theoses.ai.api": {
 					type: "string",
 					required: true,
 					description: "Provider API id",
 				},
-				"pi.ai.streaming": {
+				"theoses.ai.streaming": {
 					type: "boolean",
 					required: true,
 					description: "Whether this operation returns a stream",
 				},
-				"pi.ai.deferred": {
+				"theoses.ai.deferred": {
 					type: "boolean",
 					required: false,
 					description: "Whether the operation requests or participates in deferred execution",
 				},
 			},
 			endAttributes: {
-				"pi.ai.response.model": { type: "string", description: "Concrete response model" },
-				"pi.ai.response.id": {
+				"theoses.ai.response.model": { type: "string", description: "Concrete response model" },
+				"theoses.ai.response.id": {
 					type: "string",
 					cardinality: "high",
 					description: "Provider response id",
 				},
-				"pi.ai.response.stop_reason": {
+				"theoses.ai.response.stop_reason": {
 					type: "string",
 					values: ["stop", "length", "tool_use", "error", "aborted", "deferred"],
 					description: "Normalized terminal response reason",
 				},
-				"pi.ai.http.status_code": { type: "number", description: "Final HTTP status" },
-				"pi.ai.usage.input_tokens": { type: "number", description: "Reported input tokens" },
-				"pi.ai.usage.output_tokens": { type: "number", description: "Reported output tokens" },
-				"pi.ai.usage.cache_read_tokens": { type: "number", description: "Reported cache-read tokens" },
-				"pi.ai.usage.cache_write_tokens": {
+				"theoses.ai.http.status_code": { type: "number", description: "Final HTTP status" },
+				"theoses.ai.usage.input_tokens": { type: "number", description: "Reported input tokens" },
+				"theoses.ai.usage.output_tokens": { type: "number", description: "Reported output tokens" },
+				"theoses.ai.usage.cache_read_tokens": { type: "number", description: "Reported cache-read tokens" },
+				"theoses.ai.usage.cache_write_tokens": {
 					type: "number",
 					description: "Reported cache-write tokens",
 				},
-				"pi.ai.usage.reasoning_tokens": { type: "number", description: "Reported reasoning tokens" },
-				"pi.ai.usage.total_tokens": { type: "number", description: "Reported total tokens" },
-				"pi.ai.usage.cost": { type: "number", description: "Reported total cost" },
-				"pi.ai.stream.chunk_count": { type: "number", description: "Streamed update chunk count" },
-				"pi.ai.stream.time_to_first_chunk_ms": {
+				"theoses.ai.usage.reasoning_tokens": { type: "number", description: "Reported reasoning tokens" },
+				"theoses.ai.usage.total_tokens": { type: "number", description: "Reported total tokens" },
+				"theoses.ai.usage.cost": { type: "number", description: "Reported total cost" },
+				"theoses.ai.stream.chunk_count": { type: "number", description: "Streamed update chunk count" },
+				"theoses.ai.stream.time_to_first_chunk_ms": {
 					type: "number",
 					description: "Elapsed milliseconds to first update chunk",
 				},
-				"pi.ai.error.type": {
+				"theoses.ai.error.type": {
 					type: "string",
 					cardinality: "low",
 					description: "Provider or transport error class",
@@ -191,25 +191,25 @@ const EVENT_TYPES = [
 ] as const;
 
 const operationStartAttributes = {
-	"pi.session.id": {
+	"theoses.session.id": {
 		type: "string",
 		required: true,
 		cardinality: "high",
 		description: "Session id",
 	},
-	"pi.lane.name": {
+	"theoses.lane.name": {
 		type: "string",
 		required: true,
 		cardinality: "high",
 		description: "Lane name",
 	},
-	"pi.operation.id": {
+	"theoses.operation.id": {
 		type: "string",
 		required: true,
 		cardinality: "high",
 		description: "Durable operation id",
 	},
-	"pi.operation.recovery": {
+	"theoses.operation.recovery": {
 		type: "boolean",
 		required: true,
 		description: "Whether this invocation resumes durable work",
@@ -217,12 +217,12 @@ const operationStartAttributes = {
 } as const;
 
 const operationErrorAttributes = {
-	"pi.error.code": {
+	"theoses.error.code": {
 		type: "string",
 		cardinality: "low",
 		description: "Stable operation error code",
 	},
-	"pi.error.type": {
+	"theoses.error.type": {
 		type: "string",
 		cardinality: "low",
 		description: "Low-cardinality operation error class",
@@ -232,12 +232,12 @@ const operationErrorAttributes = {
 export const HARNESS_TELEMETRY_SCHEMA = {
 	version: 1,
 	spans: {
-		"pi.harness.run": {
+		"theoses.harness.run": {
 			description: "One admitted in-process run invocation",
 			parents: { kind: "root_or_external" },
 			startAttributes: {
 				...operationStartAttributes,
-				"pi.operation.kind": {
+				"theoses.operation.kind": {
 					type: "string",
 					required: true,
 					values: ["run"],
@@ -245,7 +245,7 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 				},
 			},
 			endAttributes: {
-				"pi.operation.outcome": {
+				"theoses.operation.outcome": {
 					type: "string",
 					values: ["completed", "aborted", "failed", "suspended"],
 					description: "Run invocation outcome",
@@ -254,12 +254,12 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			},
 			status: { default: "ok", errorWhen: "The run fails or throws" },
 		},
-		"pi.harness.compaction": {
+		"theoses.harness.compaction": {
 			description: "One admitted in-process manual compaction invocation",
 			parents: { kind: "root_or_external" },
 			startAttributes: {
 				...operationStartAttributes,
-				"pi.operation.kind": {
+				"theoses.operation.kind": {
 					type: "string",
 					required: true,
 					values: ["compaction"],
@@ -267,7 +267,7 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 				},
 			},
 			endAttributes: {
-				"pi.operation.outcome": {
+				"theoses.operation.outcome": {
 					type: "string",
 					values: ["completed", "declined", "aborted", "failed"],
 					description: "Compaction invocation outcome",
@@ -276,12 +276,12 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			},
 			status: { default: "ok", errorWhen: "The compaction fails or throws" },
 		},
-		"pi.harness.navigation": {
+		"theoses.harness.navigation": {
 			description: "One admitted in-process navigation invocation",
 			parents: { kind: "root_or_external" },
 			startAttributes: {
 				...operationStartAttributes,
-				"pi.operation.kind": {
+				"theoses.operation.kind": {
 					type: "string",
 					required: true,
 					values: ["navigation"],
@@ -289,7 +289,7 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 				},
 			},
 			endAttributes: {
-				"pi.operation.outcome": {
+				"theoses.operation.outcome": {
 					type: "string",
 					values: ["completed", "declined", "aborted", "failed"],
 					description: "Navigation invocation outcome",
@@ -298,23 +298,23 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			},
 			status: { default: "ok", errorWhen: "The navigation fails or throws" },
 		},
-		"pi.harness.checkpoint": {
+		"theoses.harness.checkpoint": {
 			description: "One run checkpoint",
-			parents: { kind: "spans", spans: ["pi.harness.run"] },
+			parents: { kind: "spans", spans: ["theoses.harness.run"] },
 			startAttributes: {
-				"pi.lane.name": {
+				"theoses.lane.name": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Lane name",
 				},
-				"pi.operation.id": {
+				"theoses.operation.id": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Durable operation id",
 				},
-				"pi.checkpoint.kind": {
+				"theoses.checkpoint.kind": {
 					type: "string",
 					required: true,
 					values: ["normal", "failure_drain", "abort_reconcile"],
@@ -324,23 +324,23 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			endAttributes: {},
 			status: { default: "ok", errorWhen: "Checkpoint work throws" },
 		},
-		"pi.harness.turn": {
+		"theoses.harness.turn": {
 			description: "One assistant response and its tool batch",
-			parents: { kind: "spans", spans: ["pi.harness.run"] },
+			parents: { kind: "spans", spans: ["theoses.harness.run"] },
 			startAttributes: {
-				"pi.lane.name": {
+				"theoses.lane.name": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Lane name",
 				},
-				"pi.operation.id": {
+				"theoses.operation.id": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Durable operation id",
 				},
-				"pi.turn.id": {
+				"theoses.turn.id": {
 					type: "string",
 					required: true,
 					cardinality: "high",
@@ -350,37 +350,42 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			endAttributes: {},
 			status: { default: "ok", errorWhen: "Turn work throws" },
 		},
-		"pi.harness.step": {
+		"theoses.harness.step": {
 			description: "One durable retry attempt",
 			parents: {
 				kind: "spans",
-				spans: ["pi.harness.turn", "pi.harness.checkpoint", "pi.harness.compaction", "pi.harness.navigation"],
+				spans: [
+					"theoses.harness.turn",
+					"theoses.harness.checkpoint",
+					"theoses.harness.compaction",
+					"theoses.harness.navigation",
+				],
 			},
 			startAttributes: {
-				"pi.lane.name": {
+				"theoses.lane.name": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Lane name",
 				},
-				"pi.operation.id": {
+				"theoses.operation.id": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Durable operation id",
 				},
-				"pi.step.kind": {
+				"theoses.step.kind": {
 					type: "string",
 					required: true,
 					values: ["assistant", "compaction", "branch_summary"],
 					description: "Retryable step kind",
 				},
-				"pi.step.attempt": {
+				"theoses.step.attempt": {
 					type: "number",
 					required: true,
 					description: "One-based durable attempt number",
 				},
-				"pi.compaction.reason": {
+				"theoses.compaction.reason": {
 					type: "string",
 					required: false,
 					values: ["manual", "threshold", "overflow"],
@@ -388,7 +393,7 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 				},
 			},
 			endAttributes: {
-				"pi.step.outcome": {
+				"theoses.step.outcome": {
 					type: "string",
 					values: ["succeeded", "retry", "failed", "aborted", "deferred", "overflow"],
 					description: "Attempt outcome",
@@ -396,89 +401,89 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			},
 			status: { default: "ok", errorWhen: "The attempt retries, fails, or throws" },
 		},
-		"pi.harness.tool": {
+		"theoses.harness.tool": {
 			description: "One raw phase-2 tool execution",
-			parents: { kind: "spans", spans: ["pi.harness.turn", "pi.harness.run"] },
+			parents: { kind: "spans", spans: ["theoses.harness.turn", "theoses.harness.run"] },
 			startAttributes: {
-				"pi.lane.name": {
+				"theoses.lane.name": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Lane name",
 				},
-				"pi.operation.id": {
+				"theoses.operation.id": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Durable operation id",
 				},
-				"pi.turn.id": {
+				"theoses.turn.id": {
 					type: "string",
 					required: false,
 					cardinality: "high",
 					description: "Invocation-local live turn id",
 				},
-				"pi.tool.name": {
+				"theoses.tool.name": {
 					type: "string",
 					required: true,
 					description: "Tool name",
 				},
-				"pi.tool.call_id": {
+				"theoses.tool.call_id": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Tool call id",
 				},
-				"pi.tool.replay": {
+				"theoses.tool.replay": {
 					type: "string",
 					required: true,
 					values: ["never", "safe"],
 					description: "Declared replay policy",
 				},
-				"pi.tool.recovery": {
+				"theoses.tool.recovery": {
 					type: "boolean",
 					required: true,
 					description: "Whether this is recovery execution",
 				},
 			},
 			endAttributes: {
-				"pi.tool.is_error": {
+				"theoses.tool.is_error": {
 					type: "boolean",
 					description: "Whether raw phase-2 execution returned an error",
 				},
 			},
 			status: { default: "ok", errorWhen: "Raw phase-2 execution returns an error" },
 		},
-		"pi.harness.hook": {
+		"theoses.harness.hook": {
 			description: "One registered hook handler invocation",
 			parents: { kind: "any" },
 			startAttributes: {
-				"pi.lane.name": {
+				"theoses.lane.name": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Lane name",
 				},
-				"pi.operation.id": {
+				"theoses.operation.id": {
 					type: "string",
 					required: false,
 					cardinality: "high",
 					description: "Durable operation id when accepted",
 				},
-				"pi.hook.name": {
+				"theoses.hook.name": {
 					type: "string",
 					required: true,
 					values: HOOK_NAMES,
 					description: "Hook name",
 				},
-				"pi.hook.registration_id": {
+				"theoses.hook.registration_id": {
 					type: "string",
 					required: false,
 					description: "Stable hook registration id",
 				},
 			},
 			endAttributes: {
-				"pi.hook.outcome": {
+				"theoses.hook.outcome": {
 					type: "string",
 					values: ["completed", "skipped", "blocked", "failed"],
 					description: "Handler outcome",
@@ -486,24 +491,24 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			},
 			status: { default: "ok", errorWhen: "The handler throws" },
 		},
-		"pi.harness.sleep": {
+		"theoses.harness.sleep": {
 			description: "One retry delay",
-			parents: { kind: "spans", spans: ["pi.harness.step", "pi.harness.run"] },
+			parents: { kind: "spans", spans: ["theoses.harness.step", "theoses.harness.run"] },
 			startAttributes: {
-				"pi.operation.id": {
+				"theoses.operation.id": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Durable operation id",
 				},
-				"pi.sleep.delay_ms": {
+				"theoses.sleep.delay_ms": {
 					type: "number",
 					required: true,
 					description: "Requested delay in milliseconds",
 				},
 			},
 			endAttributes: {
-				"pi.sleep.outcome": {
+				"theoses.sleep.outcome": {
 					type: "string",
 					values: ["elapsed", "aborted"],
 					description: "Delay outcome",
@@ -511,18 +516,18 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			},
 			status: { default: "ok", errorWhen: "Sleep work throws" },
 		},
-		"pi.harness.event_handler": {
+		"theoses.harness.event_handler": {
 			description: "One passive event listener invocation",
 			parents: { kind: "any" },
 			startAttributes: {
-				"pi.event.type": {
+				"theoses.event.type": {
 					type: "string",
 					required: true,
 					cardinality: "low",
 					values: EVENT_TYPES,
 					description: "Delivered harness event type",
 				},
-				"pi.lane.name": {
+				"theoses.lane.name": {
 					type: "string",
 					required: false,
 					cardinality: "high",
@@ -532,36 +537,36 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			endAttributes: {},
 			status: { default: "ok", errorWhen: "The listener throws" },
 		},
-		"pi.session.write": {
+		"theoses.session.write": {
 			description: "One committed session mutation",
 			parents: { kind: "any" },
 			startAttributes: {
-				"pi.lane.name": {
+				"theoses.lane.name": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Lane name",
 				},
-				"pi.operation.id": {
+				"theoses.operation.id": {
 					type: "string",
 					required: false,
 					cardinality: "high",
 					description: "Durable operation id when accepted",
 				},
-				"pi.session.mutation": {
+				"theoses.session.mutation": {
 					type: "string",
 					required: true,
 					values: ["entry", "record", "lane", "fact"],
 					description: "Session mutation kind",
 				},
-				"pi.session.item_type": {
+				"theoses.session.item_type": {
 					type: "string",
 					required: false,
 					description: "Entry, record, lane, or fact subtype",
 				},
 			},
 			endAttributes: {
-				"pi.session.seq": {
+				"theoses.session.seq": {
 					type: "number",
 					description: "Committed session sequence when exposed",
 				},
