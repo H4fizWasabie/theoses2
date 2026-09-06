@@ -34,6 +34,13 @@ function chatId(ctx: Context): string | undefined {
 	return ctx.chat?.id.toString();
 }
 
+const STOP_COMMANDS = new Set(["stop", "halt", "/stop", "/cancel"]);
+
+/** Recognizes an explicit "/stop"/"/cancel" command or a bare "stop"/"halt" message, case-insensitively. */
+function isStopCommand(text: string): boolean {
+	return STOP_COMMANDS.has(text.trim().toLowerCase());
+}
+
 function messageText(ctx: Context): string {
 	return ctx.message?.text ?? ctx.message?.caption ?? "";
 }
@@ -176,10 +183,33 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 	const cwd = options.cwd ?? process.cwd();
 	const sessions = new Map<string, Promise<AgentSession>>();
 	const queues = new Map<string, Promise<void>>();
+	// Tracks the tool currently running for each chat, so a stop command can report what it interrupted.
+	const runningTool = new Map<string, string | undefined>();
+	// Set right before abort() so the in-flight message handler skips sending its own (partial/empty) reply.
+	const haltedByStop = new Set<string>();
 
 	bot.on("message", async (ctx) => {
 		const chat = chatId(ctx);
 		if (chat !== ownerChatId || !ctx.message) return;
+
+		const text = messageText(ctx);
+		if (isStopCommand(text)) {
+			const existing = sessions.get(chat);
+			const session = existing ? await existing : undefined;
+			if (!session?.isStreaming) {
+				await bot.api.sendMessage(ctx.chat.id, "Nothing is running.");
+				return;
+			}
+			const activity = runningTool.get(chat);
+			haltedByStop.add(chat);
+			await session.abort();
+			await bot.api.sendMessage(
+				ctx.chat.id,
+				activity ? `Halted. Was running: ${activity}.` : "Halted the in-progress reply.",
+			);
+			return;
+		}
+
 		const previous = queues.get(chat) ?? Promise.resolve();
 		const next = previous.then(async () => {
 			const session = await sessionFor(chat, cwd, sessions);
@@ -224,8 +254,12 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			const generatedImages: Buffer[] = [];
 			const unsubscribe = session.subscribe((event) => {
 				response = assistantText(event) ?? response;
-				if (event.type === "tool_execution_start") setStatus(`Running ${event.toolName}...`);
+				if (event.type === "tool_execution_start") {
+					runningTool.set(chat, event.toolName);
+					setStatus(`Running ${event.toolName}...`);
+				}
 				if (event.type === "tool_execution_end") {
+					runningTool.delete(chat);
 					toolNames.push(event.toolName);
 					generatedImages.push(...extractGeneratedImages(event.result));
 				}
@@ -241,8 +275,14 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			} finally {
 				unsubscribe();
 				abortController.abort();
+				runningTool.delete(chat);
 			}
 			await statusPending;
+			if (haltedByStop.delete(chat)) {
+				if (statusMessageId !== undefined)
+					await bot.api.deleteMessage(ctx.chat.id, statusMessageId).catch(() => {});
+				return;
+			}
 			if (response) {
 				await sendTelegramReply(bot, ctx.chat.id, response, toolNames, ctx.message.message_id, statusMessageId);
 			} else if (statusMessageId !== undefined) {

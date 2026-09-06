@@ -1,4 +1,4 @@
-const state = { sessions: [], active: null, history: [], reply: null, tabs: [], activeTab: null, pending: 0, preview: false, filesRoot: "/home", graph: null };
+const state = { sessions: [], active: null, history: [], reply: null, tabs: [], activeTab: null, pending: 0, preview: false, filesRoot: "/home", graph: null, liveTurn: null };
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
 
@@ -358,6 +358,7 @@ $("chat-form").addEventListener("submit", (event) => {
   state.history.push({ role: "user", segments: [{ type: "text", text: message }] });
   const liveTurn = { role: "assistant", segments: [], pending: true, queued: true, active: true };
   state.history.push(liveTurn);
+  state.liveTurn = liveTurn;
   state.pending = (state.pending || 0) + 1;
   renderActive();
   renderHistory();
@@ -404,14 +405,35 @@ $("chat-form").addEventListener("submit", (event) => {
       }
       await loadSessions();
     } catch (error) { liveTurn.active = false; liveTurn.pending = false; $("chat-status").textContent = error.message; renderHistory(); }
-    finally { state.pending -= 1; renderActive(); }
+    finally { state.pending -= 1; if (state.liveTurn === liveTurn) state.liveTurn = null; renderActive(); }
   })();
 });
 
+/** Finds the tool call in the live turn that hasn't gotten its result yet, if any, to report what a stop interrupted. */
+function runningToolName(turn) {
+  if (!turn) return null;
+  const resultIds = new Set(turn.segments.filter((segment) => segment.type === "tool_result").map((segment) => segment.id));
+  const call = [...turn.segments].reverse().find((segment) => segment.type === "tool_call" && !resultIds.has(segment.id));
+  return call ? call.name : null;
+}
+
 $("stop-chat").addEventListener("click", async () => {
   if (!state.active) return;
-  try { await request(`/api/sessions/${encodeURIComponent(state.active.id)}/stop`, { method: "POST" }); }
-  catch (error) { $("chat-status").textContent = error.message; }
+  const activity = runningToolName(state.liveTurn);
+  try {
+    await request(`/api/sessions/${encodeURIComponent(state.active.id)}/stop`, { method: "POST" });
+    $("chat-status").textContent = activity ? `Halted. Was running: ${activity}.` : "Halted the in-progress reply.";
+  } catch (error) {
+    $("chat-status").textContent = error.message;
+  }
+});
+
+// Escape halts the active reply, mirroring the Stop button, unless a dialog (e.g. Telegram settings) is open and should handle it instead.
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !state.active || !state.pending) return;
+  if (document.querySelector("dialog[open]")) return;
+  event.preventDefault();
+  $("stop-chat").click();
 });
 
 $("new-session").addEventListener("click", () => void newSession().catch((error) => window.alert(error.message)));
