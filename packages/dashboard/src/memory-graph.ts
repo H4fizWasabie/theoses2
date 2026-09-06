@@ -1,6 +1,5 @@
-import { homedir } from "node:os";
 import { join } from "node:path";
-import { CONFIG_DIR_NAME, FileMemoryStore } from "theoses-coding-agent";
+import { FileMemoryStore, getMemoriesDir } from "theoses-coding-agent";
 
 export interface MemoryGraphNode {
 	id: string;
@@ -20,15 +19,10 @@ export interface MemoryGraph {
 	edges: MemoryGraphEdge[];
 }
 
-/** Mirrors FileMemoryStore's own default (and THEOSES_MEMORY_DIR override) so paths line up with the file workbench. */
-function memoryDir(): string {
-	return process.env.THEOSES_MEMORY_DIR ?? join(homedir(), CONFIG_DIR_NAME, "memories");
-}
-
 export async function readMemoryGraph(): Promise<MemoryGraph> {
 	const store = new FileMemoryStore();
 	const nodes = store.listNodes();
-	const dir = memoryDir();
+	const dir = getMemoriesDir();
 	return {
 		nodes: nodes.map((node) => ({
 			id: node.id,
