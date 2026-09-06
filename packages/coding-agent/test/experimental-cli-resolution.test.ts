@@ -5,7 +5,7 @@ const UNSUPPORTED_SERVER_OPTIONS = "The experimental server command does not sup
 const UNSUPPORTED_CLIENT_OPTIONS = "The experimental client command does not support existing CLI options yet";
 
 describe("experimental CLI command composition", () => {
-	test("composes pi command options with the existing parser", () => {
+	test("composes Theoses command options with the existing parser", () => {
 		const result = experimentalCli.parse([
 			"--listen",
 			"unix:///tmp/pi.sock",

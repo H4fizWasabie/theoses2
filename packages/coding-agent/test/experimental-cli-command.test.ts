@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { experimentalCli } from "../src/cli/experimental/cli.ts";
 
 describe("experimental CLI commands", () => {
-	test("selects pi mode and parses existing CLI arguments", () => {
+	test("selects Theoses mode and parses existing CLI arguments", () => {
 		expect(
 			experimentalCli.parse([
 				"--provider",
@@ -83,7 +83,7 @@ describe("experimental CLI commands", () => {
 		"permits omitted authentication for later environment/default resolution",
 		(argv) => {
 			const result = experimentalCli.parse(argv);
-			expect(result).toMatchObject({ ok: true, command: { command: argv[0] ?? "pi" } });
+			expect(result).toMatchObject({ ok: true, command: { command: argv[0] ?? "theoses" } });
 			if (result.ok) expect(result.command.auth).toBeUndefined();
 		},
 	);
