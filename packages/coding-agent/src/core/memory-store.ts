@@ -45,6 +45,55 @@ export interface MemoryStore {
 	saveNote(text: string): MemoryRecord;
 }
 
+/** Common English function words, stripped from `remember` queries so they don't dilute term matching. */
+const QUERY_STOPWORDS = new Set([
+	"a",
+	"about",
+	"am",
+	"an",
+	"and",
+	"are",
+	"do",
+	"does",
+	"did",
+	"for",
+	"he",
+	"her",
+	"him",
+	"his",
+	"how",
+	"i",
+	"is",
+	"it",
+	"its",
+	"me",
+	"my",
+	"of",
+	"or",
+	"our",
+	"remember",
+	"she",
+	"that",
+	"the",
+	"their",
+	"them",
+	"they",
+	"this",
+	"to",
+	"us",
+	"was",
+	"we",
+	"were",
+	"what",
+	"when",
+	"where",
+	"who",
+	"why",
+	"with",
+	"you",
+	"your",
+]);
+
 function defaultMemoryDir(): string {
 	return getMemoriesDir();
 }
@@ -209,10 +258,19 @@ export class FileMemoryStore implements MemoryStore {
 			nodes.flatMap((n) => n.edges.filter((e) => e.rel === "supersedes").map((e) => e.target)),
 		);
 
-		const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+		const allTerms = query
+			.toLowerCase()
+			.split(/[^a-z0-9]+/)
+			.filter(Boolean);
+		const significantTerms = allTerms.filter((term) => !QUERY_STOPWORDS.has(term));
+		// Free-text queries ("who am I", "what do you know about my preferences") are mostly stopwords
+		// and connective words that won't appear verbatim in a stored fact's subject/body, so requiring
+		// every term to match (as opposed to any significant term) made `remember` return nothing for
+		// exactly the kind of natural-language question it's meant to answer.
+		const terms = significantTerms.length > 0 ? significantTerms : allTerms;
 		const matches = (n: MemoryNode) => {
 			const haystack = `${n.subject} ${n.body ?? ""}`.toLowerCase();
-			return terms.every((term) => haystack.includes(term));
+			return terms.some((term) => haystack.includes(term));
 		};
 
 		const entryIds = nodes.filter(matches).map((n) => n.id);
