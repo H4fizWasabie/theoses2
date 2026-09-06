@@ -42,3 +42,7 @@ plans/
 .theoses/hf-sessions/
 .theoses/hf-sessions-backup/
 collect.sh
+
+# graphify skill's local knowledge-graph build output (per-machine, not for committing)
+/.codegraph/
+/graphify-out/
