@@ -1,18 +1,18 @@
-export { PiClient } from "./client.ts";
+export { TheosesClient } from "./client.ts";
 export {
-	PiClientDisposedError,
-	PiDisconnectedError,
-	PiServerError,
-	PiSessionDetachedError,
-	PiSessionOwnershipError,
+	TheosesClientDisposedError,
+	TheosesDisconnectedError,
+	TheosesServerError,
+	TheosesSessionDetachedError,
+	TheosesSessionOwnershipError,
 } from "./errors.ts";
-export type { AcquireSessionOptions, PiSessionHandle, SessionLease, SessionLeaseMode } from "./session-handle.ts";
+export type { AcquireSessionOptions, SessionLease, SessionLeaseMode, TheosesSessionHandle } from "./session-handle.ts";
 export type { ByteTransport, ByteTransportFactory, ByteTransportHandlers } from "./transport.ts";
 export type {
 	ConnectionState,
 	ConnectionStateChange,
 	CreateSessionOptions,
 	ListenerErrorHandler,
-	PiClientOptions,
+	TheosesClientOptions,
 	Unsubscribe,
 } from "./types.ts";

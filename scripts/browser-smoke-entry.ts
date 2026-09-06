@@ -1,4 +1,4 @@
-import { PiClient } from "theoses-client";
+import { TheosesClient } from "theoses-client";
 import { createAssistantMessageEventStream, Type } from "theoses-ai";
 import { complete, getModel, getProviders, streamSimple } from "theoses-ai/compat";
 import {
@@ -60,7 +60,7 @@ console.log(
 	new FileError("not_found", "missing").code,
 	toError("boom").message,
 	typeof streamProxy,
-	typeof PiClient,
+	typeof TheosesClient,
 	PROTOCOL_VERSION,
 	decodeCbor(encodeCbor({ browser: true })),
 );
