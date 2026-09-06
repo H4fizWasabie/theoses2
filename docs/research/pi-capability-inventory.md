@@ -1,5 +1,7 @@
 # Theoses Capability Inventory
 
+Historical note: this filename preserves the original research subject; the inventory documents the upstream Pi architecture that Theoses was forked from.
+
 This is a factual, descriptive inventory of the capabilities currently implemented across `packages/` in the Theoses coding-agent harness (v0.84.3), produced to unblock GitHub issue [#4](https://github.com/H4fizWasabie/theoses2/issues/4) ("Theoses capability inventory"), a child of the Theoses2 engine map (issue [#1](https://github.com/H4fizWasabie/theoses2/issues/1)). It does not recommend what to keep, cut, or refactor for Theoses2 — it only records what exists, where it lives, and what it obviously assumes about a coding/terminal/git environment. All file paths are relative to `packages/` unless given in full; every capability was verified against source in this repo.
 
 ---

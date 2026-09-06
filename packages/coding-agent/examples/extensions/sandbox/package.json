@@ -1,5 +1,5 @@
 {
-	"name": "pi-extension-sandbox",
+	"name": "theoses-extension-sandbox",
 	"private": true,
 	"version": "2.0.2",
 	"type": "module",
@@ -8,7 +8,7 @@
 		"build": "echo 'nothing to build'",
 		"check": "echo 'nothing to check'"
 	},
-	"pi": {
+	"theoses": {
 		"extensions": [
 			"./index.ts"
 		]
