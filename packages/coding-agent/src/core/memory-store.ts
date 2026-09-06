@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { stringify } from "yaml";
-import { CONFIG_DIR_NAME } from "../config.ts";
+import { getMemoriesDir } from "../config.ts";
 import { parseFrontmatter } from "../utils/frontmatter.ts";
 
 /** Closed vocabulary for semantic-graph edges. Extend only on a real, recurring gap. */
@@ -47,11 +46,11 @@ export interface MemoryStore {
 }
 
 function defaultMemoryDir(): string {
-	return process.env.THEOSES_MEMORY_DIR ?? join(homedir(), CONFIG_DIR_NAME, "memories");
+	return getMemoriesDir();
 }
 
 function legacyMemoryFilePath(): string {
-	return process.env.THEOSES_MEMORY_FILE ?? join(homedir(), CONFIG_DIR_NAME, "memory.jsonl");
+	return process.env.THEOSES_MEMORY_FILE ?? join(dirname(getMemoriesDir()), "memory.jsonl");
 }
 
 interface LegacyMemoryRecord {

@@ -503,6 +503,7 @@ export const VERSION: string = pkg.version || "0.0.0";
 // e.g., THEOSES_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
 export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
 export const ENV_SESSION_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR`;
+export const ENV_MEMORY_DIR = `${APP_NAME.toUpperCase()}_MEMORY_DIR`;
 
 export function expandTildePath(path: string): string {
 	return normalizePath(path);
@@ -519,6 +520,21 @@ export function getAgentDir(): string {
 		return expandTildePath(envDir);
 	}
 	return join(homedir(), CONFIG_DIR_NAME, "agent");
+}
+
+/**
+ * Get the durable memory directory (e.g., ~/.theoses/memories/).
+ * Derived from the same base as getAgentDir() (via ENV_AGENT_DIR when set) rather than a
+ * bare homedir() call, so deployments that pin THEOSES_CODING_AGENT_DIR to a stable path
+ * (e.g. because the process runs as a different user than the one owning that path) don't
+ * silently land memory reads/writes in that process's own, unrelated home directory.
+ */
+export function getMemoriesDir(): string {
+	const envDir = process.env[ENV_MEMORY_DIR];
+	if (envDir) {
+		return expandTildePath(envDir);
+	}
+	return join(dirname(getAgentDir()), "memories");
 }
 
 /** Get path to user's custom themes directory */
