@@ -136,7 +136,7 @@ describe("openai-codex streaming", () => {
 					},
 				},
 			})}`,
-		].join("\n\n")}\n\n`;
+		].join("\r\n\r\n")}\r\n\r\n`;
 
 		const encoder = new TextEncoder();
 		const stream = new ReadableStream<Uint8Array>({

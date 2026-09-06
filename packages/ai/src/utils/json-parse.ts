@@ -122,3 +122,9 @@ export function parseStreamingJson<T = Record<string, unknown>>(partialJson: str
 		}
 	}
 }
+
+/** Parse provider JSON that has reached a stream finalization event. */
+export function parseCompleteJson<T = Record<string, unknown>>(json: string | undefined): T {
+	if (!json || json.trim() === "") return {} as T;
+	return parseJsonWithRepair<T>(json);
+}

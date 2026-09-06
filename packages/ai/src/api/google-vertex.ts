@@ -65,9 +65,6 @@ const THINKING_LEVEL_MAP: Record<GoogleApiThinkingLevel, ThinkingLevel> = {
 	HIGH: ThinkingLevel.HIGH,
 };
 
-// Counter for generating unique tool call IDs
-let toolCallCounter = 0;
-
 export const stream: StreamFunction<"google-vertex", GoogleVertexOptions> = (
 	model: Model<"google-vertex">,
 	context: Context,
@@ -76,6 +73,7 @@ export const stream: StreamFunction<"google-vertex", GoogleVertexOptions> = (
 	const stream = new AssistantMessageEventStream();
 
 	(async () => {
+		let toolCallCounter = 0;
 		const output: AssistantMessage = {
 			role: "assistant",
 			content: [],

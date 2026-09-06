@@ -47,9 +47,6 @@ export interface GoogleOptions extends StreamOptions {
 	};
 }
 
-// Counter for generating unique tool call IDs
-let toolCallCounter = 0;
-
 export const stream: StreamFunction<"google-generative-ai", GoogleOptions> = (
 	model: Model<"google-generative-ai">,
 	context: Context,
@@ -58,6 +55,7 @@ export const stream: StreamFunction<"google-generative-ai", GoogleOptions> = (
 	const stream = new AssistantMessageEventStream();
 
 	(async () => {
+		let toolCallCounter = 0;
 		const output: AssistantMessage = {
 			role: "assistant",
 			content: [],
