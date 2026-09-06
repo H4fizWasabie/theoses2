@@ -1,9 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { type Api, contentText, type Model, type ToolCall, type ToolResultMessage } from "theoses-ai";
 import { type Static, Type } from "typebox";
-import { CONFIG_DIR_NAME } from "../config.ts";
+import { getAgentDir } from "../config.ts";
 import type { AgentSession } from "./agent-session.ts";
 import { EpisodicStore } from "./episodic-store.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
@@ -45,9 +44,11 @@ interface CheckpointFile {
 }
 
 function checkpointPath(): string {
+	// Derived from getAgentDir() (respects THEOSES_CODING_AGENT_DIR) rather than a bare homedir()
+	// call — see episodic-store.ts's defaultEpisodicDbPath() and memory-store.ts's
+	// getMemoriesDir() for the same fix applied to the other stores in this package.
 	return (
-		process.env.THEOSES_CONSOLIDATION_CHECKPOINTS ??
-		join(homedir(), CONFIG_DIR_NAME, "consolidation-checkpoints.json")
+		process.env.THEOSES_CONSOLIDATION_CHECKPOINTS ?? join(dirname(getAgentDir()), "consolidation-checkpoints.json")
 	);
 }
 

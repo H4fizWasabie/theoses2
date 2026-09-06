@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { CONFIG_DIR_NAME } from "../config.ts";
+import { getAgentDir } from "../config.ts";
 
 export interface EpisodeRecord {
 	id: string;
@@ -26,7 +25,11 @@ interface EpisodeRow {
 }
 
 function defaultEpisodicDbPath(): string {
-	return process.env.THEOSES_EPISODIC_DB ?? join(homedir(), CONFIG_DIR_NAME, "episodes.db");
+	// Derived from getAgentDir() (respects THEOSES_CODING_AGENT_DIR) rather than a bare homedir()
+	// call, so deployments that pin the agent dir to a stable path don't silently land the
+	// episodic store in the wrong user's home directory. Same fix as memory-store.ts's
+	// getMemoriesDir() and the THEOSES_TELEGRAM_CWD fix for session-manager.ts.
+	return process.env.THEOSES_EPISODIC_DB ?? join(dirname(getAgentDir()), "episodes.db");
 }
 
 function rowToRecord(row: EpisodeRow): EpisodeRecord {
@@ -129,9 +132,11 @@ export class EpisodicStore {
 			.all(timestamp, timestamp, limit) as unknown as EpisodeRow[];
 		if (containing.length > 0) return containing.map(rowToRecord);
 
+		// Per-row distance, not an aggregate: MIN() with no GROUP BY would collapse the whole
+		// table into a single row, silently ignoring `limit` and returning at most one episode.
 		const nearest = this.db
 			.prepare(
-				`SELECT *, MIN(ABS(julianday(started_at) - julianday(?))) AS distance
+				`SELECT *, ABS(julianday(started_at) - julianday(?)) AS distance
 				 FROM episodes ORDER BY distance ASC LIMIT ?`,
 			)
 			.all(timestamp, limit) as unknown as EpisodeRow[];

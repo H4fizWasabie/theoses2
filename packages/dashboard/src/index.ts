@@ -478,7 +478,11 @@ async function asset(response: ServerResponse, pathname: string): Promise<void> 
 }
 
 export function createDashboardServer(options: DashboardServerOptions = {}) {
-	const cwd = options.cwd ?? process.cwd();
+	// Deployments that run the dashboard from a versioned release directory (e.g. a `current`
+	// symlink swapped on each release) must set THEOSES_DASHBOARD_CWD to a stable path.
+	// process.cwd() resolves through such a symlink to the release's real physical path, which
+	// changes every release — the same bug fixed for the Telegram bot's THEOSES_TELEGRAM_CWD.
+	const cwd = options.cwd ?? process.env.THEOSES_DASHBOARD_CWD ?? process.cwd();
 	const accessToken = options.accessToken ?? process.env.THEOSES_DASHBOARD_TOKEN ?? "";
 	const telegramConfigPath = options.telegramConfigPath ?? join(getAgentDir(), "theoses.env");
 	return createServer(async (request, response) => {
