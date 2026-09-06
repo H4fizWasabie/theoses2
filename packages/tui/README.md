@@ -335,6 +335,7 @@ Single-line text input with horizontal scrolling.
 ```typescript
 const input = new Input();
 input.onSubmit = (value) => console.log(value);
+input.onEscape = () => console.log("Cancelled");
 input.setValue("initial");
 input.getValue();
 ```
@@ -361,6 +362,7 @@ interface EditorTheme {
 
 interface EditorOptions {
   paddingX?: number;  // Horizontal padding (default: 0)
+  autocompleteMaxVisible?: number;  // Visible autocomplete rows (default: 5)
 }
 
 const editor = new Editor(tui, theme, options?);  // tui is required for height-aware scrolling
@@ -371,6 +373,8 @@ editor.setAutocompleteProvider(provider);
 editor.borderColor = (s) => chalk.blue(s); // Change border dynamically
 editor.setPaddingX(1); // Update horizontal padding dynamically
 editor.getPaddingX();  // Get current padding
+editor.getAutocompleteMaxVisible();
+editor.setAutocompleteMaxVisible(8);
 ```
 
 **Features:**
@@ -621,7 +625,7 @@ editor.setAutocompleteProvider(provider);
 - Type `/` to see slash commands
 - Press `Tab` for file path completion
 - Works with `~/`, `./`, `../`, and `@` prefix
-- Filters to attachable files for `@` prefix
+- Completes directories and filesystem entries for `@` prefix; callers decide which entries are attachable
 
 ## Key Detection
 

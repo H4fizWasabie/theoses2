@@ -99,7 +99,8 @@ export function findWordForward(text: string, cursor: number, options?: WordNavi
 		newCursor += next.value.segment.length;
 	} else if (next.value.isWordLike) {
 		// Skip inside one word-like segment, preserving ASCII punctuation boundaries.
-		newCursor += PUNCTUATION_REGEX.exec(next.value.segment)?.index ?? next.value.segment.length;
+		const punctuationIndex = PUNCTUATION_REGEX.exec(next.value.segment)?.index;
+		newCursor += punctuationIndex === 0 ? next.value.segment.length : (punctuationIndex ?? next.value.segment.length);
 	} else {
 		// Skip non-word non-whitespace run (punctuation)
 		while (
