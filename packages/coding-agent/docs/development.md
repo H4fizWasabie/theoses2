@@ -25,7 +25,7 @@ Configure via `package.json`:
 
 ```json
 {
-  "piConfig": {
+  "theosesConfig": {
     "name": "theoses",
     "configDir": ".theoses"
   }

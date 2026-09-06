@@ -1,5 +1,7 @@
 # Pi Capability Triage
 
+Historical note: this filename preserves the original research subject; the triage classifies the upstream Pi architecture that Theoses was forked from.
+
 Batch triage of the inventory in `docs/research/pi-capability-inventory.md` (GitHub issue
 [#6](https://github.com/H4fizWasabie/theoses2/issues/6)), applying the decision process from
 issue [#5](https://github.com/H4fizWasabie/theoses2/issues/5), for GitHub issue
