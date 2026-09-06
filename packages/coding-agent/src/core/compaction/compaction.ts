@@ -143,7 +143,7 @@ export function countUserTurnsSince(pathEntries: SessionEntry[], startIndex: num
 	let count = 0;
 	for (let i = startIndex; i < pathEntries.length; i++) {
 		const entry = pathEntries[i];
-		if (entry.type === "message" && entry.message.role === "user") count++;
+		if (isTurnStartEntry(entry)) count++;
 	}
 	return count;
 }

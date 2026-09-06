@@ -125,9 +125,8 @@ function getAliases(): Record<string, string> {
 
 type HandlerFn = (...args: unknown[]) => Promise<unknown>;
 
-let extensionCacheCwd: string | undefined;
 let extensionCacheGeneration = 0;
-const extensionCache = new Map<string, ExtensionFactory>();
+const extensionCaches = new Map<string, Map<string, ExtensionFactory>>();
 
 interface ExtensionCacheToken {
 	cwd: string;
@@ -135,17 +134,12 @@ interface ExtensionCacheToken {
 }
 
 export function clearExtensionCache(): void {
-	extensionCache.clear();
-	extensionCacheCwd = undefined;
+	extensionCaches.clear();
 	extensionCacheGeneration++;
 }
 
 function useExtensionCacheCwd(cwd: string): ExtensionCacheToken {
 	const resolvedCwd = resolvePath(cwd);
-	if (extensionCacheCwd !== undefined && extensionCacheCwd !== resolvedCwd) {
-		clearExtensionCache();
-	}
-	extensionCacheCwd = resolvedCwd;
 	return { cwd: resolvedCwd, generation: extensionCacheGeneration };
 }
 
@@ -457,16 +451,12 @@ function createExtensionAPI(
 }
 
 function isCurrentCacheToken(cacheToken: ExtensionCacheToken | undefined): cacheToken is ExtensionCacheToken {
-	return (
-		cacheToken !== undefined &&
-		extensionCacheCwd === cacheToken.cwd &&
-		extensionCacheGeneration === cacheToken.generation
-	);
+	return cacheToken !== undefined && extensionCacheGeneration === cacheToken.generation;
 }
 
 async function loadExtensionModule(extensionPath: string, cacheToken?: ExtensionCacheToken) {
 	if (isCurrentCacheToken(cacheToken)) {
-		const cachedFactory = extensionCache.get(extensionPath);
+		const cachedFactory = extensionCaches.get(cacheToken.cwd)?.get(extensionPath);
 		if (cachedFactory) {
 			return cachedFactory;
 		}
@@ -490,7 +480,12 @@ async function loadExtensionModule(extensionPath: string, cacheToken?: Extension
 		return undefined;
 	}
 	if (isCurrentCacheToken(cacheToken)) {
-		extensionCache.set(extensionPath, factory);
+		let cache = extensionCaches.get(cacheToken.cwd);
+		if (!cache) {
+			cache = new Map();
+			extensionCaches.set(cacheToken.cwd, cache);
+		}
+		cache.set(extensionPath, factory);
 	}
 	return factory;
 }
@@ -654,35 +649,39 @@ function isExtensionFile(name: string): boolean {
  * Returns resolved paths or null if no entry points found.
  */
 function resolveExtensionEntries(dir: string): string[] | null {
-	// Check for package.json with "theoses" field first
-	const packageJsonPath = path.join(dir, "package.json");
-	if (fs.existsSync(packageJsonPath)) {
-		const manifest = readTheosesManifest(packageJsonPath);
-		if (manifest?.extensions?.length) {
-			const entries: string[] = [];
-			for (const extPath of manifest.extensions) {
-				const resolvedExtPath = path.resolve(dir, extPath);
-				if (fs.existsSync(resolvedExtPath)) {
-					entries.push(resolvedExtPath);
+	try {
+		// Check for package.json with "theoses" field first
+		const packageJsonPath = path.join(dir, "package.json");
+		if (fs.existsSync(packageJsonPath)) {
+			const manifest = readTheosesManifest(packageJsonPath);
+			if (manifest?.extensions?.length) {
+				const entries: string[] = [];
+				for (const extPath of manifest.extensions) {
+					const resolvedExtPath = path.resolve(dir, extPath);
+					if (fs.existsSync(resolvedExtPath)) {
+						entries.push(resolvedExtPath);
+					}
+				}
+				if (entries.length > 0) {
+					return entries;
 				}
 			}
-			if (entries.length > 0) {
-				return entries;
-			}
 		}
-	}
 
-	// Check for index.ts or index.js
-	const indexTs = path.join(dir, "index.ts");
-	const indexJs = path.join(dir, "index.js");
-	if (fs.existsSync(indexTs)) {
-		return [indexTs];
-	}
-	if (fs.existsSync(indexJs)) {
-		return [indexJs];
-	}
+		// Check for index.ts or index.js
+		const indexTs = path.join(dir, "index.ts");
+		const indexJs = path.join(dir, "index.js");
+		if (fs.existsSync(indexTs)) {
+			return [indexTs];
+		}
+		if (fs.existsSync(indexJs)) {
+			return [indexJs];
+		}
 
-	return null;
+		return null;
+	} catch {
+		return null;
+	}
 }
 
 export function resolveExtensionPaths(paths: string[], cwd: string, excludedPaths: string[] = []): string[] {
@@ -691,14 +690,18 @@ export function resolveExtensionPaths(paths: string[], cwd: string, excludedPath
 		excluded.some((excludedPath) => candidate === excludedPath || candidate.startsWith(`${excludedPath}${path.sep}`));
 	const resolvedPaths: string[] = [];
 	for (const rawPath of paths) {
-		const resolvedPath = resolvePath(rawPath, cwd, { normalizeUnicodeSpaces: true });
-		if (!fs.existsSync(resolvedPath) || !fs.statSync(resolvedPath).isDirectory()) {
-			if (!isExcluded(canonicalizePath(resolvedPath))) resolvedPaths.push(resolvedPath);
-			continue;
-		}
+		try {
+			const resolvedPath = resolvePath(rawPath, cwd, { normalizeUnicodeSpaces: true });
+			if (!fs.existsSync(resolvedPath) || !fs.statSync(resolvedPath).isDirectory()) {
+				if (!isExcluded(canonicalizePath(resolvedPath))) resolvedPaths.push(resolvedPath);
+				continue;
+			}
 
-		const entries = resolveExtensionEntries(resolvedPath) ?? discoverExtensionsInDir(resolvedPath);
-		resolvedPaths.push(...entries.filter((entry) => !isExcluded(canonicalizePath(entry))));
+			const entries = resolveExtensionEntries(resolvedPath) ?? discoverExtensionsInDir(resolvedPath);
+			resolvedPaths.push(...entries.filter((entry) => !isExcluded(canonicalizePath(entry))));
+		} catch {
+			// A removed extension is equivalent to an extension that was not discovered.
+		}
 	}
 	return resolvedPaths;
 }
