@@ -1,10 +1,10 @@
-import { PiServer } from "../../server.ts";
-import type { PiServerService } from "../../types.ts";
+import { TheosesServer } from "../../server.ts";
+import type { TheosesServerService } from "../../types.ts";
 import { createUnixListener } from "./listener.ts";
 import type { UnixServerOptions } from "./types.ts";
 
-/** Compose PiServer with one Unix-domain socket listener. */
-export function createUnixServer(service: PiServerService, options: UnixServerOptions): PiServer {
+/** Compose TheosesServer with one Unix-domain socket listener. */
+export function createUnixServer(service: TheosesServerService, options: UnixServerOptions): TheosesServer {
 	const listener = createUnixListener({
 		path: options.path,
 		mode: options.mode,
@@ -13,7 +13,7 @@ export function createUnixServer(service: PiServerService, options: UnixServerOp
 		gracefulCloseTimeoutMs: options.gracefulCloseTimeoutMs,
 		onError: options.onError,
 	});
-	return new PiServer(service, {
+	return new TheosesServer(service, {
 		listeners: [listener],
 		maxFrameLength: options.maxFrameLength,
 		handshakeTimeoutMs: options.handshakeTimeoutMs,

@@ -6,11 +6,11 @@ import {
 	type SessionMetadata,
 } from "theoses-protocol";
 import type { ConnectionState } from "./connection.ts";
-import type { PiServerService } from "./types.ts";
+import type { TheosesServerService } from "./types.ts";
 
 interface ServerSnapshotPublisherOptions {
 	serverId: string;
-	service: PiServerService;
+	service: TheosesServerService;
 	connections: Set<ConnectionState>;
 	isClosing: () => boolean;
 	listSessions: () => Promise<SessionMetadata[]>;

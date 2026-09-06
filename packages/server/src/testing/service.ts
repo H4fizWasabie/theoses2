@@ -7,13 +7,13 @@ import type {
 	ThinkingLevel,
 	TranscriptProgress,
 } from "theoses-protocol";
-import { PiServerError } from "../errors.ts";
+import { TheosesServerError } from "../errors.ts";
 import type {
 	CreateSessionOptions,
-	PiServerService,
-	PiSessionRuntime,
-	PiSessionRuntimeEvent,
 	PromptInput,
+	TheosesServerService,
+	TheosesSessionRuntime,
+	TheosesSessionRuntimeEvent,
 } from "../types.ts";
 
 export const TEST_MODEL: ModelMetadata = {
@@ -49,13 +49,13 @@ interface StoredSession {
 	snapshot: SessionSnapshot;
 }
 
-export class TestSessionRuntime implements PiSessionRuntime {
+export class TestSessionRuntime implements TheosesSessionRuntime {
 	readonly disposed = new Deferred<void>();
 	disposeCount = 0;
 	readonly steers: PromptInput[] = [];
 	private readonly stored: StoredSession;
 	private readonly onDispose: () => void;
-	private readonly listeners = new Set<(event: PiSessionRuntimeEvent) => void>();
+	private readonly listeners = new Set<(event: TheosesSessionRuntimeEvent) => void>();
 	private pendingPrompt?: { input: PromptInput; done: Deferred<"complete" | "aborted"> };
 
 	constructor(stored: StoredSession, onDispose: () => void) {
@@ -72,7 +72,7 @@ export class TestSessionRuntime implements PiSessionRuntime {
 	}
 
 	async prompt(input: PromptInput): Promise<void> {
-		if (this.getPhase() !== "idle") throw new PiServerError("busy", "A prompt is already running");
+		if (this.getPhase() !== "idle") throw new TheosesServerError("busy", "A prompt is already running");
 		const done = new Deferred<"complete" | "aborted">();
 		this.pendingPrompt = { input, done };
 		this.update({
@@ -116,7 +116,7 @@ export class TestSessionRuntime implements PiSessionRuntime {
 	}
 
 	async steer(input: PromptInput): Promise<void> {
-		if (this.getPhase() === "idle") throw new PiServerError("busy", "There is no active prompt to steer");
+		if (this.getPhase() === "idle") throw new TheosesServerError("busy", "There is no active prompt to steer");
 		this.steers.push(input);
 		this.update({
 			queuedSteerCount: this.stored.snapshot.queuedSteerCount + 1,
@@ -133,21 +133,21 @@ export class TestSessionRuntime implements PiSessionRuntime {
 	}
 
 	async abort(): Promise<void> {
-		if (!this.pendingPrompt) throw new PiServerError("busy", "There is no active prompt to abort");
+		if (!this.pendingPrompt) throw new TheosesServerError("busy", "There is no active prompt to abort");
 		this.pendingPrompt.done.resolve("aborted");
 	}
 
 	async setModel(model: ModelRef): Promise<void> {
-		if (this.getPhase() !== "idle") throw new PiServerError("busy", "Session is busy");
+		if (this.getPhase() !== "idle") throw new TheosesServerError("busy", "Session is busy");
 		this.update({ model });
 	}
 
 	async setThinking(thinkingLevel: ThinkingLevel): Promise<void> {
-		if (this.getPhase() !== "idle") throw new PiServerError("busy", "Session is busy");
+		if (this.getPhase() !== "idle") throw new TheosesServerError("busy", "Session is busy");
 		this.update({ thinkingLevel });
 	}
 
-	subscribe(listener: (event: PiSessionRuntimeEvent) => void): () => void {
+	subscribe(listener: (event: TheosesSessionRuntimeEvent) => void): () => void {
 		this.listeners.add(listener);
 		return () => this.listeners.delete(listener);
 	}
@@ -171,7 +171,7 @@ export class TestSessionRuntime implements PiSessionRuntime {
 		for (const listener of this.listeners) listener({ type: "progress", progress });
 	}
 
-	emitError(error: PiServerError): void {
+	emitError(error: TheosesServerError): void {
 		for (const listener of this.listeners) listener({ type: "error", error });
 	}
 
@@ -195,7 +195,7 @@ interface ListDelay {
 	release: Deferred<void>;
 }
 
-export class TestServerService implements PiServerService {
+export class TestServerService implements TheosesServerService {
 	readonly sessions = new Map<string, StoredSession>();
 	readonly runtimes = new Map<string, TestSessionRuntime[]>();
 	readonly locked = new Set<string>();
@@ -222,16 +222,16 @@ export class TestServerService implements PiServerService {
 		return [TEST_MODEL];
 	}
 
-	async createSession(options: CreateSessionOptions): Promise<PiSessionRuntime> {
+	async createSession(options: CreateSessionOptions): Promise<TheosesSessionRuntime> {
 		this.lastCreatedId = options.id;
-		if (this.sessions.has(options.id)) throw new PiServerError("session_locked", "Session already exists");
+		if (this.sessions.has(options.id)) throw new TheosesServerError("session_locked", "Session already exists");
 		this.seed(options.id, options.name, options.cwd, options.model, options.thinkingLevel);
 		return this.acquire(options.id);
 	}
 
-	async openSession(sessionId: string): Promise<PiSessionRuntime> {
-		if (!this.sessions.has(sessionId)) throw new PiServerError("not_found", `Unknown session: ${sessionId}`);
-		if (this.locked.has(sessionId)) throw new PiServerError("session_locked", `Session is locked: ${sessionId}`);
+	async openSession(sessionId: string): Promise<TheosesSessionRuntime> {
+		if (!this.sessions.has(sessionId)) throw new TheosesServerError("not_found", `Unknown session: ${sessionId}`);
+		if (this.locked.has(sessionId)) throw new TheosesServerError("session_locked", `Session is locked: ${sessionId}`);
 		return this.acquire(sessionId);
 	}
 
