@@ -9,9 +9,9 @@ import ms from "ms";
 import type { ExtensionAPI } from "theoses-coding-agent";
 import { Type } from "typebox";
 
-export default function (pi: ExtensionAPI) {
+export default function (theoses: ExtensionAPI) {
 	// Register a tool that uses ms
-	pi.registerTool({
+	theoses.registerTool({
 		name: "parse_duration",
 		label: "Parse Duration",
 		description: "Parse a human-readable duration string (e.g., '2 days', '1h', '5m') to milliseconds",

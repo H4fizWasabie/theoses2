@@ -12,8 +12,8 @@
 
 import type { ExtensionAPI, SlashCommandInfo } from "theoses-coding-agent";
 
-export default function commandsExtension(pi: ExtensionAPI) {
-	pi.registerCommand("commands", {
+export default function commandsExtension(theoses: ExtensionAPI) {
+	theoses.registerCommand("commands", {
 		description: "List available slash commands",
 		getArgumentCompletions: (prefix) => {
 			const sources = ["extension", "prompt", "skill"];
@@ -21,7 +21,7 @@ export default function commandsExtension(pi: ExtensionAPI) {
 			return filtered.length > 0 ? filtered.map((s) => ({ value: s, label: s })) : null;
 		},
 		handler: async (args, ctx) => {
-			const commands = pi.getCommands();
+			const commands = theoses.getCommands();
 			const sourceFilter = args.trim() as "extension" | "prompt" | "skill" | "";
 
 			// Filter by source if specified

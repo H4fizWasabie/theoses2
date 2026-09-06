@@ -468,8 +468,8 @@ const SubagentParams = Type.Object({
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
 });
 
-export default function (pi: ExtensionAPI) {
-	pi.registerTool({
+export default function (theoses: ExtensionAPI) {
+	theoses.registerTool({
 		name: "subagent",
 		label: "Subagent",
 		description: [

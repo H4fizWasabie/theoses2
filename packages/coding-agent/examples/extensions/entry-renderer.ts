@@ -16,8 +16,8 @@ interface StatusCardData {
 	timestamp: number;
 }
 
-export default function (pi: ExtensionAPI) {
-	pi.registerEntryRenderer<StatusCardData>("status-card", (entry, { expanded }, theme) => {
+export default function (theoses: ExtensionAPI) {
+	theoses.registerEntryRenderer<StatusCardData>("status-card", (entry, { expanded }, theme) => {
 		const data = entry.data ?? { message: "No data", timestamp: Date.now() };
 		const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
 		box.addChild(new Text(`${theme.fg("accent", "[status]")} ${data.message}`, 0, 0));
@@ -29,10 +29,10 @@ export default function (pi: ExtensionAPI) {
 		return box;
 	});
 
-	pi.registerCommand("status-card", {
+	theoses.registerCommand("status-card", {
 		description: "Render a durable status card that is not sent to the LLM",
 		handler: async (args) => {
-			pi.appendEntry<StatusCardData>("status-card", {
+			theoses.appendEntry<StatusCardData>("status-card", {
 				message: args.trim() || "Status card",
 				timestamp: Date.now(),
 			});
