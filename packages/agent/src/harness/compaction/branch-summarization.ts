@@ -150,7 +150,6 @@ export function prepareBranchEntries(entries: Entry[], tokenBudget: number = 0):
 		const entry = entries[i];
 		const message = getMessageFromEntry(entry);
 		if (!message) continue;
-		extractFileOpsFromMessage(message, fileOps);
 
 		const tokens = estimateTokens(message);
 		if (tokenBudget > 0 && totalTokens + tokens > tokenBudget) {
@@ -163,6 +162,7 @@ export function prepareBranchEntries(entries: Entry[], tokenBudget: number = 0):
 			break;
 		}
 
+		extractFileOpsFromMessage(message, fileOps);
 		messages.unshift(message);
 		totalTokens += tokens;
 	}

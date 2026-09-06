@@ -17,6 +17,14 @@ export type HarnessEventType = HarnessEvent["type"];
 export type HarnessEventOfType<TType extends HarnessEventType> = Extract<HarnessEvent, { type: TType }>;
 export type HarnessEventListener<TEvent extends HarnessEvent = HarnessEvent> = (event: TEvent) => void | Promise<void>;
 
+function deliver(listener: HarnessEventListener, event: HarnessEvent): void {
+	try {
+		void Promise.resolve(listener(event)).catch(() => {});
+	} catch {
+		// Listener failures must not affect other subscribers or the emitter.
+	}
+}
+
 export interface Events {
 	/**
 	 * Register a passive listener for future events and return its unsubscribe function.
@@ -66,17 +74,17 @@ export class HarnessEventBus implements Events {
 	emit(event: HarnessEvent): void {
 		// Deliver only to direct listeners registered for this event type.
 		// Async results are not awaited because emit() is synchronous.
-		for (const listener of this.listeners.get(event.type) ?? []) void listener(event);
+		for (const listener of this.listeners.get(event.type) ?? []) deliver(listener, event);
 
 		// Deliver every event to each watcher; watch() handles buffering until start().
-		for (const listener of this.watchListeners) listener(event);
+		for (const listener of this.watchListeners) deliver(listener, event);
 	}
 
 	watch<TSnapshot>(captureSnapshot: () => TSnapshot): WatchHandle<TSnapshot> {
 		let listener: HarnessEventListener | undefined;
 		let buffered: HarnessEvent[] = [];
 		const receive = (event: HarnessEvent): void => {
-			if (listener) void listener(event);
+			if (listener) deliver(listener, event);
 			else buffered.push(event);
 		};
 		this.watchListeners.add(receive);
@@ -89,7 +97,7 @@ export class HarnessEventBus implements Events {
 				while (buffered.length > 0) {
 					const pending = buffered;
 					buffered = [];
-					for (const event of pending) void nextListener(event);
+					for (const event of pending) deliver(nextListener, event);
 				}
 				listener = nextListener;
 			},

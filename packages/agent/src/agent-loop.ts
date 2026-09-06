@@ -441,7 +441,8 @@ async function executeToolCallsSequential(
 	const finalizedCalls: FinalizedToolCallOutcome[] = [];
 	const messages: ToolResultMessage[] = [];
 
-	for (const toolCall of toolCalls) {
+	for (let index = 0; index < toolCalls.length; index++) {
+		const toolCall = toolCalls[index];
 		await emit({
 			type: "tool_execution_start",
 			toolCallId: toolCall.id,
@@ -476,6 +477,15 @@ async function executeToolCallsSequential(
 		messages.push(toolResultMessage);
 
 		if (signal?.aborted) {
+			for (const skippedToolCall of toolCalls.slice(index + 1)) {
+				const finalized = createAbortedToolCallOutcome(skippedToolCall);
+				await emitToolExecutionStart(skippedToolCall, emit);
+				await emitToolExecutionEnd(finalized, emit);
+				const toolResultMessage = createToolResultMessage(finalized);
+				await emitToolResultMessage(toolResultMessage, emit);
+				finalizedCalls.push(finalized);
+				messages.push(toolResultMessage);
+			}
 			break;
 		}
 	}
@@ -495,6 +505,7 @@ async function executeToolCallsParallel(
 	emit: AgentEventSink,
 ): Promise<ExecutedToolCallBatch> {
 	const finalizedCalls: FinalizedToolCallEntry[] = [];
+	const skippedToolCalls: AgentToolCall[] = [];
 
 	for (const toolCall of toolCalls) {
 		await emit({
@@ -514,6 +525,7 @@ async function executeToolCallsParallel(
 			await emitToolExecutionEnd(finalized, emit);
 			finalizedCalls.push(finalized);
 			if (signal?.aborted) {
+				skippedToolCalls.push(...toolCalls.slice(finalizedCalls.length));
 				break;
 			}
 			continue;
@@ -533,6 +545,7 @@ async function executeToolCallsParallel(
 			return finalized;
 		});
 		if (signal?.aborted) {
+			skippedToolCalls.push(...toolCalls.slice(finalizedCalls.length));
 			break;
 		}
 	}
@@ -540,6 +553,12 @@ async function executeToolCallsParallel(
 	const orderedFinalizedCalls = await Promise.all(
 		finalizedCalls.map((entry) => (typeof entry === "function" ? entry() : Promise.resolve(entry))),
 	);
+	for (const toolCall of skippedToolCalls) {
+		await emitToolExecutionStart(toolCall, emit);
+		const finalized = createAbortedToolCallOutcome(toolCall);
+		await emitToolExecutionEnd(finalized, emit);
+		orderedFinalizedCalls.push(finalized);
+	}
 	const messages: ToolResultMessage[] = [];
 	for (const finalized of orderedFinalizedCalls) {
 		const toolResultMessage = createToolResultMessage(finalized);
@@ -762,6 +781,19 @@ function createErrorToolResult(message: string): AgentToolResult<any> {
 		content: [{ type: "text", text: message }],
 		details: {},
 	};
+}
+
+function createAbortedToolCallOutcome(toolCall: AgentToolCall): FinalizedToolCallOutcome {
+	return { toolCall, result: createErrorToolResult("Operation aborted"), isError: true };
+}
+
+async function emitToolExecutionStart(toolCall: AgentToolCall, emit: AgentEventSink): Promise<void> {
+	await emit({
+		type: "tool_execution_start",
+		toolCallId: toolCall.id,
+		toolName: toolCall.name,
+		args: toolCall.arguments,
+	});
 }
 
 async function emitToolExecutionEnd(finalized: FinalizedToolCallOutcome, emit: AgentEventSink): Promise<void> {
