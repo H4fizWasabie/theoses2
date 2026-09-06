@@ -2,8 +2,8 @@
  * Custom entry rendering example.
  *
  * Shows how to render durable extension data inside the chat without sending it
- * to the LLM. Custom entries are stored in the session via pi.appendEntry() and
- * rendered in interactive mode via pi.registerEntryRenderer().
+ * to the LLM. Custom entries are stored in the session via theoses.appendEntry() and
+ * rendered in interactive mode via theoses.registerEntryRenderer().
  *
  * Usage: /status-card [message]
  */

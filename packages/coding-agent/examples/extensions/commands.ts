@@ -1,7 +1,7 @@
 /**
  * Commands Extension
  *
- * Demonstrates the pi.getCommands() API by providing a /commands command
+ * Demonstrates theoses.getCommands() API by providing a /commands command
  * that lists all available slash commands in the current session.
  *
  * Usage:

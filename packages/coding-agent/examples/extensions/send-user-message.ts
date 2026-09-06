@@ -1,8 +1,8 @@
 /**
  * Send User Message Example
  *
- * Demonstrates pi.sendUserMessage() for sending user messages from extensions.
- * Unlike pi.sendMessage() which sends custom messages, sendUserMessage() sends
+ * Demonstrates theoses.sendUserMessage() for sending user messages from extensions.
+ * Unlike theoses.sendMessage() which sends custom messages, sendUserMessage() sends
  * actual user messages that appear in the conversation as if typed by the user.
  *
  * Usage:

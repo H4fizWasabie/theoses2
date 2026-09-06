@@ -1418,7 +1418,7 @@ export interface ExtensionAPI {
 	 *
 	 * @example
 	 * // Register a new provider with custom models
-	 * pi.registerProvider("my-proxy", {
+	 * theoses.registerProvider("my-proxy", {
 	 *   baseUrl: "https://proxy.example.com",
 	 *   apiKey: "$PROXY_API_KEY",
 	 *   api: "anthropic-messages",
@@ -1437,13 +1437,13 @@ export interface ExtensionAPI {
 	 *
 	 * @example
 	 * // Override baseUrl for an existing provider
-	 * pi.registerProvider("anthropic", {
+	 * theoses.registerProvider("anthropic", {
 	 *   baseUrl: "https://proxy.example.com"
 	 * });
 	 *
 	 * @example
 	 * // Register provider with OAuth support
-	 * pi.registerProvider("corporate-ai", {
+	 * theoses.registerProvider("corporate-ai", {
 	 *   baseUrl: "https://ai.corp.com",
 	 *   api: "openai-responses",
 	 *   models: [...],
@@ -1481,7 +1481,7 @@ export interface ExtensionAPI {
 // Provider Registration Types
 // ============================================================================
 
-/** Configuration for registering a provider via pi.registerProvider(). */
+/** Configuration for registering a provider via theoses.registerProvider(). */
 export interface ProviderConfig {
 	/** Display name for the provider in UI. */
 	name?: string;
