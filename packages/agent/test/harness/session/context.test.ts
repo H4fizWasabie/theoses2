@@ -121,4 +121,30 @@ describe("v4 session context", () => {
 		expect(context.messages.map((message) => message.role)).toEqual(["user", "user"]);
 		expect(context.messages[1]).toMatchObject({ content: [{ type: "text", text: "note: project me" }] });
 	});
+
+	it("omits failed and aborted assistant messages", () => {
+		const entries: Entry[] = [
+			entry(
+				{
+					type: "message",
+					id: "error",
+					parentId: null,
+					message: { ...assistantMessage("error"), stopReason: "error" },
+				},
+				1,
+			),
+			entry(
+				{
+					type: "message",
+					id: "aborted",
+					parentId: "error",
+					message: { ...assistantMessage("aborted"), stopReason: "aborted" },
+				},
+				2,
+			),
+			entry({ type: "message", id: "user", parentId: "aborted", message: userMessage("continue") }, 3),
+		];
+
+		expect(buildSessionContext(entries).messages).toEqual([userMessage("continue")]);
+	});
 });

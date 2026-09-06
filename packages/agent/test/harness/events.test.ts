@@ -62,4 +62,23 @@ describe("HarnessEventBus", () => {
 		events.emit(runStartEvent);
 		expect(received).toEqual([runStartEvent, runEndEvent]);
 	});
+
+	it("isolates throwing and rejecting listeners", async () => {
+		const events = new HarnessEventBus();
+		const received: string[] = [];
+		events.on("run_start", () => {
+			throw new Error("sync listener failure");
+		});
+		events.on("run_start", async () => {
+			await Promise.resolve();
+			throw new Error("async listener failure");
+		});
+		events.on("run_start", () => {
+			received.push("delivered");
+		});
+
+		events.emit(runStartEvent);
+		await Promise.resolve();
+		expect(received).toEqual(["delivered"]);
+	});
 });

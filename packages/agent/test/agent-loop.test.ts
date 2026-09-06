@@ -678,6 +678,61 @@ describe("agentLoop with AgentMessage", () => {
 		expect(turnToolResultIds).toEqual(["tool-1", "tool-2"]);
 	});
 
+	it("emits aborted results for tool calls skipped after cancellation", async () => {
+		const controller = new AbortController();
+		const toolSchema = Type.Object({ value: Type.String() });
+		let executed = 0;
+		const tool: AgentTool<typeof toolSchema, { value: string }> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				executed++;
+				controller.abort();
+				return { content: [{ type: "text", text: params.value }], details: params };
+			},
+		};
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [tool] };
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			toolExecution: "sequential",
+		};
+		let calls = 0;
+		const stream = agentLoop([createUserMessage("echo")], context, config, controller.signal, () => {
+			const result = new MockAssistantStream();
+			queueMicrotask(() => {
+				calls++;
+				if (calls > 1) {
+					result.push({ type: "done", reason: "stop", message: createAssistantMessage([]) });
+					return;
+				}
+				result.push({
+					type: "done",
+					reason: "toolUse",
+					message: createAssistantMessage(
+						[
+							{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "one" } },
+							{ type: "toolCall", id: "tool-2", name: "echo", arguments: { value: "two" } },
+						],
+						"toolUse",
+					),
+				});
+			});
+			return result;
+		});
+		const events: AgentEvent[] = [];
+		for await (const event of stream) events.push(event);
+
+		const toolResultIds = events.flatMap((event) =>
+			event.type === "message_end" && event.message.role === "toolResult" ? [event.message.toolCallId] : [],
+		);
+		expect(toolResultIds).toEqual(["tool-1", "tool-2"]);
+		expect(executed).toBe(1);
+		expect(calls).toBeLessThanOrEqual(2);
+	});
+
 	it("should inject queued messages after all tool calls complete", async () => {
 		const toolSchema = Type.Object({ value: Type.String() });
 		const executed: string[] = [];

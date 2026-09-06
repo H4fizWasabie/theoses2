@@ -69,7 +69,13 @@ export function sessionEntryToContextMessages(
 	options: SessionContextBuildOptions = {},
 ): AgentMessage[] {
 	if (entry.type === "message") {
-		if (entry.message.role === "assistant" && entry.message.stopReason === "deferred") return [];
+		if (
+			entry.message.role === "assistant" &&
+			(entry.message.stopReason === "deferred" ||
+				entry.message.stopReason === "error" ||
+				entry.message.stopReason === "aborted")
+		)
+			return [];
 		return [entry.message];
 	}
 	if (entry.type === "compaction") {

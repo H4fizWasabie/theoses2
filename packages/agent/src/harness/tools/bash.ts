@@ -142,7 +142,7 @@ export function createBashTool<TContext extends ExecutionToolContext = Execution
 				}
 
 				const appendStatus = (status: string): string => `${outputText ? `${outputText}\n\n` : ""}${status}`;
-				if (capture.cancelled) throw new Error(appendStatus("Command aborted"));
+				if (capture.cancelled) throw new Error(appendStatus("Command aborted"), { cause: capture.executionError });
 				if (capture.executionError?.code === "timeout") {
 					throw new Error(appendStatus(`Command timed out after ${timeout} seconds`), {
 						cause: capture.executionError,

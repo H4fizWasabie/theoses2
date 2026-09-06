@@ -245,10 +245,10 @@ export function stripBom(content: string): { bom: string; text: string } {
 	return content.startsWith("\uFEFF") ? { bom: "\uFEFF", text: content.slice(1) } : { bom: "", text: content };
 }
 
-function countOccurrences(content: string, oldText: string): number {
-	const fuzzyContent = normalizeForFuzzyMatch(content);
-	const fuzzyOldText = normalizeForFuzzyMatch(oldText);
-	return fuzzyContent.split(fuzzyOldText).length - 1;
+function countOccurrences(content: string, oldText: string, fuzzy: boolean): number {
+	const searchContent = fuzzy ? normalizeForFuzzyMatch(content) : content;
+	const searchText = fuzzy ? normalizeForFuzzyMatch(oldText) : oldText;
+	return searchContent.split(searchText).length - 1;
 }
 
 function getNotFoundError(path: string, editIndex: number, totalEdits: number): Error {
@@ -326,7 +326,7 @@ export function applyEditsToNormalizedContent(
 			throw getNotFoundError(path, i, normalizedEdits.length);
 		}
 
-		const occurrences = countOccurrences(replacementBaseContent, edit.oldText);
+		const occurrences = countOccurrences(replacementBaseContent, edit.oldText, matchResult.usedFuzzyMatch);
 		if (occurrences > 1) {
 			throw getDuplicateError(path, i, normalizedEdits.length, occurrences);
 		}

@@ -67,6 +67,12 @@ function extractFileOperations(
 }
 function getMessageFromEntry(entry: Entry): AgentMessage | undefined {
 	if (entry.type === "message") {
+		if (
+			entry.message.role === "assistant" &&
+			(entry.message.stopReason === "error" || entry.message.stopReason === "aborted")
+		) {
+			return undefined;
+		}
 		return entry.message as AgentMessage;
 	}
 	if (entry.type === "branch_summary") {
