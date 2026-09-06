@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { stripBom } from "../utils/text.ts";
 
-export interface PiManifest {
+export interface TheosesManifest {
 	extensions?: string[];
 	skills?: string[];
 	prompts?: string[];
@@ -14,16 +14,16 @@ function isObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function readPiManifest(packageJsonPath: string): PiManifest | null {
+export function readTheosesManifest(packageJsonPath: string): TheosesManifest | null {
 	try {
 		const pkg: unknown = JSON.parse(stripBom(readFileSync(packageJsonPath, "utf-8")));
-		if (!isObject(pkg) || !isObject(pkg.pi)) {
+		if (!isObject(pkg) || !isObject(pkg.theoses)) {
 			return null;
 		}
 
-		const manifest: PiManifest = {};
+		const manifest: TheosesManifest = {};
 		for (const field of RESOURCE_FIELDS) {
-			const entries = pkg.pi[field];
+			const entries = pkg.theoses[field];
 			if (Array.isArray(entries) && entries.every((entry) => typeof entry === "string")) {
 				manifest[field] = entries;
 			}
