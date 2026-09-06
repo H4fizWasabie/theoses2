@@ -656,7 +656,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           script: |
-              const lines = ['Theoses issue analysis failed; no analysis was produced.', '', `Run: ${process.env.RUN_URL}`];
+            const lines = ['Theoses issue analysis failed; no analysis was produced.', '', `Run: ${process.env.RUN_URL}`];
             if (process.env.SHARE_URL) {
               lines.push(`Partial session: ${process.env.SHARE_URL}`);
             }
