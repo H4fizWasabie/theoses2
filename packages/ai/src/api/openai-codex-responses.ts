@@ -174,11 +174,15 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 			reject(new Error("Request was aborted"));
 			return;
 		}
-		const timeout = setTimeout(resolve, ms);
-		signal?.addEventListener("abort", () => {
+		const onAbort = () => {
 			clearTimeout(timeout);
 			reject(new Error("Request was aborted"));
-		});
+		};
+		const timeout = setTimeout(() => {
+			signal?.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		signal?.addEventListener("abort", onAbort, { once: true });
 	});
 }
 
@@ -785,13 +789,14 @@ async function* parseSSE(response: Response, signal?: AbortSignal): AsyncGenerat
 			if (done) break;
 			buffer += decoder.decode(value, { stream: true });
 
-			let idx = buffer.indexOf("\n\n");
+			let idx = buffer.search(/\r?\n\r?\n/u);
 			while (idx !== -1) {
+				const separator = buffer.match(/\r?\n\r?\n/u)![0];
 				const chunk = buffer.slice(0, idx);
-				buffer = buffer.slice(idx + 2);
+				buffer = buffer.slice(idx + separator.length);
 
 				const dataLines = chunk
-					.split("\n")
+					.split(/\r?\n/u)
 					.filter((l) => l.startsWith("data:"))
 					.map((l) => l.slice(5).trim());
 				if (dataLines.length > 0) {
@@ -807,7 +812,7 @@ async function* parseSSE(response: Response, signal?: AbortSignal): AsyncGenerat
 						}
 					}
 				}
-				idx = buffer.indexOf("\n\n");
+				idx = buffer.search(/\r?\n\r?\n/u);
 			}
 		}
 	} finally {
