@@ -1166,6 +1166,10 @@ export class AgentSession {
 			return true;
 		}
 
+		if (this.sessionManager.isWorkingNoteStale()) {
+			this.sessionManager.clearWorkingNote();
+		}
+
 		// The agent loop drains both queues before emitting agent_end. Any messages
 		// here were queued by agent_end extension handlers and need a continuation.
 		return this.agent.hasQueuedMessages();
@@ -2871,6 +2875,7 @@ export class AgentSession {
 					read: { autoResizeImages },
 					bash: { commandPrefix: shellCommandPrefix, shellPath },
 					workingNote: (note) => this.sessionManager.appendWorkingNote(note),
+					workingNoteClear: () => this.sessionManager.clearWorkingNote(),
 					memory: this._memoryStore,
 					onMemorySaved: () => {
 						const entries = this.sessionManager.getBranch();

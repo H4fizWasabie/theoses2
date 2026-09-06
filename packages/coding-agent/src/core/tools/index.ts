@@ -156,6 +156,7 @@ export interface ToolsOptions {
 	find?: FindToolOptions;
 	ls?: LsToolOptions;
 	workingNote?: (note: string) => void;
+	workingNoteClear?: () => void;
 	memory?: MemoryStore;
 	onMemorySaved?: () => void;
 	convertDoc?: { operations?: ConvertDocOperations };
@@ -182,7 +183,10 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 		case "ls":
 			return createLsToolDefinition(cwd, options?.ls);
 		case "working_note":
-			return createWorkingNoteToolDefinition(options?.workingNote ?? (() => {}));
+			return createWorkingNoteToolDefinition(
+				options?.workingNote ?? (() => {}),
+				options?.workingNoteClear ?? (() => {}),
+			);
 		case "remember":
 		case "save_note": {
 			const definitions = createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore());
@@ -218,7 +222,12 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 		case "ls":
 			return createLsTool(cwd, options?.ls);
 		case "working_note":
-			return wrapToolDefinition(createWorkingNoteToolDefinition(options?.workingNote ?? (() => {})));
+			return wrapToolDefinition(
+				createWorkingNoteToolDefinition(
+					options?.workingNote ?? (() => {}),
+					options?.workingNoteClear ?? (() => {}),
+				),
+			);
 		case "remember":
 		case "save_note": {
 			const definitions = createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore());
@@ -265,7 +274,10 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		grep: createGrepToolDefinition(cwd, options?.grep),
 		find: createFindToolDefinition(cwd, options?.find),
 		ls: createLsToolDefinition(cwd, options?.ls),
-		working_note: createWorkingNoteToolDefinition(options?.workingNote ?? (() => {})),
+		working_note: createWorkingNoteToolDefinition(
+			options?.workingNote ?? (() => {}),
+			options?.workingNoteClear ?? (() => {}),
+		),
 		remember: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore(), options?.onMemorySaved)[0]!,
 		save_note: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore(), options?.onMemorySaved)[1]!,
 		convert_doc: createConvertDocToolDefinition(cwd, options?.convertDoc),
@@ -304,7 +316,9 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		grep: createGrepTool(cwd, options?.grep),
 		find: createFindTool(cwd, options?.find),
 		ls: createLsTool(cwd, options?.ls),
-		working_note: wrapToolDefinition(createWorkingNoteToolDefinition(options?.workingNote ?? (() => {}))),
+		working_note: wrapToolDefinition(
+			createWorkingNoteToolDefinition(options?.workingNote ?? (() => {}), options?.workingNoteClear ?? (() => {})),
+		),
 		remember: wrapToolDefinition(createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[0]!),
 		save_note: wrapToolDefinition(createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[1]!),
 		convert_doc: wrapToolDefinition(createConvertDocToolDefinition(cwd, options?.convertDoc)),
