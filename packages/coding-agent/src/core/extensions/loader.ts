@@ -56,21 +56,11 @@ const VIRTUAL_MODULES: Record<string, unknown> = {
 	"@sinclair/typebox/value": _bundledTypeboxValue,
 	"theoses-agent-core": _bundledPiAgentCore,
 	"theoses-tui": _bundledPiTui,
-	// Extensions resolve the pi-ai root to the compat entrypoint (a strict
-	// superset of the core entrypoint): existing extensions using the old
-	// global API keep working at runtime until compat is removed.
 	"theoses-ai": _bundledPiAiCompat,
 	"theoses-ai/compat": _bundledPiAiCompat,
 	"theoses-ai/oauth": _bundledPiAiOauth,
 	"theoses-ai/providers/all": _bundledPiAiProviders,
 	"theoses-coding-agent": _bundledPiCodingAgent,
-	"@mariozechner/pi-agent-core": _bundledPiAgentCore,
-	"@mariozechner/pi-tui": _bundledPiTui,
-	"@mariozechner/pi-ai": _bundledPiAiCompat,
-	"@mariozechner/pi-ai/compat": _bundledPiAiCompat,
-	"@mariozechner/pi-ai/oauth": _bundledPiAiOauth,
-	"@mariozechner/pi-ai/providers/all": _bundledPiAiProviders,
-	"@mariozechner/pi-coding-agent": _bundledPiCodingAgent,
 };
 
 const require = createRequire(import.meta.url);
@@ -110,9 +100,6 @@ function getAliases(): Record<string, string> {
 	const piCodingAgentEntry = packageIndex;
 	const piAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "theoses-agent-core");
 	const piTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "theoses-tui");
-	// Extensions resolve the pi-ai root to the compat entrypoint (a strict
-	// superset of the core entrypoint): existing extensions using the old
-	// global API keep working at runtime until compat is removed.
 	const piAiCompatEntry = resolveWorkspaceOrImport("ai/dist/compat.js", "theoses-ai/compat");
 	const piAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "theoses-ai/oauth");
 	const piAiProvidersEntry = resolveWorkspaceOrImport("ai/dist/providers/all.js", "theoses-ai/providers/all");
@@ -125,13 +112,6 @@ function getAliases(): Record<string, string> {
 		"theoses-ai/compat": piAiCompatEntry,
 		"theoses-ai/oauth": piAiOauthEntry,
 		"theoses-ai": piAiCompatEntry,
-		"@mariozechner/pi-coding-agent": piCodingAgentEntry,
-		"@mariozechner/pi-agent-core": piAgentCoreEntry,
-		"@mariozechner/pi-tui": piTuiEntry,
-		"@mariozechner/pi-ai/providers/all": piAiProvidersEntry,
-		"@mariozechner/pi-ai/compat": piAiCompatEntry,
-		"@mariozechner/pi-ai/oauth": piAiOauthEntry,
-		"@mariozechner/pi-ai": piAiCompatEntry,
 		typebox: typeboxEntry,
 		"typebox/compile": typeboxCompileEntry,
 		"typebox/value": typeboxValueEntry,
