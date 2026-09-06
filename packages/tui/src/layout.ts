@@ -266,8 +266,8 @@ function styleScrollbarCell(line: string, column: number, totalWidth: number, st
 export function getScrollbarGeometry(box: LayoutBox): ScrollbarGeometry | undefined {
 	if (!box.scrollView?.isScrollbarVisible || box.rect.width <= 0 || box.rect.height <= 0) return undefined;
 
-	const contentHeight = box.children[0]?.rect.height ?? box.scrollContentLines?.length ?? 0;
 	const trackHeight = box.rect.height;
+	const contentHeight = Math.max(box.children[0]?.rect.height ?? box.scrollContentLines?.length ?? 0, trackHeight);
 
 	const minThumbHeight = Math.min(2, trackHeight);
 	const thumbHeight = Math.max(
