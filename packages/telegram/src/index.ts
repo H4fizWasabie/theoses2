@@ -13,6 +13,7 @@ const CHANNEL = "telegram";
 const TELEGRAM_MESSAGE_LIMIT = 4000;
 const TELEGRAM_DOWNLOAD_TIMEOUT_MS = 120_000;
 const TELEGRAM_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024;
+const TELEGRAM_STOP_REQUEST_TTL_MS = 30_000;
 const TYPING_INTERVAL_MS = 4000; // Telegram's typing indicator expires after ~5s, so it must be re-sent.
 
 // Mirrors createAgentSession's own default tool set, plus convert_doc: Telegram
@@ -223,8 +224,32 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 	const runningTool = new Map<string, string | undefined>();
 	// Set right before abort() so the in-flight message handler skips sending its own (partial/empty) reply.
 	const haltedByStop = new Set<string>();
-	const stopRequested = new Set<string>();
+	const stopRequested = new Map<string, { messageId: number; timer: ReturnType<typeof setTimeout> }>();
+	const queuedMessageIds = new Map<string, number[]>();
 	const queueDepth = new Map<string, number>();
+	const removeQueuedMessage = (chat: string, messageId: number): void => {
+		const queued = queuedMessageIds.get(chat);
+		if (!queued) return;
+		const remaining = queued.filter((id) => id !== messageId);
+		if (remaining.length > 0) queuedMessageIds.set(chat, remaining);
+		else queuedMessageIds.delete(chat);
+	};
+	const requestStop = (chat: string, messageId: number): void => {
+		const previous = stopRequested.get(chat);
+		if (previous) clearTimeout(previous.timer);
+		const timer = setTimeout(() => {
+			const request = stopRequested.get(chat);
+			if (request?.messageId === messageId) stopRequested.delete(chat);
+		}, TELEGRAM_STOP_REQUEST_TTL_MS);
+		stopRequested.set(chat, { messageId, timer });
+	};
+	const consumeStopRequest = (chat: string, messageId: number): boolean => {
+		const request = stopRequested.get(chat);
+		if (!request || request.messageId !== messageId) return false;
+		clearTimeout(request.timer);
+		stopRequested.delete(chat);
+		return true;
+	};
 
 	bot.on("message", async (ctx) => {
 		const chat = chatId(ctx);
@@ -235,13 +260,16 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			const existing = sessions.get(chat);
 			const session = existing ? await existing : undefined;
 			if (session?.isStreaming) {
-				if ((queueDepth.get(chat) ?? 0) > 1) stopRequested.add(chat);
+				const queuedMessageId = queuedMessageIds.get(chat)?.[0];
+				if (queuedMessageId !== undefined) requestStop(chat, queuedMessageId);
 				haltedByStop.add(chat);
 				const activity = runningTool.get(chat);
 				await session.abort();
 				await bot.api.sendMessage(
 					ctx.chat.id,
-					activity ? `Halted. Was running: ${activity}.` : "Halted the in-progress reply.",
+					activity
+						? `Halted. Was running: ${activity}.${queuedMessageId === undefined ? "" : " Also skipped your next queued message."}`
+						: `Halted the in-progress reply.${queuedMessageId === undefined ? "" : " Also skipped your next queued message."}`,
 				);
 				return;
 			}
@@ -249,27 +277,25 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				await bot.api.sendMessage(ctx.chat.id, "Nothing is running.");
 				return;
 			}
-			stopRequested.add(chat);
-			const previous = queues.get(chat) ?? Promise.resolve();
-			const next = previous.then(() => {
-				stopRequested.delete(chat);
-				return bot.api.sendMessage(ctx.chat.id, "Halted the queued message.");
-			});
-			queues.set(
-				chat,
-				next.then(
-					() => undefined,
-					() => undefined,
-				),
-			);
-			await next;
+			const queuedMessageId = queuedMessageIds.get(chat)?.[0];
+			if (queuedMessageId === undefined) {
+				await bot.api.sendMessage(ctx.chat.id, "Nothing is queued.");
+				return;
+			}
+			requestStop(chat, queuedMessageId);
+			await bot.api.sendMessage(ctx.chat.id, "Halted the queued message.");
 			return;
 		}
 
+		const messageId = ctx.message.message_id;
+		const queued = queuedMessageIds.get(chat) ?? [];
+		queued.push(messageId);
+		queuedMessageIds.set(chat, queued);
 		queueDepth.set(chat, (queueDepth.get(chat) ?? 0) + 1);
 		const previous = queues.get(chat) ?? Promise.resolve();
 		const next = previous.then(async () => {
-			if (stopRequested.delete(chat)) return;
+			removeQueuedMessage(chat, messageId);
+			if (consumeStopRequest(chat, messageId)) return;
 			const session = await sessionFor(chat, cwd, sessions);
 			const images: string[] = [];
 			if (ctx.message.photo?.length) {
