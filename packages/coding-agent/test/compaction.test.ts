@@ -8,6 +8,7 @@ import {
 	type CompactionSettings,
 	calculateContextTokens,
 	compact,
+	countUserTurnsSince,
 	DEFAULT_COMPACTION_SETTINGS,
 	estimateContextTokens,
 	findCutPoint,
@@ -199,6 +200,14 @@ describe("Token calculation", () => {
 	it("should handle zero values", () => {
 		const usage = createMockUsage(0, 0, 0, 0);
 		expect(calculateContextTokens(usage)).toBe(0);
+	});
+});
+
+describe("turn counting", () => {
+	it("counts all context-visible turn starts", () => {
+		const entries = [createCustomMessageEntry("injected"), createMessageEntry(createUserMessage("prompt"))];
+
+		expect(countUserTurnsSince(entries, 0)).toBe(2);
 	});
 });
 
