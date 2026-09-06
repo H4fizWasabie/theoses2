@@ -51,7 +51,7 @@ describe("extensions discovery", () => {
 		expect(result.extensions.map((e) => path.basename(e.path)).sort()).toEqual(["bar.ts", "foo.ts"]);
 	});
 
-	it("loads the coding-agent entrypoint without rewriting pi-ai provider subpaths", async () => {
+	it("loads the coding-agent entrypoint without rewriting Theoses AI provider subpaths", async () => {
 		fs.writeFileSync(
 			path.join(extensionsDir, "coding-agent-import.ts"),
 			`
@@ -69,7 +69,24 @@ describe("extensions discovery", () => {
 		expect(result.extensions).toHaveLength(1);
 	});
 
-	it("keeps the type-only pi-ai OAuth compatibility barrel resolvable", async () => {
+	it("rejects original Pi extension import specifiers", async () => {
+		fs.writeFileSync(
+			path.join(extensionsDir, "pi-import.ts"),
+			`
+				import { getAgentDir } from "@mariozechner/pi-coding-agent";
+				void getAgentDir;
+				export default function() {}
+			`,
+		);
+
+		const result = await discoverAndLoadExtensions([], tempDir, tempDir);
+
+		expect(result.extensions).toHaveLength(0);
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0].error).toContain("@mariozechner/pi-coding-agent");
+	});
+
+	it("keeps the Theoses AI OAuth barrel resolvable", async () => {
 		fs.writeFileSync(
 			path.join(extensionsDir, "oauth-import.ts"),
 			`
