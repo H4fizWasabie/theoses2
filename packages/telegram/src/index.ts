@@ -158,7 +158,7 @@ async function sessionFor(
 		const key = { channel: CHANNEL, channelSessionId: chat };
 		const matches: SessionInfo[] = await SessionManager.list(cwd, undefined, undefined, key);
 		const sessionManager = matches[0]
-			? SessionManager.open(matches[0].path)
+			? SessionManager.open(matches[0].path, undefined, cwd)
 			: SessionManager.create(cwd, undefined, key);
 		const { session } = await createAgentSession({ sessionManager, tools: TELEGRAM_TOOLS, thinkingLevel: "high" });
 		return session;
@@ -180,7 +180,12 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 	if (!ownerChatId) throw new Error("THEOSES_TELEGRAM_CHAT_ID is required");
 
 	const bot = new Bot(token);
-	const cwd = options.cwd ?? process.cwd();
+	// Deployments that run the bot from a versioned release directory (e.g. a `current`
+	// symlink swapped on each release) must set THEOSES_TELEGRAM_CWD to a stable path.
+	// process.cwd() resolves through such a symlink to the release's real physical path,
+	// which changes every release and would otherwise silently orphan the running
+	// session (and its Working Note/Active Context Window) on every update.
+	const cwd = options.cwd ?? process.env.THEOSES_TELEGRAM_CWD ?? process.cwd();
 	const sessions = new Map<string, Promise<AgentSession>>();
 	const queues = new Map<string, Promise<void>>();
 	// Tracks the tool currently running for each chat, so a stop command can report what it interrupted.
