@@ -47,6 +47,18 @@ describe("EpisodicStore", () => {
 		expect(results[0]?.summary).toContain("firewall");
 	});
 
+	it("search matches significant terms from a natural-language query", () => {
+		store.recordEpisode({
+			startedAt: "2026-09-03T05:00:00.000Z",
+			endedAt: "2026-09-03T05:10:00.000Z",
+			summary: "Fixed the VPS firewall configuration",
+		});
+
+		expect(store.search("what do you know about the firewall").map((r) => r.summary)).toEqual([
+			"Fixed the VPS firewall configuration",
+		]);
+	});
+
 	it("atTime returns episodes whose range contains the timestamp", () => {
 		store.recordEpisode({
 			startedAt: "2026-09-03T05:00:00.000Z",

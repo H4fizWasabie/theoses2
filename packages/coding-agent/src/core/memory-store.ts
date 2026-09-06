@@ -46,7 +46,7 @@ export interface MemoryStore {
 }
 
 /** Common English function words, stripped from `remember` queries so they don't dilute term matching. */
-const QUERY_STOPWORDS = new Set([
+export const QUERY_STOPWORDS = new Set([
 	"a",
 	"about",
 	"am",
