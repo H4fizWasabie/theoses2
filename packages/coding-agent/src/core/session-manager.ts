@@ -33,6 +33,13 @@ export const CURRENT_SESSION_VERSION = 3;
 export const WORKING_NOTE_WRITE_CAP = 2000;
 export const WORKING_NOTE_INJECTION_CAP = 2000;
 
+/**
+ * Backstop for when the model forgets to clear the Working Note itself (see `working_note`
+ * tool's `clear` mode). If this many user turns pass with no write or clear touching the note,
+ * it's treated as abandoned/stale and cleared automatically.
+ */
+export const WORKING_NOTE_STALE_TURNS = 5;
+
 export interface ChannelSessionKey {
 	channel: string;
 	channelSessionId: string;
@@ -1120,6 +1127,37 @@ export class SessionManager {
 		};
 		this._appendEntry(entry);
 		return entry.id;
+	}
+
+	clearWorkingNote(): string {
+		const entry: WorkingNoteEntry = {
+			type: "working_note",
+			id: generateId(this.byId),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
+			note: "",
+		};
+		this._appendEntry(entry);
+		return entry.id;
+	}
+
+	/** True once the Working Note has gone `WORKING_NOTE_STALE_TURNS` user turns untouched. */
+	isWorkingNoteStale(): boolean {
+		if (!this.getWorkingNote()) return false;
+		const branch = this.getBranch();
+		let boundary = 0;
+		for (let i = branch.length - 1; i >= 0; i--) {
+			if (branch[i].type === "working_note") {
+				boundary = i + 1;
+				break;
+			}
+		}
+		let userTurns = 0;
+		for (let i = boundary; i < branch.length; i++) {
+			const entry = branch[i];
+			if (entry.type === "message" && entry.message.role === "user") userTurns++;
+		}
+		return userTurns > WORKING_NOTE_STALE_TURNS;
 	}
 
 	getLastOperationOutcome(): OperationFinishedEntry["outcome"] | undefined {
