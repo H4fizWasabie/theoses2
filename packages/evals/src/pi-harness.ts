@@ -119,7 +119,7 @@ async function runPiCodingAgent<TOutput extends JsonValue>(
 	const model = modelRuntime.getModel(selection.provider, selection.id);
 	if (!model) throw new Error(`Eval model not found: ${selection.provider}/${selection.id}`);
 
-	const root = await mkdtemp(join(tmpdir(), "pi-eval-"));
+	const root = await mkdtemp(join(tmpdir(), "theoses-eval-"));
 	const cwd = join(root, "workspace");
 	const agentDir = join(root, "agent");
 	let transformedSystemPrompt: string | undefined;

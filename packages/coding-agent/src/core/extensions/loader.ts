@@ -29,8 +29,8 @@ import { canonicalizePath, resolvePath } from "../../utils/paths.ts";
 import { createEventBus, type EventBus } from "../event-bus.ts";
 import type { ExecOptions } from "../exec.ts";
 import { execCommand } from "../exec.ts";
-import { readTheosesManifest } from "../pi-manifest.ts";
 import { createSyntheticSourceInfo } from "../source-info.ts";
+import { readTheosesManifest } from "../theoses-manifest.ts";
 import { time } from "../timings.ts";
 import type {
 	EntryRenderer,

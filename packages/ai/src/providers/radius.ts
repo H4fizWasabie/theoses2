@@ -1,4 +1,4 @@
-import { theosesMessagesApi } from "../api/pi-messages.lazy.ts";
+import { theosesMessagesApi } from "../api/theoses-messages.lazy.ts";
 import { envApiKeyAuth, lazyOAuth } from "../auth/helpers.ts";
 import { loadRadiusOAuth } from "../auth/oauth/load.ts";
 import type { Provider } from "../models.ts";

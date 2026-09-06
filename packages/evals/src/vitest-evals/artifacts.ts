@@ -12,8 +12,8 @@ import type { HarnessRun } from "vitest-evals/harness";
 
 export const THEOSES_SESSION_SNAPSHOT_ARTIFACT = "piSessionJsonl";
 
-const evalSessionArtifactKey = Symbol("pi-evals-session-artifact");
-const evalSourceArtifactKey = Symbol("pi-evals-source-artifact");
+const evalSessionArtifactKey = Symbol("theoses-evals-session-artifact");
+const evalSourceArtifactKey = Symbol("theoses-evals-source-artifact");
 
 interface PiSessionAttachment extends TestAttachment {
 	name: "session.jsonl";

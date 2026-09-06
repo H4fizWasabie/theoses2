@@ -22,7 +22,7 @@
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"keywords": [
-		"pi",
+		"theoses",
 		"protocol",
 		"cbor",
 		"binary",

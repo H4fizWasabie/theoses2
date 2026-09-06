@@ -8,7 +8,7 @@ import { streamSimple as streamOpenAICodexResponses } from "../src/api/openai-co
 import { streamSimple as streamOpenAICompletions } from "../src/api/openai-completions.ts";
 import { streamSimple as streamOpenAIResponses } from "../src/api/openai-responses.ts";
 import { generateImages } from "../src/api/openrouter-images.ts";
-import { streamSimple as streamTheosesMessages } from "../src/api/pi-messages.ts";
+import { streamSimple as streamTheosesMessages } from "../src/api/theoses-messages.ts";
 import type { Api, Context, FetchFunction, ImagesModel, Model } from "../src/types.ts";
 
 const context: Context = {
