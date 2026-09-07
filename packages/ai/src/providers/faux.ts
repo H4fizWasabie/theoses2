@@ -25,6 +25,8 @@ const DEFAULT_PROVIDER = "faux";
 const DEFAULT_MODEL_ID = "faux-1";
 const DEFAULT_MODEL_NAME = "Faux Model";
 const DEFAULT_BASE_URL = "http://localhost:0";
+const DEFAULT_CONTEXT_WINDOW = 128000;
+const DEFAULT_MAX_TOKENS = 16384;
 const DEFAULT_MIN_TOKEN_SIZE = 3;
 const DEFAULT_MAX_TOKEN_SIZE = 5;
 
@@ -468,8 +470,8 @@ export function createFauxCore(options: RegisterFauxProviderOptions) {
 					reasoning: false,
 					input: ["text", "image"] as ("text" | "image")[],
 					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-					contextWindow: 128000,
-					maxTokens: 16384,
+					contextWindow: DEFAULT_CONTEXT_WINDOW,
+					maxTokens: DEFAULT_MAX_TOKENS,
 				},
 			];
 	const models = modelDefinitions.map((definition) => ({
@@ -481,8 +483,8 @@ export function createFauxCore(options: RegisterFauxProviderOptions) {
 		reasoning: definition.reasoning ?? false,
 		input: definition.input ?? ["text", "image"],
 		cost: definition.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: definition.contextWindow ?? 128000,
-		maxTokens: definition.maxTokens ?? 16384,
+		contextWindow: definition.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+		maxTokens: definition.maxTokens ?? DEFAULT_MAX_TOKENS,
 	})) as [Model<string>, ...Model<string>[]];
 
 	const resolveResponse = async (

@@ -1,4 +1,7 @@
-const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
+export const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
+
+/** Thrown when a provider-requested retry delay exceeds `maxRetryDelayMs`. */
+export class RetryDelayExceededError extends Error {}
 
 interface ProviderRetryOptions {
 	maxRetries?: number;
@@ -34,33 +37,51 @@ function isRetryableProviderError(error: ProviderError): boolean {
 	);
 }
 
-function validateServerRetryDelayMs(
+/**
+ * Reads a provider-requested retry delay off `retry-after-ms`/`retry-after` response
+ * headers, in that priority order. Returns `undefined` when neither header is present
+ * or parseable, so callers can fall back to their own backoff schedule.
+ */
+export function parseRetryAfterHeaderMs(headers: Headers | undefined): number | undefined {
+	const retryAfterMs = headers?.get("retry-after-ms");
+	if (retryAfterMs) {
+		const value = Number.parseFloat(retryAfterMs);
+		if (!Number.isNaN(value)) return Math.max(0, value);
+	}
+
+	const retryAfter = headers?.get("retry-after");
+	if (retryAfter) {
+		const seconds = Number.parseFloat(retryAfter);
+		const delayMs = Number.isNaN(seconds) ? Date.parse(retryAfter) - Date.now() : seconds * 1000;
+		if (!Number.isNaN(delayMs)) return Math.max(0, delayMs);
+	}
+
+	return undefined;
+}
+
+/**
+ * Caps a provider-requested retry delay at `maxRetryDelayMs` (default {@link
+ * DEFAULT_MAX_RETRY_DELAY_MS}), throwing {@link RetryDelayExceededError} when it's
+ * exceeded so callers can fail fast instead of sleeping past a sane budget.
+ */
+export function validateServerRetryDelayMs(
 	delayMs: number,
 	maxRetryDelayMs: number | undefined,
-	providerErrorMessage: string,
+	providerErrorMessage?: string,
 ): number {
 	const maxDelayMs = maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
 	if (maxDelayMs > 0 && delayMs > maxDelayMs) {
-		throw new Error(
-			`Server requested ${Math.ceil(delayMs / 1000)}s retry delay (max: ${Math.ceil(maxDelayMs / 1000)}s). ${providerErrorMessage}`,
+		const suffix = providerErrorMessage ? `. ${providerErrorMessage}` : "";
+		throw new RetryDelayExceededError(
+			`Server requested ${Math.ceil(delayMs / 1000)}s retry delay (max: ${Math.ceil(maxDelayMs / 1000)}s)${suffix}`,
 		);
 	}
 	return delayMs;
 }
 
 function getRetryDelayMs(error: ProviderError, retryIndex: number, maxRetryDelayMs: number | undefined): number {
-	const retryAfterMs = error.headers?.get("retry-after-ms");
-	if (retryAfterMs) {
-		const value = Number.parseFloat(retryAfterMs);
-		if (!Number.isNaN(value)) return validateServerRetryDelayMs(value, maxRetryDelayMs, error.message);
-	}
-
-	const retryAfter = error.headers?.get("retry-after");
-	if (retryAfter) {
-		const seconds = Number.parseFloat(retryAfter);
-		const delayMs = Number.isNaN(seconds) ? Date.parse(retryAfter) - Date.now() : seconds * 1000;
-		return validateServerRetryDelayMs(delayMs, maxRetryDelayMs, error.message);
-	}
+	const headerDelayMs = parseRetryAfterHeaderMs(error.headers);
+	if (headerDelayMs !== undefined) return validateServerRetryDelayMs(headerDelayMs, maxRetryDelayMs, error.message);
 
 	const exponentialDelay = Math.min(0.5 * 2 ** retryIndex, 8) * 1000;
 	return exponentialDelay * (1 - Math.random() * 0.25);
