@@ -22,34 +22,25 @@
     </form>
   </div>
   <div id="app" class="app" hidden>
-    <header class="topbar">
+    <header class="command-rail">
       <div class="brand">Theoses</div>
+      <div class="rail-stat"><label>state</label><strong id="rail-state" class="live">IDLE</strong></div>
+      <div class="rail-stat"><label>provider</label><strong id="rail-provider">—</strong></div>
+      <div class="rail-stat"><label>model</label><strong id="rail-model">—</strong></div>
+      <div class="rail-stat"><label>thinking</label><strong id="rail-thinking">—</strong></div>
+      <div class="rail-stat"><label>context</label><strong id="rail-context">—</strong></div>
+      <div class="rail-stat"><label>cost</label><strong id="rail-cost">—</strong></div>
+      <div class="rail-spacer"></div>
       <button id="new-session" class="button">+ New</button>
       <button id="graph-view-button" class="button">Graph</button>
       <button id="runtime-info-button" class="button">Runtime</button>
       <button id="telegram-settings-button" class="button">Settings</button>
-      <button id="toggle-sidebar" class="icon-button" title="Collapse conversations and files">☰</button>
-      <button id="toggle-files" class="icon-button" title="Collapse file editor">▣</button>
-      <div class="topbar-spacer"></div>
       <span class="connection">private · Tailscale</span>
     </header>
-    <main class="shell">
-      <aside class="sidebar">
-        <section class="sessions-pane">
-          <div class="section-title"><span>Conversations</span><button id="refresh-sessions" class="icon-button" title="Refresh">↻</button></div>
-          <div id="sessions" class="session-list"></div>
-        </section>
-        <section class="explorer-pane">
-          <div class="section-title"><span>Files</span><button id="refresh-files" class="icon-button" title="Refresh">↻</button></div>
-          <form id="path-form" class="path-bar">
-            <button id="path-up" type="button" class="icon-button" title="Up one directory">↑</button>
-            <input id="path-input" type="text" autocomplete="off" spellcheck="false">
-          </form>
-          <div id="tree" class="tree"></div>
-        </section>
-      </aside>
-      <button class="resize-handle" data-resize="sidebar" aria-label="Resize sidebar"></button>
-      <section class="chat-pane">
+    <main class="workbench">
+      <section class="panel chat">
+        <div class="panel-head"><strong>Conversation</strong><button id="refresh-sessions" class="icon-button" title="Refresh">↻</button><button class="minimize-toggle" type="button" data-minimize aria-label="Minimize conversation"><span></span></button></div>
+        <div id="sessions" class="session-strip"></div>
         <div class="pane-head"><div><strong id="session-title">No dashboard session</strong><span id="session-channel"></span></div><span id="chat-status"></span></div>
         <div id="messages" class="messages"><div class="empty">Create a dashboard session to begin.</div></div>
         <div id="reply-bar" class="reply-bar" hidden></div>
@@ -59,8 +50,8 @@
           <button class="send" type="submit" disabled>Send</button>
         </form>
       </section>
-      <button class="resize-handle" data-resize="files" aria-label="Resize file editor"></button>
-      <section class="file-pane">
+      <section class="panel files">
+        <div class="panel-head"><strong>File workbench</strong><button class="minimize-toggle" type="button" data-minimize aria-label="Minimize file workbench"><span></span></button></div>
         <div id="tabs" class="tabs"></div>
         <div id="file-empty" class="empty file-empty">Select a text file from the tree.</div>
         <div id="editor" class="editor" hidden>
@@ -71,7 +62,19 @@
           <div id="file-status" class="file-status"></div>
         </div>
       </section>
+      <section class="panel filesystem">
+        <div class="panel-head"><strong>File system</strong><button id="refresh-files" class="icon-button" title="Refresh">↻</button><button class="minimize-toggle" type="button" data-minimize aria-label="Minimize file system"><span></span></button></div>
+        <form id="path-form" class="path-bar">
+          <button id="path-up" type="button" class="icon-button" title="Up one directory">↑</button>
+          <input id="path-input" type="text" autocomplete="off" spellcheck="false">
+        </form>
+        <div id="tree" class="tree"></div>
+      </section>
     </main>
+    <section class="panel timeline">
+      <div class="panel-head"><strong>Turn timeline</strong><span class="meta">context and cost by turn</span></div>
+      <div id="timeline-body" class="timeline-body"></div>
+    </section>
   </div>
   <div id="graph-view" class="graph-view" hidden>
     <div class="graph-head">
