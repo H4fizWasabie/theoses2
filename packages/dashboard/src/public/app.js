@@ -111,10 +111,43 @@ function renderTurnBody(turn) {
 
 function renderHistory() {
   const target = $("messages");
-  if (!state.history.length) { target.innerHTML = '<div class="empty">No messages yet.</div>'; return; }
-  target.innerHTML = state.history.map((turn, index) => `<article class="message"><div class="message-label">${turn.role === "user" ? "You" : "Theoses"}${usageBadge(turn.usage)}</div><div class="message-body">${renderTurnBody(turn)}</div><div class="message-tools"><button class="reply" data-reply="${index}">Reply</button></div></article>`).join("");
-  target.querySelectorAll("[data-reply]").forEach((button) => button.addEventListener("click", () => setReply(state.history[Number(button.dataset.reply)])));
-  target.scrollTop = target.scrollHeight;
+  if (!state.history.length) { target.innerHTML = '<div class="empty">No messages yet.</div>'; }
+  else {
+    target.innerHTML = state.history.map((turn, index) => `<article class="message"><div class="message-label">${turn.role === "user" ? "You" : "Theoses"}${usageBadge(turn.usage)}</div><div class="message-body">${renderTurnBody(turn)}</div><div class="message-tools"><button class="reply" data-reply="${index}">Reply</button></div></article>`).join("");
+    target.querySelectorAll("[data-reply]").forEach((button) => button.addEventListener("click", () => setReply(state.history[Number(button.dataset.reply)])));
+    target.scrollTop = target.scrollHeight;
+  }
+  renderTimeline();
+}
+
+function renderTimeline() {
+  const target = $("timeline-body");
+  if (!target) return;
+  const turns = state.history.filter((turn) => turn.role === "assistant");
+  if (!turns.length) { target.innerHTML = '<div class="empty">No turns yet.</div>'; return; }
+  const recent = turns.slice(-8).reverse();
+  target.innerHTML = recent.map((turn, index) => {
+    const text = flatText(turn).trim().slice(0, 90) || (turn.active ? "Working…" : "Tool activity");
+    const usage = turn.usage;
+    const stat = usage ? `$${usage.cost.toFixed(4)}` : turn.active ? "active" : "—";
+    return `<div class="turn ${index === 0 && turn.active ? "active" : ""}">
+      <div class="turn-top"><span>TURN ${turns.length - index}</span><span>${stat}</span></div>
+      <strong>${escapeHtml(text)}</strong>
+      <div class="turn-stats"><span>${usage ? `${usage.input.toLocaleString()} in` : "—"}</span><span>${usage ? `${usage.output.toLocaleString()} out` : "—"}</span></div>
+    </div>`;
+  }).join("");
+}
+
+function renderRail() {
+  const executing = (state.pending || 0) > 0;
+  $("rail-state").textContent = executing ? "EXECUTING" : "IDLE";
+  $("rail-state").classList.toggle("live", executing);
+  $("rail-provider").textContent = state.runtime?.provider || "—";
+  $("rail-model").textContent = state.runtime?.modelId || "—";
+  $("rail-thinking").textContent = state.runtime?.thinkingLevel || "—";
+  const usage = state.liveTurn?.usage || state.runtime?.lastUsage;
+  $("rail-context").textContent = usage ? `${usage.totalTokens.toLocaleString()} tok` : "—";
+  $("rail-cost").textContent = usage ? `$${usage.cost.toFixed(4)}` : "—";
 }
 
 function setReply(turn) {
@@ -133,6 +166,7 @@ function renderActive() {
   $("message").placeholder = telegram ? "Telegram sessions are read-only" : "Message Theoses…";
   $("chat-form").querySelector(".send").disabled = !state.active || telegram;
   $("stop-chat").hidden = !state.active || telegram || !state.pending;
+  renderRail();
 }
 
 async function loadSessions() {
@@ -316,30 +350,22 @@ function setPreview(enabled) {
 
 $("preview-file").addEventListener("click", () => setPreview(!state.preview));
 
-function togglePanel(name) {
-  const mobile = window.matchMedia("(max-width: 640px)").matches;
-  const panel = document.querySelector(name === "sidebar" ? ".sidebar" : ".file-pane");
-  if (mobile) panel.classList.toggle("open");
-  else document.querySelector(".shell").classList.toggle(`${name}-collapsed`);
+function updateLayoutColumns() {
+  const layout = document.querySelector(".workbench");
+  if (!layout) return;
+  if (window.matchMedia("(max-width: 900px)").matches) { layout.style.gridTemplateColumns = "1fr"; return; }
+  const colA = document.querySelector(".panel.chat")?.classList.contains("minimized") ? "56px" : "3fr";
+  const colB = document.querySelector(".panel.files")?.classList.contains("minimized") ? "56px" : "4fr";
+  const colC = document.querySelector(".panel.filesystem")?.classList.contains("minimized") ? "56px" : "3fr";
+  layout.style.gridTemplateColumns = `${colA} ${colB} ${colC}`;
 }
 
-$("toggle-sidebar").addEventListener("click", () => togglePanel("sidebar"));
-$("toggle-files").addEventListener("click", () => togglePanel("files"));
-
-document.querySelectorAll("[data-resize]").forEach((handle) => handle.addEventListener("pointerdown", (event) => {
-  const shell = document.querySelector(".shell");
-  const start = event.clientX;
-  const variable = handle.dataset.resize === "sidebar" ? "--sidebar-width" : "--files-width";
-  const initial = (handle.dataset.resize === "sidebar" ? document.querySelector(".sidebar") : document.querySelector(".file-pane")).getBoundingClientRect().width;
-  handle.setPointerCapture(event.pointerId);
-  const move = (moveEvent) => {
-    const delta = moveEvent.clientX - start;
-    const width = Math.max(180, initial + (handle.dataset.resize === "sidebar" ? delta : -delta));
-    shell.style.setProperty(variable, `${width}px`);
-  };
-  const stop = () => { handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", stop); };
-  handle.addEventListener("pointermove", move); handle.addEventListener("pointerup", stop);
+document.querySelectorAll("[data-minimize]").forEach((button) => button.addEventListener("click", () => {
+  button.closest(".panel")?.classList.toggle("minimized");
+  updateLayoutColumns();
 }));
+window.addEventListener("resize", updateLayoutColumns);
+updateLayoutColumns();
 
 async function streamSSE(response, onEvent) {
   const reader = response.body.getReader();
@@ -410,6 +436,7 @@ $("chat-form").addEventListener("submit", (event) => {
           liveTurn.segments.push({ type: "tool_result", id: data.id, name: data.name, result: data.result, isError: data.isError });
         } else if (eventName === "usage") {
           liveTurn.usage = data;
+          renderRail();
         } else if (eventName === "done") {
           settled = true;
           liveTurn.active = false;
@@ -426,6 +453,10 @@ $("chat-form").addEventListener("submit", (event) => {
         renderHistory();
       }
       await loadSessions();
+      try {
+        const refreshed = await request(`/api/sessions/${encodeURIComponent(sessionId)}`);
+        if (state.active?.id === sessionId) { state.runtime = refreshed.runtime; renderRail(); }
+      } catch { /* best-effort refresh; the Runtime dialog will still show accurate data on next open */ }
     } catch (error) { liveTurn.active = false; liveTurn.pending = false; $("chat-status").textContent = error.message; renderHistory(); }
     finally { state.pending -= 1; if (state.liveTurn === liveTurn) state.liveTurn = null; renderActive(); }
   })();
