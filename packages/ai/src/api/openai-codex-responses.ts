@@ -32,6 +32,11 @@ import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { headersToRecord } from "../utils/headers.ts";
 import { resolveHttpProxyUrlForTarget } from "../utils/node-http-proxy.ts";
 import { getPiUserAgent } from "../utils/pi-user-agent.ts";
+import {
+	parseRetryAfterHeaderMs,
+	RetryDelayExceededError,
+	validateServerRetryDelayMs,
+} from "../utils/provider-retry.ts";
 import { isRetryableProviderError } from "../utils/retry.ts";
 import { uuidv7 } from "../utils/uuid.ts";
 import { createGrammarToolInputProperties } from "./constrained-sampling.ts";
@@ -47,7 +52,6 @@ const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth" as const;
 const DEFAULT_MAX_RETRIES = 0;
 const BASE_DELAY_MS = 1000;
-const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
 const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
 // The Codex backend accepts zstd-compressed request bodies on the SSE responses
 // endpoint (the same endpoint the official Codex client compresses against).
@@ -113,45 +117,10 @@ function assertSuccessfulOutput(output: AssistantMessage): asserts output is Suc
 // ============================================================================
 // Retry Helpers
 // ============================================================================
-
-function getRetryAfterDelayMs(headers: Headers): number | undefined {
-	const retryAfterMs = headers.get("retry-after-ms");
-	if (retryAfterMs !== null) {
-		const millis = Number(retryAfterMs);
-		if (Number.isFinite(millis)) {
-			return Math.max(0, millis);
-		}
-	}
-
-	const retryAfter = headers.get("retry-after");
-	if (!retryAfter) {
-		return undefined;
-	}
-
-	const seconds = Number(retryAfter);
-	if (Number.isFinite(seconds)) {
-		return Math.max(0, seconds * 1000);
-	}
-
-	const date = Date.parse(retryAfter);
-	if (!Number.isNaN(date)) {
-		return Math.max(0, date - Date.now());
-	}
-
-	return undefined;
-}
-
-class RetryDelayExceededError extends Error {}
-
-function validateRetryDelayMs(delayMs: number, options?: StreamOptions): number {
-	const maxRetryDelayMs = options?.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
-	if (maxRetryDelayMs > 0 && delayMs > maxRetryDelayMs) {
-		throw new RetryDelayExceededError(
-			`Server requested ${Math.ceil(delayMs / 1000)}s retry delay (max: ${Math.ceil(maxRetryDelayMs / 1000)}s)`,
-		);
-	}
-	return delayMs;
-}
+//
+// Retry-after header parsing and delay-cap enforcement are shared with
+// utils/provider-retry.ts (see parseRetryAfterHeaderMs/validateServerRetryDelayMs)
+// so the two providers' retry policies can't silently drift apart.
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 	return new Promise((resolve, reject) => {
@@ -404,11 +373,11 @@ export const stream: StreamFunction<"openai-codex-responses", OpenAICodexRespons
 
 					const errorText = await response.text();
 					if (attempt < maxRetries && isRetryableProviderError(errorText, response.status)) {
-						const retryAfterDelayMs = getRetryAfterDelayMs(response.headers);
+						const retryAfterDelayMs = parseRetryAfterHeaderMs(response.headers);
 						const delayMs =
 							retryAfterDelayMs === undefined
 								? BASE_DELAY_MS * 2 ** attempt
-								: validateRetryDelayMs(retryAfterDelayMs, options);
+								: validateServerRetryDelayMs(retryAfterDelayMs, options?.maxRetryDelayMs);
 
 						await sleep(delayMs, options?.signal);
 						continue;
