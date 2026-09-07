@@ -278,7 +278,7 @@ function normalizeImages(images: PromptOptions["images"]): ImageContent[] | unde
 		if (typeof dataUrl !== "string") throw new Error("Image attachments must use one consistent format");
 		const match = /^data:(image\/[a-z0-9.+-]+);base64,/i.exec(dataUrl);
 		if (!match) throw new Error("Image attachments must be base64 data URLs");
-		return { type: "image", data: dataUrl, mimeType: match[1] };
+		return { type: "image", data: dataUrl.slice(match[0].length), mimeType: match[1] };
 	});
 }
 
