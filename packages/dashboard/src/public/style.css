@@ -1,7 +1,7 @@
 :root {
   color-scheme: dark;
   --bg: #05080a;
-  --panel: rgba(13, 19, 21, 0.9);
+  --panel: rgba(13, 19, 21, 0.6);
   --panel-solid: #0d1315;
   --panel-muted: #111a1c;
   --border: #1f2c29;
