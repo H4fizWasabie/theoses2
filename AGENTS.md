@@ -67,6 +67,20 @@ The rest of this section only applies when editing `theoses2` itself — its own
 - Never run the full vitest suite directly — it includes e2e tests gated on env vars. Run `./test.sh` from the repo root, or target a specific file: `node "$(git rev-parse --show-toplevel)/node_modules/vitest/dist/cli.js" --run test/specific.test.ts`.
 - Treat npm dep and lockfile changes as reviewed code. Direct external deps stay pinned to exact versions. Hydrate with `npm install --ignore-scripts`; don't run lifecycle scripts unless asked. Pre-commit blocks lockfile commits unless `THEOSES_ALLOW_LOCKFILE_CHANGE=1`.
 
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as GitHub issues (`H4fizWasabie/theoses2`), managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — one root `CONTEXT.md` + `docs/adr/`, despite this being an npm-workspaces monorepo. See `docs/agents/domain.md`.
+
 ## User Override
 
 If Abah's instructions conflict with any rule in this document, ask for explicit confirmation before overriding. Only then execute his instructions.
