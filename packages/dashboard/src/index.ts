@@ -167,6 +167,25 @@ function usageSummary(usage: {
 	return { input: usage.input, output: usage.output, totalTokens: usage.totalTokens, cost: usage.cost.total };
 }
 
+interface RuntimeSummary {
+	provider: string | null;
+	modelId: string | null;
+	thinkingLevel: string;
+	lastUsage: UsageSummary | null;
+}
+
+/** Read-only runtime info for display. Never exposes or accepts credentials. */
+function runtimeSummary(manager: SessionManager, history: HistoryTurn[]): RuntimeSummary {
+	const context = manager.buildSessionContext();
+	const lastAssistantTurn = [...history].reverse().find((turn) => turn.role === "assistant" && turn.usage);
+	return {
+		provider: context.model?.provider ?? null,
+		modelId: context.model?.modelId ?? null,
+		thinkingLevel: context.thinkingLevel,
+		lastUsage: lastAssistantTurn?.usage ?? null,
+	};
+}
+
 function sessionHistory(manager: SessionManager): HistoryTurn[] {
 	const turns: HistoryTurn[] = [];
 	for (const entry of manager.getEntries()) {
@@ -423,7 +442,8 @@ async function api(
 		}
 		if (request.method === "GET") {
 			const manager = SessionManager.open(info.path);
-			json(response, 200, { session: sessionView(info), history: sessionHistory(manager) });
+			const history = sessionHistory(manager);
+			json(response, 200, { session: sessionView(info), history, runtime: runtimeSummary(manager, history) });
 			return true;
 		}
 	}
@@ -464,13 +484,14 @@ async function api(
 
 async function asset(response: ServerResponse, pathname: string): Promise<void> {
 	const name = pathname === "/" ? "index.html" : pathname.slice(1);
-	if (name !== "index.html" && name !== "app.js" && name !== "style.css") {
+	if (name !== "index.html" && name !== "app.js" && name !== "field.js" && name !== "style.css") {
 		response.writeHead(404).end();
 		return;
 	}
 	const types: Record<string, string> = {
 		"index.html": "text/html; charset=utf-8",
 		"app.js": "text/javascript; charset=utf-8",
+		"field.js": "text/javascript; charset=utf-8",
 		"style.css": "text/css; charset=utf-8",
 	};
 	response.writeHead(200, { "Content-Type": types[name] });

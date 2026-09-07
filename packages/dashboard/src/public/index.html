@@ -4,9 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Theoses</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+  <canvas id="field-canvas" aria-hidden="true"></canvas>
   <div id="login" class="login">
     <form id="login-form" class="login-card">
       <h1>Theoses</h1>
@@ -22,6 +26,7 @@
       <div class="brand">Theoses</div>
       <button id="new-session" class="button">+ New</button>
       <button id="graph-view-button" class="button">Graph</button>
+      <button id="runtime-info-button" class="button">Runtime</button>
       <button id="telegram-settings-button" class="button">Settings</button>
       <button id="toggle-sidebar" class="icon-button" title="Collapse conversations and files">☰</button>
       <button id="toggle-files" class="icon-button" title="Collapse file editor">▣</button>
@@ -90,6 +95,22 @@
       <button class="button" type="submit">Save Telegram settings</button>
     </form>
   </dialog>
+  <dialog id="runtime-info" class="settings-dialog runtime-dialog">
+    <div class="settings-card">
+      <div class="settings-head"><div><h2>Runtime</h2><p>Read-only. Change model, thinking level, or provider auth from the CLI.</p></div><button id="close-runtime-info" class="icon-button" type="button" title="Close">×</button></div>
+      <div class="runtime-rows">
+        <div class="runtime-row"><span>Model</span><strong id="runtime-model">—</strong></div>
+        <div class="runtime-row"><span>Provider</span><strong id="runtime-provider">—</strong></div>
+        <div class="runtime-row"><span>Thinking level</span><strong id="runtime-thinking">—</strong></div>
+        <div class="runtime-row"><span>Last turn</span><strong id="runtime-usage">—</strong></div>
+      </div>
+      <p class="settings-help">Use <code>/model</code>, <code>/thinking</code>, or <code>/login</code> in the Theoses CLI to change these.</p>
+    </div>
+  </dialog>
+  <script type="importmap">
+    {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.179.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.179.1/examples/jsm/"}}
+  </script>
+  <script src="/field.js" type="module"></script>
   <script src="/app.js" type="module"></script>
 </body>
 </html>
