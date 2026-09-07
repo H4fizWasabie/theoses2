@@ -79,6 +79,52 @@ function createFakeAnthropicClient(response: Response): Anthropic {
 }
 
 describe("Anthropic raw SSE parsing", () => {
+	it.each(['{"path":', '{"path": ???}'])("rejects unrecoverable final tool arguments: %s", async (partialJson) => {
+		const response = createSseResponse([
+			minimalAnthropicEvents[0],
+			{
+				event: "content_block_start",
+				data: JSON.stringify({
+					type: "content_block_start",
+					index: 0,
+					content_block: { type: "tool_use", id: "toolu_invalid", name: "inspect", input: {} },
+				}),
+			},
+			{
+				event: "content_block_delta",
+				data: JSON.stringify({
+					type: "content_block_delta",
+					index: 0,
+					delta: { type: "input_json_delta", partial_json: partialJson },
+				}),
+			},
+			minimalAnthropicEvents[3],
+			...minimalAnthropicEvents.slice(4),
+		]);
+		const stream = streamAnthropic(
+			getModel("anthropic", "claude-haiku-4-5"),
+			{
+				messages: [{ role: "user", content: "Inspect.", timestamp: Date.now() }],
+				tools: [
+					{
+						name: "inspect",
+						description: "Inspect a path.",
+						parameters: Type.Object({ path: Type.Optional(Type.String()) }),
+					},
+				],
+			},
+			{ client: createFakeAnthropicClient(response) },
+		);
+		const eventTypes: string[] = [];
+		for await (const event of stream) eventTypes.push(event.type);
+		const result = await stream.result();
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toBeTruthy();
+		expect(eventTypes).toContain("error");
+		expect(eventTypes).not.toContain("toolcall_end");
+		expect(eventTypes).not.toContain("done");
+	});
+
 	it("repairs malformed SSE JSON and malformed streamed tool JSON", async () => {
 		const model = getModel("anthropic", "claude-haiku-4-5");
 		const context: Context = {
