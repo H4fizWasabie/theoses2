@@ -144,6 +144,33 @@ describe("AgentSession prompt characterization", () => {
 		expect(sawImage).toBe(true);
 	});
 
+	it("strips the data-URL prefix when images are passed as raw data-URL strings", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		let imageData: string | undefined;
+
+		harness.setResponses([
+			(context) => {
+				const user = context.messages.find((message) => message.role === "user");
+				if (user?.role === "user" && typeof user.content !== "string") {
+					const image = user.content.find((part) => part.type === "image");
+					if (image?.type === "image") imageData = image.data;
+				}
+				return fauxAssistantMessage("ok");
+			},
+		]);
+
+		// Callers like the Telegram bot pass full data URLs (string[]), not pre-built
+		// ImageContent objects — normalizeImages must strip the "data:...;base64," prefix
+		// rather than storing the whole data URL as the payload (issue found live: this
+		// double-prefixed every provider request and broke every image attachment).
+		await harness.session.prompt("describe", {
+			images: ["data:image/png;base64,ZmFrZQ=="],
+		});
+
+		expect(imageData).toBe("ZmFrZQ==");
+	});
+
 	it("expands skill commands before sending the prompt", async () => {
 		const tempDir = join(tmpdir(), `pi-skill-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
