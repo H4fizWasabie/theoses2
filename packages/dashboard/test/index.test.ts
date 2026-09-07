@@ -117,3 +117,35 @@ test("dashboard saves Telegram onboarding settings without exposing the bot toke
 		await close(server);
 	}
 });
+
+test("dashboard session runtime info is read-only and never exposes credentials", async () => {
+	const root = await mkdtemp(join(tmpdir(), "theoses-dashboard-runtime-"));
+	const server = createDashboardServer({ accessToken: "test-owner-token", cwd: root });
+	const base = await listen(server);
+	try {
+		const created = await fetch(`${base}/api/sessions`, {
+			method: "POST",
+			headers: { Authorization: "Bearer test-owner-token" },
+		});
+		assert.equal(created.status, 201);
+		const session = (await created.json()) as { id: string };
+
+		const opened = await fetch(`${base}/api/sessions/${encodeURIComponent(session.id)}`, {
+			headers: { Authorization: "Bearer test-owner-token" },
+		});
+		assert.equal(opened.status, 200);
+		const body = (await opened.json()) as { runtime: Record<string, unknown> };
+
+		assert.ok("runtime" in body);
+		assert.ok("thinkingLevel" in body.runtime);
+		assert.ok("modelId" in body.runtime);
+		assert.ok("provider" in body.runtime);
+		assert.ok("lastUsage" in body.runtime);
+
+		// The runtime summary is a read-only display, never a place credentials could leak.
+		const serialized = JSON.stringify(body);
+		assert.doesNotMatch(serialized, /apiKey|api_key|credential|oauth|refresh|access_token/i);
+	} finally {
+		await close(server);
+	}
+});

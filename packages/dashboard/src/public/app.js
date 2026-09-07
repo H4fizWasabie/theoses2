@@ -1,4 +1,4 @@
-const state = { sessions: [], active: null, history: [], reply: null, tabs: [], activeTab: null, pending: 0, preview: false, filesRoot: "/home", graph: null, liveTurn: null };
+const state = { sessions: [], active: null, history: [], runtime: null, reply: null, tabs: [], activeTab: null, pending: 0, preview: false, filesRoot: "/home", graph: null, liveTurn: null };
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
 
@@ -146,7 +146,27 @@ async function openSession(id) {
   const data = await request(`/api/sessions/${encodeURIComponent(id)}`);
   state.active = data.session;
   state.history = data.history;
+  state.runtime = data.runtime;
   setReply(null); renderSessions(); renderActive(); renderHistory();
+}
+
+function openRuntimeInfo() {
+  if (!state.active) {
+    $("runtime-model").textContent = "No active session";
+    $("runtime-provider").textContent = "—";
+    $("runtime-thinking").textContent = "—";
+    $("runtime-usage").textContent = "—";
+    $("runtime-info").showModal();
+    return;
+  }
+  const runtime = state.runtime;
+  $("runtime-model").textContent = runtime?.modelId || "Not yet chosen";
+  $("runtime-provider").textContent = runtime?.provider || "—";
+  $("runtime-thinking").textContent = runtime?.thinkingLevel || "—";
+  $("runtime-usage").textContent = runtime?.lastUsage
+    ? `${runtime.lastUsage.input.toLocaleString()} in · ${runtime.lastUsage.output.toLocaleString()} out · $${runtime.lastUsage.cost.toFixed(4)}`
+    : "No turns yet";
+  $("runtime-info").showModal();
 }
 
 async function newSession() {
@@ -261,6 +281,8 @@ $("login-form").addEventListener("submit", async (event) => {
   }
 });
 
+$("runtime-info-button").addEventListener("click", openRuntimeInfo);
+$("close-runtime-info").addEventListener("click", () => $("runtime-info").close());
 $("telegram-settings-button").addEventListener("click", () => void openTelegramSettings());
 $("close-telegram-settings").addEventListener("click", () => $("telegram-settings").close());
 $("telegram-settings-form").addEventListener("submit", async (event) => {
