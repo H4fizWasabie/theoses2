@@ -167,7 +167,7 @@ export class JsonlSessionRepo
 
 	/**
 	 * Claim the logical ID across repository instances/processes before checking timestamped filenames.
-	 * ponytail: a crashed creator leaves its claim behind; remove that directory only after confirming
+	 * Caveat: a crashed creator leaves its claim behind; remove that directory only after confirming
 	 * no creator is active. Automatic stale-claim recovery belongs with the deferred recovery work.
 	 */
 	private async claimCreateDestination<T>(
