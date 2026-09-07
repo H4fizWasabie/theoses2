@@ -50,6 +50,8 @@ export function resolveToCwd(filePath: string, cwd: string): string {
 }
 
 export function resolveReadPath(filePath: string, cwd: string): string {
+	const exact = resolvePath(filePath, cwd, { stripAtPrefix: true });
+	if (fileExists(exact)) return exact;
 	const resolved = resolveToCwd(filePath, cwd);
 
 	if (fileExists(resolved)) {
@@ -84,6 +86,8 @@ export function resolveReadPath(filePath: string, cwd: string): string {
 }
 
 export async function resolveReadPathAsync(filePath: string, cwd: string): Promise<string> {
+	const exact = resolvePath(filePath, cwd, { stripAtPrefix: true });
+	if (await pathExists(exact)) return exact;
 	const resolved = resolveToCwd(filePath, cwd);
 
 	if (await pathExists(resolved)) {

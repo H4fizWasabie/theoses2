@@ -102,6 +102,8 @@ function toFileError(error: unknown, fallbackPath?: string): FileError {
 	if (nodeError) {
 		const message = nodeError.message;
 		switch (nodeError.code) {
+			case "EEXIST":
+				return new FileError("already_exists", message, path, cause);
 			case "ABORT_ERR":
 				return new FileError("aborted", message, path, cause);
 			case "ENOENT":

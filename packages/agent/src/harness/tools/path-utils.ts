@@ -14,6 +14,8 @@ export async function resolveToolPath(env: ExecutionEnv, path: string, signal?: 
 }
 
 export async function resolveReadToolPath(env: ExecutionEnv, path: string, signal?: AbortSignal): Promise<string> {
+	const exact = getOrThrow(await env.absolutePath(path.startsWith("@") ? path.slice(1) : path, signal));
+	if (getOrThrow(await env.exists(exact, signal))) return exact;
 	const resolved = await resolveToolPath(env, path, signal);
 	const variants = [
 		resolved,

@@ -52,6 +52,9 @@ export function createReadTool<TContext extends ExecutionToolContext = Execution
 		parameters: readSchema,
 		async execute(_toolCallId, { path, offset, limit }, signal, _onUpdate, { env }) {
 			const absolutePath = await resolveReadToolPath(env, path, signal);
+			const requestedPath = getOrThrow(await env.absolutePath(path.startsWith("@") ? path.slice(1) : path, signal));
+			const pathNotice =
+				absolutePath === requestedPath ? "" : `[Resolved read path: ${JSON.stringify(absolutePath)}]\n`;
 			const bytes = getOrThrow(await env.readBinaryFile(absolutePath, signal));
 			const mimeType = detectSupportedImageMimeType(bytes);
 			if (mimeType) {
@@ -61,14 +64,16 @@ export function createReadTool<TContext extends ExecutionToolContext = Execution
 					});
 					if (!processed.ok) {
 						return {
-							content: [{ type: "text", text: `Read image file [${mimeType}]\n${processed.message}` }],
+							content: [
+								{ type: "text", text: `${pathNotice}Read image file [${mimeType}]\n${processed.message}` },
+							],
 							details: undefined,
 						};
 					}
 					const hints = processed.hints.length > 0 ? `\n${processed.hints.join("\n")}` : "";
 					return {
 						content: [
-							{ type: "text", text: `Read image file [${processed.mimeType}]${hints}` },
+							{ type: "text", text: `${pathNotice}Read image file [${processed.mimeType}]${hints}` },
 							{ type: "image", data: processed.data, mimeType: processed.mimeType },
 						] satisfies Array<TextContent | ImageContent>,
 						details: undefined,
@@ -79,7 +84,7 @@ export function createReadTool<TContext extends ExecutionToolContext = Execution
 						content: [
 							{
 								type: "text",
-								text: "Read image file [image/bmp]\n[Image omitted: configure an imageProcessor to convert BMP images.]",
+								text: `${pathNotice}Read image file [image/bmp]\n[Image omitted: configure an imageProcessor to convert BMP images.]`,
 							},
 						],
 						details: undefined,
@@ -87,7 +92,7 @@ export function createReadTool<TContext extends ExecutionToolContext = Execution
 				}
 				return {
 					content: [
-						{ type: "text", text: `Read image file [${mimeType}]` },
+						{ type: "text", text: `${pathNotice}Read image file [${mimeType}]` },
 						{ type: "image", data: encodeBase64(bytes), mimeType },
 					] satisfies Array<TextContent | ImageContent>,
 					details: undefined,
@@ -138,7 +143,7 @@ export function createReadTool<TContext extends ExecutionToolContext = Execution
 				outputText = truncation.content;
 			}
 
-			return { content: [{ type: "text", text: outputText }], details };
+			return { content: [{ type: "text", text: pathNotice + outputText }], details };
 		},
 	};
 }

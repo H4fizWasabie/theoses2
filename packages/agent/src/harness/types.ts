@@ -131,6 +131,7 @@ export type FileKind = "file" | "directory" | "symlink";
 /** Stable, backend-independent file error codes returned by {@link FileSystem} file operations. */
 export type FileErrorCode =
 	| "aborted"
+	| "already_exists"
 	| "not_found"
 	| "permission_denied"
 	| "not_directory"
@@ -259,7 +260,7 @@ export interface FileSystem {
 	canonicalPath(path: string, abortSignal?: AbortSignal): Promise<Result<string, FileError>>;
 	/** Return false for missing paths. Other errors, such as permission failures, return a {@link FileError}. */
 	exists(path: string, abortSignal?: AbortSignal): Promise<Result<boolean, FileError>>;
-	/** Create a directory. Defaults: `recursive: true`, no abort signal. */
+	/** Create a directory. With `recursive: false`, atomically fail with `already_exists` if present. Defaults: `recursive: true`, no abort signal. */
 	createDir(
 		path: string,
 		options?: { recursive?: boolean; abortSignal?: AbortSignal },

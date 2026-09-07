@@ -222,7 +222,11 @@ export async function retryAssistantCall(
  */
 export function isRetryableAssistantError(message: AssistantMessage): boolean {
 	if (message.stopReason !== "error" || !message.errorMessage) return false;
-	const errorMessage = message.errorMessage;
+	return isRetryableProviderError(message.errorMessage);
+}
+
+/** Shared classification for raw HTTP/transport failures and failed assistant messages. */
+export function isRetryableProviderError(errorMessage: string, status?: number): boolean {
 	if (NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN.test(errorMessage)) return false;
-	return RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage);
+	return RETRYABLE_PROVIDER_ERROR_PATTERN.test(`${status ?? ""} ${errorMessage}`);
 }

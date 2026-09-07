@@ -111,7 +111,6 @@ export class JsonlSessionRepo
 {
 	private readonly fs: JsonlSessionRepoFileSystem;
 	private readonly sessionsRootInput: string;
-	private readonly activeCreateDestinations = new Set<string>();
 	private rootPromise: Promise<string> | undefined;
 
 	constructor(options: JsonlSessionRepoOptions) {
@@ -167,23 +166,32 @@ export class JsonlSessionRepo
 	}
 
 	/**
-	 * Prevent same-process create/fork races for one logical destination. The durable filename includes a
-	 * timestamp, so the async filesystem existence check alone can let two concurrent calls both decide the
-	 * same {cwd, id} is free and publish duplicate sessions.
+	 * Claim the logical ID across repository instances/processes before checking timestamped filenames.
+	 * Caveat: a crashed creator leaves its claim behind; remove that directory only after confirming
+	 * no creator is active. Automatic stale-claim recovery belongs with the deferred recovery work.
 	 */
 	private async claimCreateDestination<T>(
 		destination: { id: string; cwd: string },
 		operation: () => Promise<T>,
 	): Promise<T> {
-		const key = `${destination.cwd}\0${destination.id}`;
-		if (this.activeCreateDestinations.has(key)) {
-			throw new SessionError("already_exists", `Session already exists: ${destination.id}`);
+		const directory = await this.sessionDirectory(destination.cwd);
+		fileResult(await this.fs.createDir(directory, { recursive: true }), "Failed to create sessions directory");
+		const claimPath = fileResult(
+			await this.fs.joinPath([directory, `.${destination.id}.create-lock`]),
+			"Failed to resolve session creation claim",
+		);
+		const claim = await this.fs.createDir(claimPath, { recursive: false });
+		if (!claim.ok && claim.error.code === "already_exists") {
+			throw new SessionError("already_exists", `Session creation already claimed: ${claimPath}`, claim.error);
 		}
-		this.activeCreateDestinations.add(key);
+		fileResult(claim, `Failed to claim session creation ${claimPath}`);
 		try {
 			return await operation();
 		} finally {
-			this.activeCreateDestinations.delete(key);
+			fileResult(
+				await this.fs.remove(claimPath, { recursive: true }),
+				`Failed to release session creation ${claimPath}`,
+			);
 		}
 	}
 
