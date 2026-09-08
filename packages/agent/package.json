@@ -10,14 +10,6 @@
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
 		},
-		"./node": {
-			"types": "./dist/node.d.ts",
-			"import": "./dist/node.js"
-		},
-		"./session/testing": {
-			"types": "./dist/harness/session/testing/index.d.ts",
-			"import": "./dist/harness/session/testing/index.js"
-		},
 		"./package.json": "./package.json"
 	},
 	"files": [
@@ -30,8 +22,6 @@
 		"check:telemetry-docs": "node scripts/generate-telemetry-docs.ts --check",
 		"build": "tsgo -p tsconfig.build.json",
 		"test": "vitest --run",
-		"test:harness": "vitest --run --config vitest.harness.config.ts",
-		"coverage:harness": "vitest --run --config vitest.harness.config.ts --coverage",
 		"prepublishOnly": "npm run build"
 	},
 	"dependencies": {
