@@ -320,12 +320,22 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				} else {
 					session.sessionManager.storeArtifact("telegram document", document.file_name ?? "document", data);
 					if (!messageText(ctx))
-						attachmentNote = noteFor(document.file_name ?? "document", document.mime_type ?? "unknown", data.length, "document");
+						attachmentNote = noteFor(
+							document.file_name ?? "document",
+							document.mime_type ?? "unknown",
+							data.length,
+							"document",
+						);
 				}
 			} else {
 				// Other media types (audio, video, voice, video note, animation) were previously
 				// dropped silently. Store what we can so the agent knows they arrived.
-				const media = ctx.message.audio ?? ctx.message.video ?? ctx.message.voice ?? ctx.message.video_note ?? ctx.message.animation;
+				const media =
+					ctx.message.audio ??
+					ctx.message.video ??
+					ctx.message.voice ??
+					ctx.message.video_note ??
+					ctx.message.animation;
 				if (media?.file_id) {
 					try {
 						const data = await downloadFile(bot, token, media.file_id);
@@ -333,8 +343,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 						const name = meta.file_name ?? meta.mime_type ?? "media";
 						const mime = meta.mime_type ?? "unknown";
 						session.sessionManager.storeArtifact("telegram document", name, data);
-						if (!messageText(ctx))
-							attachmentNote = noteFor(name, mime, data.length, "media file");
+						if (!messageText(ctx)) attachmentNote = noteFor(name, mime, data.length, "media file");
 					} catch (e) {
 						console.error("Failed to download non-document media:", e);
 					}
