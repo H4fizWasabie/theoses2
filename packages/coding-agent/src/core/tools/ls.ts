@@ -6,6 +6,7 @@ import { type Static, Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
+import { spillTruncatedOutput } from "./output-shaping.ts";
 import { pathExists, resolveToCwd } from "./path-utils.ts";
 import { getTextOutput, renderToolPath, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -28,6 +29,7 @@ const DEFAULT_LIMIT = 500;
 export interface LsToolDetails {
 	truncation?: TruncationResult;
 	entryLimitReached?: number;
+	fullOutputPath?: string;
 }
 
 /**
@@ -113,7 +115,7 @@ export function createLsToolDefinition(
 			{ path, limit }: { path?: string; limit?: number },
 			signal?: AbortSignal,
 			_onUpdate?,
-			_ctx?,
+			ctx?,
 		) {
 			return new Promise((resolve, reject) => {
 				if (signal?.aborted) {
@@ -194,8 +196,17 @@ export function createLsToolDefinition(
 							details.entryLimitReached = effectiveLimit;
 						}
 						if (truncation.truncated) {
-							notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
+							const fullOutputPath = spillTruncatedOutput({
+								raw: rawOutput,
+								tool: "ls",
+								sessionManager: ctx?.sessionManager,
+							});
+							notices.push(
+								`${formatSize(DEFAULT_MAX_BYTES)} limit reached` +
+									(fullOutputPath ? `. Full output: ${fullOutputPath}` : ""),
+							);
 							details.truncation = truncation;
+							details.fullOutputPath = fullOutputPath;
 						}
 						if (notices.length > 0) {
 							output += `\n\n[${notices.join(". ")}]`;

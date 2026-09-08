@@ -2,12 +2,20 @@ import { randomBytes } from "node:crypto";
 import { createWriteStream, type WriteStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, type TruncationResult, truncateTail } from "./truncate.ts";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, type TruncationResult, truncateHead, truncateTail } from "./truncate.ts";
+
+/** Bytes of the very start of the output kept alongside the tail, so truncated
+ * output (e.g. build/install setup lines) isn't lost to only-the-end truncation. */
+export const DEFAULT_HEAD_BYTES = 2000;
 
 export interface OutputAccumulatorOptions {
 	maxLines?: number;
 	maxBytes?: number;
+	/** Bytes of head to retain alongside the tail when truncated. Set to 0 to disable (tail-only). */
+	maxHeadBytes?: number;
 	tempFilePrefix?: string;
+	/** Directory to spill the full output into when truncated. Defaults to the OS temp dir. */
+	spillDir?: string;
 }
 
 export interface OutputSnapshot {
@@ -16,9 +24,9 @@ export interface OutputSnapshot {
 	fullOutputPath?: string;
 }
 
-function defaultTempFilePath(prefix: string): string {
+function defaultTempFilePath(prefix: string, dir: string): string {
 	const id = randomBytes(8).toString("hex");
-	return join(tmpdir(), `${prefix}-${id}.log`);
+	return join(dir, `${prefix}-${id}.log`);
 }
 
 function byteLength(text: string): number {
@@ -35,14 +43,18 @@ function byteLength(text: string): number {
 export class OutputAccumulator {
 	private readonly maxLines: number;
 	private readonly maxBytes: number;
+	private readonly maxHeadBytes: number;
 	private readonly maxRollingBytes: number;
 	private readonly tempFilePrefix: string;
+	private readonly spillDir: string;
 	private readonly decoder = new TextDecoder();
 
 	private rawChunks: Buffer[] = [];
 	private tailText = "";
 	private tailBytes = 0;
 	private tailStartsAtLineBoundary = true;
+	private headRaw = "";
+	private headFrozen = false;
 	private totalRawBytes = 0;
 	private totalDecodedBytes = 0;
 	private completedLines = 0;
@@ -57,8 +69,10 @@ export class OutputAccumulator {
 	constructor(options: OutputAccumulatorOptions = {}) {
 		this.maxLines = options.maxLines ?? DEFAULT_MAX_LINES;
 		this.maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+		this.maxHeadBytes = options.maxHeadBytes ?? 0;
 		this.maxRollingBytes = Math.max(this.maxBytes * 2, 1);
 		this.tempFilePrefix = options.tempFilePrefix ?? "pi-output";
+		this.spillDir = options.spillDir ?? tmpdir();
 	}
 
 	append(data: Buffer): void {
@@ -111,8 +125,19 @@ export class OutputAccumulator {
 			this.ensureTempFile();
 		}
 
+		let content = truncation.content;
+		if (truncation.truncated && this.maxHeadBytes > 0 && this.headRaw.length > 0) {
+			const headTruncation = truncateHead(this.headRaw, {
+				maxBytes: this.maxHeadBytes,
+				maxLines: Number.MAX_SAFE_INTEGER,
+			});
+			if (headTruncation.content.length > 0) {
+				content = `${headTruncation.content}\n...\n${content}`;
+			}
+		}
+
 		return {
-			content: truncation.content,
+			content,
 			truncation,
 			fullOutputPath: this.tempFilePath,
 		};
@@ -156,6 +181,13 @@ export class OutputAccumulator {
 		this.tailBytes += bytes;
 		if (this.tailBytes > this.maxRollingBytes * 2) {
 			this.trimTail();
+		}
+		if (this.maxHeadBytes > 0 && !this.headFrozen) {
+			this.headRaw += text;
+			// Small margin over maxHeadBytes so the later byte-safe cut always has enough to work with.
+			if (byteLength(this.headRaw) >= this.maxHeadBytes * 2) {
+				this.headFrozen = true;
+			}
 		}
 
 		let newlines = 0;
@@ -212,7 +244,7 @@ export class OutputAccumulator {
 		if (this.tempFilePath) {
 			return;
 		}
-		this.tempFilePath = defaultTempFilePath(this.tempFilePrefix);
+		this.tempFilePath = defaultTempFilePath(this.tempFilePrefix, this.spillDir);
 		this.tempFileStream = createWriteStream(this.tempFilePath);
 		for (const chunk of this.rawChunks) {
 			this.tempFileStream.write(chunk);

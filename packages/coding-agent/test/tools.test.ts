@@ -94,9 +94,9 @@ describe("Coding Agent Tools", () => {
 			const output = getTextOutput(result);
 
 			expect(output).toContain("Line 1");
-			expect(output).toContain("Line 2000");
-			expect(output).not.toContain("Line 2001");
-			expect(output).toContain("[Showing lines 1-2000 of 2500. Use offset=2001 to continue.]");
+			expect(output).toContain("Line 500");
+			expect(output).not.toContain("Line 501");
+			expect(output).toContain("[Showing lines 1-500 of 2500. Use offset=501 to continue.]");
 		});
 
 		it("should truncate when byte limit exceeded", async () => {
@@ -182,7 +182,7 @@ describe("Coding Agent Tools", () => {
 			expect(result.details?.truncation?.truncated).toBe(true);
 			expect(result.details?.truncation?.truncatedBy).toBe("lines");
 			expect(result.details?.truncation?.totalLines).toBe(2500);
-			expect(result.details?.truncation?.outputLines).toBe(2000);
+			expect(result.details?.truncation?.outputLines).toBe(500);
 		});
 
 		it("should detect image MIME type from file magic (not extension)", async () => {
@@ -679,10 +679,10 @@ describe("Coding Agent Tools", () => {
 			const output = getTextOutput(result);
 
 			expect(result.details?.truncation?.totalLines).toBe(4000);
-			expect(result.details?.truncation?.outputLines).toBe(2000);
-			expect(output).toContain("line-2001");
+			expect(result.details?.truncation?.outputLines).toBe(500);
+			expect(output).toContain("line-3501");
 			expect(output).toContain("line-4000");
-			expect(output).toMatch(/\[Showing lines 2001-4000 of 4000\. Full output: /);
+			expect(output).toMatch(/\[Showing lines 3501-4000 of 4000\. Full output: /);
 			expect(output).not.toContain("4001");
 		});
 

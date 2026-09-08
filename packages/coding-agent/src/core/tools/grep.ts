@@ -9,6 +9,7 @@ import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts"
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import { ensureTool } from "../../utils/tools-manager.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
+import { spillTruncatedOutput } from "./output-shaping.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { getTextOutput, invalidArgText, shortenPath, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -47,6 +48,7 @@ export interface GrepToolDetails {
 	truncation?: TruncationResult;
 	matchLimitReached?: number;
 	linesTruncated?: boolean;
+	fullOutputPath?: string;
 }
 
 /**
@@ -157,7 +159,7 @@ export function createGrepToolDefinition(
 			},
 			signal?: AbortSignal,
 			_onUpdate?,
-			_ctx?,
+			ctx?,
 		) {
 			return new Promise((resolve, reject) => {
 				if (signal?.aborted) {
@@ -349,8 +351,17 @@ export function createGrepToolDefinition(
 								details.matchLimitReached = effectiveLimit;
 							}
 							if (truncation.truncated) {
-								notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
+								const fullOutputPath = spillTruncatedOutput({
+									raw: rawOutput,
+									tool: "grep",
+									sessionManager: ctx?.sessionManager,
+								});
+								notices.push(
+									`${formatSize(DEFAULT_MAX_BYTES)} limit reached` +
+										(fullOutputPath ? `. Full output: ${fullOutputPath}` : ""),
+								);
 								details.truncation = truncation;
+								details.fullOutputPath = fullOutputPath;
 							}
 							if (linesTruncated) {
 								notices.push(

@@ -612,7 +612,10 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 								delta = toolCall.function.arguments;
 								block.partialArgs = (block.partialArgs ?? "") + toolCall.function.arguments;
 								const lastParsedLength = block.lastParsedArgsLength ?? 0;
-								if (block.partialArgs.length - lastParsedLength >= STREAMING_ARGS_REPARSE_THROTTLE_CHARS || lastParsedLength === 0) {
+								if (
+									block.partialArgs.length - lastParsedLength >= STREAMING_ARGS_REPARSE_THROTTLE_CHARS ||
+									lastParsedLength === 0
+								) {
 									block.arguments = parseStreamingJson(block.partialArgs);
 									block.lastParsedArgsLength = block.partialArgs.length;
 								}
