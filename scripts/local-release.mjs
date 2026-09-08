@@ -12,7 +12,6 @@ const packages = [
 	{ directory: "packages/agent", name: "theoses-agent-core" },
 	{ directory: "packages/protocol", name: "theoses-protocol" },
 	{ directory: "packages/client", name: "theoses-client" },
-	{ directory: "packages/session-backends/sqlite-node", name: "theoses-session-backend-sqlite-node" },
 	{ directory: "packages/server", name: "theoses-server" },
 	{ directory: "packages/coding-agent", name: "theoses-coding-agent" },
 ];

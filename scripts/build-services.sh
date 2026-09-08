@@ -71,7 +71,6 @@ runtime_packages=(
     dashboard
     protocol
     server
-    session-backends/sqlite-node
     telegram
     telemetry
     tui
