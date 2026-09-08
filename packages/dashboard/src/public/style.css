@@ -63,6 +63,24 @@ button { color: inherit; }
 .button:disabled { opacity: .45; cursor: default; }
 
 .workbench { flex: 1; min-height: 0; display: grid; grid-template-columns: 3fr 4fr 3fr; gap: 10px; padding: 10px 10px 0; transition: grid-template-columns .35s ease; }
+
+/* Field focus mode: the panels tile edge-to-edge with only 10px gaps, which
+   isn't enough room to actually drag/zoom the galaxy behind them. The "Field"
+   button hides the panels (leaving the command rail) so the full-viewport
+   canvas becomes reachable everywhere. */
+body.field-focus .app { pointer-events: none; }
+body.field-focus .command-rail,
+body.field-focus .field-hud { pointer-events: auto; }
+body.field-focus .workbench,
+body.field-focus .timeline { opacity: 0; transition: opacity .25s ease; }
+#field-canvas { cursor: grab; }
+#field-canvas:active { cursor: grabbing; }
+.field-hud { position: fixed; left: 0; right: 0; bottom: 18px; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 14px; }
+.field-hud[hidden] { display: none; }
+.field-hud-hint { color: var(--muted); font-size: 11px; font-family: var(--mono); letter-spacing: .04em; text-transform: uppercase; }
+.field-hud-zoom { display: flex; gap: 6px; }
+.field-hud-zoom button { width: 26px; height: 26px; border: 1px solid var(--border-strong); border-radius: 3px; background: var(--panel-muted); color: var(--text); cursor: pointer; font-family: var(--mono); }
+.field-hud-zoom button:hover { border-color: var(--accent); color: var(--accent); }
 .panel { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
 .panel-head { flex: 0 0 40px; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 12px; border-bottom: 1px solid var(--border); }
 .panel-head strong { font-size: 12px; font-weight: 600; }

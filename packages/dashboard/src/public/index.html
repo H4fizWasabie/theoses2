@@ -32,11 +32,20 @@
       <div class="rail-stat"><label>cost</label><strong id="rail-cost">—</strong></div>
       <div class="rail-spacer"></div>
       <button id="new-session" class="button">+ New</button>
+      <button id="field-view-button" class="button">Field</button>
       <button id="graph-view-button" class="button">Graph</button>
       <button id="runtime-info-button" class="button">Runtime</button>
       <button id="telegram-settings-button" class="button">Settings</button>
       <span class="connection">private · Tailscale</span>
     </header>
+    <div id="field-hud" class="field-hud" hidden>
+      <span class="field-hud-hint">drag to orbit &middot; scroll to zoom</span>
+      <div class="field-hud-zoom">
+        <button type="button" data-zoom="in" aria-label="Zoom in">+</button>
+        <button type="button" data-zoom="out" aria-label="Zoom out">&minus;</button>
+      </div>
+      <button id="field-view-close" class="button" type="button">Close</button>
+    </div>
     <main class="workbench">
       <section class="panel chat">
         <div class="panel-head"><strong>Conversation</strong><button id="refresh-sessions" class="icon-button" title="Refresh">↻</button><button class="minimize-toggle" type="button" data-minimize aria-label="Minimize conversation"><span></span></button></div>
