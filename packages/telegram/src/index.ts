@@ -298,11 +298,19 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			if (consumeStopRequest(chat, messageId)) return;
 			const session = await sessionFor(chat, cwd, sessions);
 			const images: string[] = [];
+			// Fallback prompt for caption-less attachments: without it, an empty string
+			// reaches the agent and the attachment is silently ignored (2026-09-08 fix).
+			let attachmentNote: string | undefined;
+			const noteFor = (name: string, mime: string, size: number, kind: string) =>
+				`User sent a ${kind} without a caption: "${name}" (mime type ${mime}, ${size} bytes). ` +
+				`It has been stored as a document artifact in this session. Use convert_doc to read it if needed, and respond about it.`;
 			if (ctx.message.photo?.length) {
 				const photo = ctx.message.photo.at(-1);
 				if (photo) {
 					const data = await downloadFile(bot, token, photo.file_id);
 					images.push(`data:image/jpeg;base64,${Buffer.from(data).toString("base64")}`);
+					if (!messageText(ctx))
+						attachmentNote = "User sent a photo without a caption. Describe or act on it as appropriate.";
 				}
 			} else if (ctx.message.document) {
 				const document = ctx.message.document;
@@ -311,6 +319,25 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 					images.push(`data:${document.mime_type};base64,${Buffer.from(data).toString("base64")}`);
 				} else {
 					session.sessionManager.storeArtifact("telegram document", document.file_name ?? "document", data);
+					if (!messageText(ctx))
+						attachmentNote = noteFor(document.file_name ?? "document", document.mime_type ?? "unknown", data.length, "document");
+				}
+			} else {
+				// Other media types (audio, video, voice, video note, animation) were previously
+				// dropped silently. Store what we can so the agent knows they arrived.
+				const media = ctx.message.audio ?? ctx.message.video ?? ctx.message.voice ?? ctx.message.video_note ?? ctx.message.animation;
+				if (media?.file_id) {
+					try {
+						const data = await downloadFile(bot, token, media.file_id);
+						const meta = media as { file_name?: string; mime_type?: string };
+						const name = meta.file_name ?? meta.mime_type ?? "media";
+						const mime = meta.mime_type ?? "unknown";
+						session.sessionManager.storeArtifact("telegram document", name, data);
+						if (!messageText(ctx))
+							attachmentNote = noteFor(name, mime, data.length, "media file");
+					} catch (e) {
+						console.error("Failed to download non-document media:", e);
+					}
 				}
 			}
 
@@ -351,7 +378,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			const abortController = new AbortController();
 			startTypingIndicator(bot, ctx.chat.id, abortController.signal);
 			try {
-				await session.prompt(messageText(ctx), {
+				await session.prompt(messageText(ctx) || attachmentNote || "", {
 					replyContext: replyText(ctx),
 					images: images.length ? images : undefined,
 					source: "extension",
