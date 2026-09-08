@@ -215,10 +215,11 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				if (media?.file_id) {
 					try {
 						const data = await downloadFile(bot, token, media.file_id);
-						const name = media.file_name ?? media.mime_type ?? "media";
+						const name = ("file_name" in media && media.file_name) || ("mime_type" in media && media.mime_type) || "media";
+						const mime = "mime_type" in media ? (media.mime_type ?? "unknown") : "unknown";
 						session.sessionManager.storeArtifact("telegram document", name, data);
 						if (!messageText(ctx))
-							attachmentNote = noteFor(name, media.mime_type ?? "unknown", data.length, "media file");
+							attachmentNote = noteFor(name, mime, data.length, "media file");
 					} catch (e) {
 						console.error("Failed to download non-document media:", e);
 					}
