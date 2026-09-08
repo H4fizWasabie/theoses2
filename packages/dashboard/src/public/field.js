@@ -190,6 +190,13 @@ async function setupField() {
       targetRadius = Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, targetRadius + event.deltaY * 0.01));
       idleUntil = performance.now() + IDLE_DELAY;
     }, { passive: false });
+    // The field-focus HUD's +/- buttons zoom the same way the wheel does; they
+    // exist because the canvas is normally covered by panels almost everywhere.
+    window.addEventListener("theoses-field-zoom", (event) => {
+      const step = event.detail?.direction === "in" ? -1.5 : 1.5;
+      targetRadius = Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, targetRadius + step));
+      idleUntil = performance.now() + IDLE_DELAY;
+    });
 
     const frame = () => {
       const now = performance.now();

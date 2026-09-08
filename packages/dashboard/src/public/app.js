@@ -721,6 +721,25 @@ $("graph-view-button").addEventListener("click", openGraphView);
 $("graph-close").addEventListener("click", closeGraphView);
 $("graph-refresh").addEventListener("click", () => void loadMemoryGraph());
 
+// The workbench panels tile edge-to-edge with only a few px of gap between them,
+// which isn't enough room to actually drag/zoom the galaxy sitting behind them.
+// This toggle hides the panels so the full-viewport canvas becomes reachable.
+function openFieldView() {
+  document.body.classList.add("field-focus");
+  $("field-hud").hidden = false;
+}
+function closeFieldView() {
+  document.body.classList.remove("field-focus");
+  $("field-hud").hidden = true;
+}
+$("field-view-button").addEventListener("click", openFieldView);
+$("field-view-close").addEventListener("click", closeFieldView);
+$("field-hud").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-zoom]");
+  if (!button) return;
+  window.dispatchEvent(new CustomEvent("theoses-field-zoom", { detail: { direction: button.dataset.zoom } }));
+});
+
 graphCanvas().addEventListener("pointerdown", (event) => {
   const point = toGraphSpace(event.clientX, event.clientY);
   const node = findGraphNodeAt(point.x, point.y);
