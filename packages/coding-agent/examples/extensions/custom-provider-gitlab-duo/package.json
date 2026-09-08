@@ -1,7 +1,7 @@
 {
   "name": "theoses-extension-custom-provider-gitlab-duo",
   "private": true,
-  "version": "1.0.14",
+  "version": "1.0.15",
   "type": "module",
   "scripts": {
     "clean": "echo 'nothing to clean'",
