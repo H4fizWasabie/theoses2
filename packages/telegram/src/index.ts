@@ -215,8 +215,9 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				if (media?.file_id) {
 					try {
 						const data = await downloadFile(bot, token, media.file_id);
-						const name = ("file_name" in media && media.file_name) || ("mime_type" in media && media.mime_type) || "media";
-						const mime = "mime_type" in media ? (media.mime_type ?? "unknown") : "unknown";
+						const meta = media as { file_name?: string; mime_type?: string };
+						const name = meta.file_name ?? meta.mime_type ?? "media";
+						const mime = meta.mime_type ?? "unknown";
 						session.sessionManager.storeArtifact("telegram document", name, data);
 						if (!messageText(ctx))
 							attachmentNote = noteFor(name, mime, data.length, "media file");
