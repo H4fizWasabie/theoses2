@@ -1,6 +1,6 @@
 {
 	"name": "theoses-evals",
-	"version": "1.0.15",
+	"version": "1.0.16",
 	"private": true,
 	"type": "module",
 	"scripts": {
@@ -9,8 +9,8 @@
 		"test": "vitest run --config vitest.test.config.ts"
 	},
 	"devDependencies": {
-		"theoses-ai": "^1.0.15",
-		"theoses-coding-agent": "^1.0.15",
+		"theoses-ai": "^1.0.16",
+		"theoses-coding-agent": "^1.0.16",
 		"@types/node": "22.19.19",
 		"shx": "0.4.0",
 		"typescript": "5.9.3",
