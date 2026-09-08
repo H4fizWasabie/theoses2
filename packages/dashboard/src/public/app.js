@@ -505,6 +505,7 @@ const GRAPH_SPRING_LENGTH = 70;
 const GRAPH_SPRING_STRENGTH = 0.03;
 const GRAPH_DAMPING = 0.85;
 const GRAPH_ANCHOR_STRENGTH = 0.025;
+const GRAPH_MAX_SPEED = 8;
 const GRAPH_LABEL_ZOOM = 1.4;
 const GRAPH_MIN_SCALE = 0.08;
 const GRAPH_MAX_SCALE = 4;
@@ -593,8 +594,14 @@ function stepGraphSimulation(graph) {
     if (node.pinned) continue;
     node._fx += (node.anchorX - node.x) * GRAPH_ANCHOR_STRENGTH;
     node._fy += (node.anchorY - node.y) * GRAPH_ANCHOR_STRENGTH;
-    node.vx = (node.vx + node._fx) * GRAPH_DAMPING;
-    node.vy = (node.vy + node._fy) * GRAPH_DAMPING;
+    let vx = (node.vx + node._fx) * GRAPH_DAMPING;
+    let vy = (node.vy + node._fy) * GRAPH_DAMPING;
+    // Repulsion is inverse-square and nodes can seed close together, so the first few
+    // frames can spike velocity into the hundreds; clamp speed so energy bleeds off
+    // smoothly instead of launching nodes across the canvas.
+    const speed = Math.hypot(vx, vy);
+    if (speed > GRAPH_MAX_SPEED) { vx = (vx / speed) * GRAPH_MAX_SPEED; vy = (vy / speed) * GRAPH_MAX_SPEED; }
+    node.vx = vx; node.vy = vy;
     node.x += node.vx; node.y += node.vy;
   }
 }

@@ -62,7 +62,8 @@ button { color: inherit; }
 .panel-head .meta { color: var(--muted); font: 10px var(--mono); }
 .panel-body { min-height: 0; padding: 12px; }
 .field { display: flex; flex-direction: column; background: #0b1011; }
-.field .panel-body { position: relative; flex: 1; padding: 0; }
+.field .panel-body { position: relative; flex: 1; padding: 0; cursor: grab; }
+.field .panel-body:active { cursor: grabbing; }
 #field-canvas { display: block; width: 100%; height: 100%; }
 .field-overlay { position: absolute; inset: 16px; pointer-events: none; }
 .field-title { max-width: 300px; }
@@ -72,6 +73,9 @@ button { color: inherit; }
 .legend-row { display: flex; align-items: center; gap: 7px; color: var(--muted); font: 10px var(--mono); }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
 .dot.cyan { background: var(--cyan); }.dot.amber { background: var(--amber); }.dot.blue { background: var(--blue); }.dot.green { background: var(--green); }
+.field-zoom { position: absolute; top: 0; right: 0; display: flex; gap: 6px; pointer-events: auto; }
+.field-zoom button { width: 22px; height: 22px; border: 1px solid var(--line-strong); background: #0b1011e8; color: var(--muted); cursor: pointer; font: 13px var(--mono); line-height: 1; }
+.field-zoom button:hover { border-color: var(--cyan); color: var(--cyan); }
 
 .chat-body, .file-body { height: calc(100% - 38px); overflow: auto; }
 .chat-body { display: flex; flex-direction: column; gap: 14px; }

@@ -1,8 +1,8 @@
-/* Ambient background only: ties the dashboard's "the agent is alive" feel to a
- * real visual, without becoming an interactive toy that competes with real work.
- * No OrbitControls — pointer-events are disabled on the canvas (see style.css),
- * and camera motion is limited to a slow idle spin plus a small mouse-parallax
- * offset so nothing here can intercept clicks meant for the app above it. */
+/* Ambient background that doubles as a lightweight camera toy: drag to orbit,
+ * wheel/pinch to zoom. The canvas sits at z-index 0 under the app (z-index 1),
+ * so panel clicks still hit the panel first — only the empty background gaps
+ * feed the canvas pointer events. Idle auto-rotation resumes a few seconds
+ * after the last interaction so the view doesn't go static. */
 async function setupField() {
   const canvas = document.getElementById("field-canvas");
   if (!canvas) return;
@@ -146,19 +146,56 @@ async function setupField() {
     resize();
     window.addEventListener("resize", resize);
 
-    const pointer = { x: 0, y: 0 };
-    window.addEventListener("pointermove", (event) => {
-      pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
-      pointer.y = (event.clientY / window.innerHeight) * 2 - 1;
-    });
+    // Camera orbits `target` in spherical coordinates so drag/wheel can move it
+    // without fighting the galaxy's own idle spin (fieldGroup.rotation.y below).
+    const target = new THREE.Vector3(0, 0.2, 0);
+    const spherical = new THREE.Spherical().setFromVector3(camera.position.clone().sub(target));
+    const MIN_RADIUS = 3, MAX_RADIUS = 22;
+    let targetRadius = spherical.radius;
+    let dragging = false;
+    let lastX = 0, lastY = 0;
+    let idleUntil = 0;
+    const IDLE_DELAY = 3200;
 
-    const baseTiltX = tiltGroup.rotation.x;
-    const baseTiltZ = tiltGroup.rotation.z;
+    const applyCamera = () => {
+      spherical.radius += (targetRadius - spherical.radius) * 0.12;
+      spherical.makeSafe();
+      camera.position.copy(target).add(new THREE.Vector3().setFromSpherical(spherical));
+      camera.lookAt(target);
+    };
+
+    canvas.addEventListener("pointerdown", (event) => {
+      dragging = true;
+      lastX = event.clientX; lastY = event.clientY;
+      canvas.setPointerCapture(event.pointerId);
+      idleUntil = performance.now() + IDLE_DELAY;
+    });
+    canvas.addEventListener("pointermove", (event) => {
+      if (!dragging) return;
+      const dx = event.clientX - lastX, dy = event.clientY - lastY;
+      lastX = event.clientX; lastY = event.clientY;
+      spherical.theta -= dx * 0.005;
+      spherical.phi -= dy * 0.005;
+      idleUntil = performance.now() + IDLE_DELAY;
+    });
+    const endDrag = (event) => {
+      dragging = false;
+      if (canvas.hasPointerCapture?.(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      idleUntil = performance.now() + IDLE_DELAY;
+    };
+    canvas.addEventListener("pointerup", endDrag);
+    canvas.addEventListener("pointercancel", endDrag);
+    canvas.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      targetRadius = Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, targetRadius + event.deltaY * 0.01));
+      idleUntil = performance.now() + IDLE_DELAY;
+    }, { passive: false });
+
     const frame = () => {
       const now = performance.now();
       fieldGroup.rotation.y += 0.0012;
-      tiltGroup.rotation.x += (baseTiltX + pointer.y * 0.06 - tiltGroup.rotation.x) * 0.04;
-      tiltGroup.rotation.z += (baseTiltZ + pointer.x * -0.04 - tiltGroup.rotation.z) * 0.04;
+      if (!dragging && now > idleUntil) spherical.theta += 0.0009;
+      applyCamera();
       core.rotation.y += 0.006;
       const pulse = 1 + Math.sin(now * 0.0035) * 0.22;
       taskStar.scale.setScalar(pulse);
