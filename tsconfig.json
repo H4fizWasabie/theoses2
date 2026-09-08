@@ -13,12 +13,7 @@
 			"theoses-ai/*": ["./packages/ai/src/*.ts", "./packages/ai/src/providers/*.ts"],
 			"theoses-ai/dist/*": ["./packages/ai/src/*"],
 			"theoses-agent-core": ["./packages/agent/src/index.ts"],
-			"theoses-agent-core/node": ["./packages/agent/src/node.ts"],
-			"theoses-agent-core/session/testing": [
-				"./packages/agent/src/harness/session/testing/index.ts"
-			],
 			"theoses-agent-core/*": ["./packages/agent/src/*"],
-			"theoses-session-backend-sqlite-node": ["./packages/session-backends/sqlite-node/src/index.ts"],
 			"theoses-coding-agent": ["./packages/coding-agent/src/index.ts"],
 			"theoses-coding-agent/hooks": ["./packages/coding-agent/src/core/hooks/index.ts"],
 			"theoses-coding-agent/*": ["./packages/coding-agent/src/*"],
@@ -35,6 +30,6 @@
 			"theoses-agent-old/*": ["./packages/agent-old/src/*"]
 		}
 	},
-	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/session-backends/*/src/**/*", "packages/session-backends/*/test/**/*", "packages/coding-agent/examples/**/*"],
+	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/coding-agent/examples/**/*"],
 	"exclude": ["**/dist/**", "packages/coding-agent/examples/extensions/gondolin/**"]
 }
