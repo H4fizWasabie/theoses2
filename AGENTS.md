@@ -37,6 +37,9 @@ Bash is a last resort for file operations, not the default. Use the purpose-buil
 
 Bash remains the right tool for what no specialized tool covers: running scripts, curl probes, process/service inspection, chaining shell logic. When a debugging loop requires sequential probes, keep each probe minimal and combine independent checks into one call where possible.
 
+- **Ordering discipline**: never run filesystem-mutating bash commands (`cp`, `mv`, `rm`, `rm -rf`) in parallel with, or in the same batch as, `write`/`edit` calls that target files inside the same directory tree — a `cp -r`/`rm -rf` racing a `write` can silently wipe the file just written. Sequence them: finish the copy/move/delete, confirm it landed, then write.
+- **Chain failures loudly**: in a single bash command, chain steps with `&&` (or `set -e`) all the way through, not a mix of `&&` and `;`. A `;` after a step that can fail lets later unrelated steps in the same command still run and print output that looks like success, masking the actual failure a beat later.
+
 ## Commands
 
 - Figure out the project's own test/lint/build commands from its config (package.json, Makefile, pyproject.toml, etc.) rather than assuming npm.
