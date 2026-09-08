@@ -8,18 +8,24 @@
  *
  * Steps:
  * 1. Check for uncommitted changes
- * 2. Verify every public workspace package is registered on npm
- * 3. Bump version via npm run version:xxx or set an explicit version
- * 4. Update CHANGELOG.md files: [Unreleased] -> [version] - date
- * 5. Regenerate release artifacts
- * 6. Run checks and tests
- * 7. Commit and tag the release
- * 8. Add new [Unreleased] section to changelogs
- * 9. Commit next-cycle changelog updates
- * 10. Push main and the tag to trigger CI publication
+ * 2. Bump version via npm run version:xxx or set an explicit version
+ * 3. Update CHANGELOG.md files: [Unreleased] -> [version] - date
+ * 4. Regenerate release artifacts
+ * 5. Run checks and tests
+ * 6. Commit and tag the release
+ * 7. Add new [Unreleased] section to changelogs
+ * 8. Commit next-cycle changelog updates
+ * 9. Push main and the tag to trigger CI publication
+ *
+ * NOTE (2026-09): the workspace packages (theoses-ai, theoses-agent-core, etc.)
+ * are not yet registered on the public npm registry, so this script's tag-push
+ * -> CI-publish path is untested end to end. In-practice releases currently go
+ * through the lighter `npm run version:patch` + a plain version-bump PR instead
+ * (see #151, #154). See issue #155 for the decision on whether to register the
+ * packages and finish wiring this up, or trim the publish step entirely.
  */
 
-import { execSync, spawnSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { findPackageDirectories } from "./package-workspaces.mjs";
@@ -50,38 +56,6 @@ function run(cmd, options = {}) {
 function getVersion() {
 	const pkg = JSON.parse(readFileSync("packages/ai/package.json", "utf-8"));
 	return pkg.version;
-}
-
-function assertPackagesAreRegisteredWithNpm() {
-	const packageNames = getPublicWorkspacePackages().map((pkg) => pkg.name);
-	const unregisteredPackages = [];
-
-	console.log("Checking npm package registration...");
-	for (const packageName of packageNames) {
-		const result = spawnSync(process.platform === "win32" ? "npm.cmd" : "npm", ["view", packageName, "version", "--json"], {
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-
-		if (result.status === 0 && result.stdout.trim()) {
-			console.log(`  ${packageName}`);
-			continue;
-		}
-
-		const output = [result.stdout, result.stderr, result.error?.message].filter(Boolean).join("\n");
-		if (output.includes("E404") || output.includes("404 Not Found")) {
-			unregisteredPackages.push(packageName);
-			continue;
-		}
-
-		throw new Error(output ? `Failed to query npm registration for ${packageName}\n${output}` : `Failed to query npm registration for ${packageName}`);
-	}
-
-	if (unregisteredPackages.length > 0) {
-		throw new Error(`The following public workspace packages are not registered on npm:\n${unregisteredPackages.map((packageName) => `  ${packageName}`).join("\n")}\nRegister them before running a release.`);
-	}
-
-	console.log("  All public workspace packages are registered on npm\n");
 }
 
 function compareVersions(a, b) {
@@ -221,19 +195,16 @@ if (status && status.trim()) {
 }
 console.log("  Working directory clean\n");
 
-// 2. Verify npm package registration before modifying the worktree.
-assertPackagesAreRegisteredWithNpm();
-
-// 3. Bump or set version
+// 2. Bump or set version
 const version = bumpOrSetVersion(RELEASE_TARGET);
 console.log(`  New version: ${version}\n`);
 
-// 4. Update changelogs
+// 3. Update changelogs
 console.log("Updating CHANGELOG.md files...");
 updateChangelogsForRelease(version);
 console.log();
 
-// 5. Regenerate release artifacts
+// 4. Regenerate release artifacts
 console.log("Regenerating release artifacts...");
 run("npm run generate:models");
 run("npm run check:model-data");
@@ -241,7 +212,7 @@ run("npm run shrinkwrap:coding-agent");
 run("npm run install-lock:coding-agent");
 console.log();
 
-// 6. Run checks and tests
+// 5. Run checks and tests
 console.log("Running checks...");
 run("npm run check");
 console.log();
@@ -254,25 +225,25 @@ console.log("Running tests...");
 run("./test.sh");
 console.log();
 
-// 7. Commit and tag
+// 6. Commit and tag
 console.log("Committing and tagging...");
 stageChangedFiles();
 run(`git commit -m "Release v${version}"`);
 run(`git tag v${version}`);
 console.log();
 
-// 8. Add new [Unreleased] sections
+// 7. Add new [Unreleased] sections
 console.log("Adding [Unreleased] sections for next cycle...");
 addUnreleasedSection();
 console.log();
 
-// 9. Commit
+// 8. Commit
 console.log("Committing changelog updates...");
 stageChangedFiles();
 run(`git commit -m "Add [Unreleased] section for next cycle"`);
 console.log();
 
-// 10. Push
+// 9. Push
 console.log("Pushing to remote...");
 run("git push origin main");
 run(`git push origin v${version}`);
