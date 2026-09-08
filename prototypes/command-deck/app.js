@@ -35,12 +35,13 @@ function rail() {
 
 function field() {
   return `<section class="panel field">
-    <div class="panel-head"><strong>Live task field</strong><span class="meta">orbit / depth 04 / 60 fps target</span></div>
+    <div class="panel-head"><strong>Live task field</strong><span class="meta">drag to orbit &middot; scroll to zoom</span></div>
     <div class="panel-body">
       <canvas id="field-canvas" aria-label="Synthetic 3D live task field"></canvas>
       <div class="field-overlay">
         <div class="field-title"><div class="eyebrow">active operation</div><h1>Audit the Telegram task path</h1><p>Agent is reading the channel boundary and checking the live execution route.</p></div>
         <div class="field-legend"><div class="legend-row"><i class="dot cyan"></i>active execution</div><div class="legend-row"><i class="dot amber"></i>current task</div><div class="legend-row"><i class="dot blue"></i>memory cluster</div><div class="legend-row"><i class="dot green"></i>completed tool</div></div>
+        <div class="field-zoom"><button type="button" data-zoom="in" aria-label="Zoom in">+</button><button type="button" data-zoom="out" aria-label="Zoom out">&minus;</button></div>
       </div>
     </div>
   </section>`;
@@ -319,6 +320,24 @@ async function setupField() {
     };
     window.addEventListener("pointermove", onPointerMove);
 
+    // Dragging to orbit only works where the canvas is actually the topmost
+    // element (the field panel body); these buttons give a click-only zoom
+    // path that works regardless of where the pointer is on the page.
+    const dolly = (factor) => {
+      const offset = camera.position.clone().sub(controls.target);
+      offset.multiplyScalar(factor);
+      offset.clampLength(controls.minDistance, controls.maxDistance);
+      camera.position.copy(controls.target).add(offset);
+      controls.update();
+    };
+    const onZoomClick = (event) => {
+      const button = event.target.closest("[data-zoom]");
+      if (!button) return;
+      dolly(button.dataset.zoom === "in" ? 0.85 : 1.15);
+    };
+    const zoomControls = document.querySelector(".field-zoom");
+    zoomControls?.addEventListener("click", onZoomClick);
+
     const baseTiltX = tiltGroup.rotation.x;
     const baseTiltZ = tiltGroup.rotation.z;
     let animationFrame = 0;
@@ -340,6 +359,7 @@ async function setupField() {
       cancelAnimationFrame(animationFrame);
       window.removeEventListener("resize", resize);
       window.removeEventListener("pointermove", onPointerMove);
+      zoomControls?.removeEventListener("click", onZoomClick);
       controls.dispose();
       composer.dispose();
       renderer.dispose();
