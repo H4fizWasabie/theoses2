@@ -18,7 +18,7 @@ import {
 } from "../../utils/shell.ts";
 import { getExperimentalToolSampling } from "../experimental.ts";
 import type { ExtensionContext, ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
-import { OutputAccumulator } from "./output-accumulator.ts";
+import { DEFAULT_HEAD_BYTES, OutputAccumulator } from "./output-accumulator.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult } from "./truncate.ts";
@@ -400,7 +400,7 @@ export function createShellToolDefinition(
 	return {
 		name: config.name,
 		label: config.label,
-		description: `Execute a ${config.shellName} command in the current working directory. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
+		description: `Execute a ${config.shellName} command in the current working directory. Returns stdout and stderr. Output is truncated to the first ${DEFAULT_HEAD_BYTES} bytes plus the last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved as a session artifact. Optionally provide a timeout in seconds.`,
 		promptSnippet: config.promptSnippet,
 		promptGuidelines: exposeSessionEnvironment && config.promptGuidelines ? [...config.promptGuidelines] : undefined,
 		parameters: bashSchema,
@@ -419,7 +419,11 @@ export function createShellToolDefinition(
 			const rewrittenCommand = await rewriteCommandWithRtk(command);
 			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${rewrittenCommand}` : rewrittenCommand;
 			const spawnContext = resolveSpawnContext(resolvedCommand, cwd, spawnHook, exposeSessionEnvironment, ctx);
-			const output = new OutputAccumulator({ tempFilePrefix: config.tempFilePrefix });
+			const output = new OutputAccumulator({
+				tempFilePrefix: config.tempFilePrefix,
+				maxHeadBytes: DEFAULT_HEAD_BYTES,
+				spillDir: ctx?.sessionManager?.getArtifactDirectory(),
+			});
 			let acceptingOutput = true;
 			let updateTimer: NodeJS.Timeout | undefined;
 			let updateDirty = false;
@@ -474,6 +478,17 @@ export function createShellToolDefinition(
 				emitOutputUpdate();
 				const snapshot = output.snapshot({ persistIfTruncated: true });
 				await output.closeTempFile();
+				if (snapshot.fullOutputPath && ctx?.sessionManager) {
+					try {
+						ctx.sessionManager.appendArtifact(
+							"bash output",
+							snapshot.fullOutputPath,
+							snapshot.truncation.totalBytes,
+						);
+					} catch {
+						// Best-effort catalog registration; the path in the notice text still works either way.
+					}
+				}
 				return snapshot;
 			};
 
