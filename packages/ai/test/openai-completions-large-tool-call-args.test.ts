@@ -3,7 +3,9 @@ import { getModel, streamSimple } from "../src/compat.ts";
 import type { Tool } from "../src/types.ts";
 
 const mockState = vi.hoisted(() => ({
-	chunks: undefined as Array<{ choices?: Array<{ delta: Record<string, unknown>; finish_reason: string | null }> }> | undefined,
+	chunks: undefined as
+		| Array<{ choices?: Array<{ delta: Record<string, unknown>; finish_reason: string | null }> }>
+		| undefined,
 }));
 
 vi.mock("openai", () => {
@@ -65,7 +67,9 @@ describe("openai-completions large streaming tool-call arguments", () => {
 						tool_calls: [
 							{
 								index: 0,
-								...(i === 0 ? { id: "call_1", type: "function", function: { name: "write", arguments: delta } } : { function: { arguments: delta } }),
+								...(i === 0
+									? { id: "call_1", type: "function", function: { name: "write", arguments: delta } }
+									: { function: { arguments: delta } }),
 							},
 						],
 					},
