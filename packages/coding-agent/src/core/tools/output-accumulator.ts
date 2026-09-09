@@ -6,7 +6,7 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, type TruncationResult, truncateHe
 
 /** Bytes of the very start of the output kept alongside the tail, so truncated
  * output (e.g. build/install setup lines) isn't lost to only-the-end truncation. */
-export const DEFAULT_HEAD_BYTES = 2000;
+export const DEFAULT_HEAD_BYTES = 1000;
 
 export interface OutputAccumulatorOptions {
 	maxLines?: number;

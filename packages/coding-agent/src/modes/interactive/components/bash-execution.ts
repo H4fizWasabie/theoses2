@@ -4,9 +4,9 @@
 
 import { Container, Loader, Spacer, Text, type TUI } from "theoses-tui";
 import {
-	DEFAULT_MAX_BYTES,
-	DEFAULT_MAX_LINES,
 	type TruncationResult,
+	TOOL_OUTPUT_MAX_BYTES,
+	TOOL_OUTPUT_MAX_LINES,
 	truncateTail,
 } from "../../../core/tools/truncate.ts";
 import { stripAnsi } from "../../../utils/ansi.ts";
@@ -121,8 +121,8 @@ export class BashExecutionComponent extends Container {
 		// Apply truncation for LLM context limits (same limits as bash tool)
 		const fullOutput = this.outputLines.join("\n");
 		const contextTruncation = truncateTail(fullOutput, {
-			maxLines: DEFAULT_MAX_LINES,
-			maxBytes: DEFAULT_MAX_BYTES,
+			maxLines: TOOL_OUTPUT_MAX_LINES,
+			maxBytes: TOOL_OUTPUT_MAX_BYTES,
 		});
 
 		// Get the lines to potentially display (after context truncation)
