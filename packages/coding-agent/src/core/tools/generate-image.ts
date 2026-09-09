@@ -22,7 +22,7 @@ export interface GenerateImageOperations {
 
 const CLOUDFLARE_BASE_URL = "https://api.cloudflare.com/client/v4";
 const DEFAULT_CLOUDFLARE_MODEL = "@cf/black-forest-labs/flux-1-schnell";
-const DEFAULT_OPENROUTER_IMAGE_MODEL = "google/gemini-3.1-flash-lite-image";
+const DEFAULT_OPENROUTER_IMAGE_MODEL = "meta/muse-image";
 
 async function generateWithCloudflare(prompt: string, signal?: AbortSignal): Promise<GeneratedImage> {
 	const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -105,18 +105,18 @@ async function generateWithPollinations(prompt: string, signal?: AbortSignal): P
 	return { data, mimeType: response.headers.get("content-type") || "image/jpeg", provider: "Pollinations.ai" };
 }
 
-/** Cloudflare Workers AI (free tier) -> OpenRouter Gemini image model -> Pollinations.ai (free, no key), in that order. */
+/** OpenRouter (primary) -> Cloudflare Workers AI (free tier fallback) -> Pollinations.ai (free, no key), in that order. */
 function createFallbackOperations(): GenerateImageOperations {
 	return {
 		generate: async (prompt, signal) => {
-			for (const generate of [generateWithCloudflare, generateWithOpenRouter, generateWithPollinations]) {
+			for (const generate of [generateWithOpenRouter, generateWithCloudflare, generateWithPollinations]) {
 				try {
 					return await generate(prompt, signal);
 				} catch {
 					// Try the next provider in the chain.
 				}
 			}
-			throw new Error("Image generation failed on Cloudflare Workers AI, OpenRouter, and Pollinations.ai");
+			throw new Error("Image generation failed on OpenRouter, Cloudflare Workers AI, and Pollinations.ai");
 		},
 	};
 }
@@ -137,7 +137,7 @@ export function createGenerateImageToolDefinition(options?: {
 		name: "generate_image",
 		label: "generate_image",
 		description:
-			"Generate an image from a text prompt (Cloudflare Workers AI, falling back to OpenRouter then Pollinations.ai). Saves the image to disk and returns it as a viewable attachment.",
+			"Generate an image from a text prompt (OpenRouter, falling back to Cloudflare Workers AI then Pollinations.ai). Saves the image to disk and returns it as a viewable attachment.",
 		promptSnippet: "Generate an image from a text prompt",
 		parameters: generateImageSchema,
 		execute: async (_id, { prompt }: GenerateImageToolInput, signal) => {
