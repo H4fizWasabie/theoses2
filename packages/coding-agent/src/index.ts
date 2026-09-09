@@ -277,6 +277,10 @@ export {
 	type ToolSourceSettings,
 	type TuiMode,
 } from "./core/settings-manager.ts";
+export {
+	configureHttpDispatcher,
+	DEFAULT_HTTP_IDLE_TIMEOUT_MS,
+} from "./core/http-dispatcher.ts";
 // Skills
 export {
 	formatSkillsForPrompt,

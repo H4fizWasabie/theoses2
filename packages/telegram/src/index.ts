@@ -2,12 +2,19 @@ import { Bot, type Context, InputFile } from "grammy";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
+	configureHttpDispatcher,
 	createAgentSession,
 	maybeRunConsolidation,
 	type SessionInfo,
 	SessionManager,
 } from "theoses-coding-agent";
 import { chunkHtml, formatTelegramHtml, splitSections } from "./format.ts";
+
+// No settings.json override plumbing here (telegram doesn't load SettingsManager);
+// this applies the shared default idle timeout globally so a stalled/looping
+// provider stream is abandoned and retried well before OpenRouter's own
+// much longer upstream timeout.
+configureHttpDispatcher();
 
 const CHANNEL = "telegram";
 const TELEGRAM_MESSAGE_LIMIT = 4000;
