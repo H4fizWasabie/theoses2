@@ -12,6 +12,16 @@ export const DEFAULT_MAX_LINES = 500;
 export const DEFAULT_MAX_BYTES = 12 * 1024; // 12KB
 export const GREP_MAX_LINE_LENGTH = 500; // Max chars per grep match line
 
+/**
+ * Smaller limits for tools that always spill their full output to a session
+ * artifact file when truncated (bash, grep, ls, find). Shrinking these only
+ * costs an extra `read` on the spill file for the rare oversized call - no
+ * data loss - so they're kept separate from DEFAULT_MAX_LINES/DEFAULT_MAX_BYTES,
+ * which `read` also uses and has no spill fallback for.
+ */
+export const TOOL_OUTPUT_MAX_LINES = 250;
+export const TOOL_OUTPUT_MAX_BYTES = 6 * 1024; // 6KB
+
 export interface TruncationResult {
 	/** The truncated content */
 	content: string;

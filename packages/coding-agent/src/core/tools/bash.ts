@@ -21,7 +21,13 @@ import type { ExtensionContext, ToolDefinition, ToolRenderResultOptions } from "
 import { DEFAULT_HEAD_BYTES, OutputAccumulator } from "./output-accumulator.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult } from "./truncate.ts";
+import {
+	DEFAULT_MAX_BYTES,
+	formatSize,
+	TOOL_OUTPUT_MAX_BYTES,
+	TOOL_OUTPUT_MAX_LINES,
+	type TruncationResult,
+} from "./truncate.ts";
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const MAX_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000;
@@ -400,7 +406,7 @@ export function createShellToolDefinition(
 	return {
 		name: config.name,
 		label: config.label,
-		description: `Execute a ${config.shellName} command in the current working directory. Returns stdout and stderr. Output is truncated to the first ${DEFAULT_HEAD_BYTES} bytes plus the last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved as a session artifact. Optionally provide a timeout in seconds.`,
+		description: `Execute a ${config.shellName} command in the current working directory. Returns stdout and stderr. Output is truncated to the first ${DEFAULT_HEAD_BYTES} bytes plus the last ${TOOL_OUTPUT_MAX_LINES} lines or ${TOOL_OUTPUT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved as a session artifact. Optionally provide a timeout in seconds.`,
 		promptSnippet: config.promptSnippet,
 		promptGuidelines: exposeSessionEnvironment && config.promptGuidelines ? [...config.promptGuidelines] : undefined,
 		parameters: bashSchema,
@@ -421,6 +427,8 @@ export function createShellToolDefinition(
 			const spawnContext = resolveSpawnContext(resolvedCommand, cwd, spawnHook, exposeSessionEnvironment, ctx);
 			const output = new OutputAccumulator({
 				tempFilePrefix: config.tempFilePrefix,
+				maxLines: TOOL_OUTPUT_MAX_LINES,
+				maxBytes: TOOL_OUTPUT_MAX_BYTES,
 				maxHeadBytes: DEFAULT_HEAD_BYTES,
 				spillDir: ctx?.sessionManager?.getArtifactDirectory(),
 			});
@@ -506,7 +514,7 @@ export function createShellToolDefinition(
 					} else if (truncation.truncatedBy === "lines") {
 						text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines}. Full output: ${snapshot.fullOutputPath}]`;
 					} else {
-						text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${snapshot.fullOutputPath}]`;
+						text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(TOOL_OUTPUT_MAX_BYTES)} limit). Full output: ${snapshot.fullOutputPath}]`;
 					}
 				}
 				return { text, details };

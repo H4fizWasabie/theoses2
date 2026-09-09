@@ -12,7 +12,7 @@ import { spillTruncatedOutput } from "./output-shaping.ts";
 import { pathExists, resolveToCwd } from "./path-utils.ts";
 import { getTextOutput, invalidArgText, shortenPath, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
-import { DEFAULT_MAX_BYTES, formatSize, type TruncationResult, truncateHead } from "./truncate.ts";
+import { formatSize, TOOL_OUTPUT_MAX_BYTES, type TruncationResult, truncateHead } from "./truncate.ts";
 
 /** Relativize a find result against the search root and normalize it to posix separators. */
 export function relativizeFindResultPath(
@@ -116,7 +116,7 @@ function formatFindResult(
 	if (resultLimit || truncation?.truncated) {
 		const warnings: string[] = [];
 		if (resultLimit) warnings.push(`${resultLimit} results limit`);
-		if (truncation?.truncated) warnings.push(`${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit`);
+		if (truncation?.truncated) warnings.push(`${formatSize(truncation.maxBytes ?? TOOL_OUTPUT_MAX_BYTES)} limit`);
 		text += `\n${theme.fg("warning", `[Truncated: ${warnings.join(", ")}]`)}`;
 	}
 	return text;
@@ -130,7 +130,7 @@ export function createFindToolDefinition(
 	return {
 		name: "find",
 		label: "find",
-		description: `Search for files by glob pattern. Returns matching file paths relative to the search directory. Respects .gitignore. Output is truncated to ${DEFAULT_LIMIT} results or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first).`,
+		description: `Search for files by glob pattern. Returns matching file paths relative to the search directory. Respects .gitignore. Output is truncated to ${DEFAULT_LIMIT} results or ${TOOL_OUTPUT_MAX_BYTES / 1024}KB (whichever is hit first).`,
 		promptSnippet: findToolSystemPromptContribution.snippet,
 		parameters: findSchema,
 		async execute(
@@ -199,7 +199,7 @@ export function createFindToolDefinition(
 							const relativized = results.map((p) => relativizeFindResultPath(p, searchPath));
 							const resultLimitReached = relativized.length >= effectiveLimit;
 							const rawOutput = relativized.join("\n");
-							const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
+							const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER, maxBytes: TOOL_OUTPUT_MAX_BYTES });
 							let resultOutput = truncation.content;
 							const details: FindToolDetails = {};
 							const notices: string[] = [];
@@ -214,7 +214,7 @@ export function createFindToolDefinition(
 									sessionManager: ctx?.sessionManager,
 								});
 								notices.push(
-									`${formatSize(DEFAULT_MAX_BYTES)} limit reached` +
+									`${formatSize(TOOL_OUTPUT_MAX_BYTES)} limit reached` +
 										(fullOutputPath ? `. Full output: ${fullOutputPath}` : ""),
 								);
 								details.truncation = truncation;
@@ -338,7 +338,7 @@ export function createFindToolDefinition(
 
 							const resultLimitReached = relativized.length >= effectiveLimit;
 							const rawOutput = relativized.join("\n");
-							const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
+							const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER, maxBytes: TOOL_OUTPUT_MAX_BYTES });
 							let resultOutput = truncation.content;
 							const details: FindToolDetails = {};
 							const notices: string[] = [];
@@ -355,7 +355,7 @@ export function createFindToolDefinition(
 									sessionManager: ctx?.sessionManager,
 								});
 								notices.push(
-									`${formatSize(DEFAULT_MAX_BYTES)} limit reached` +
+									`${formatSize(TOOL_OUTPUT_MAX_BYTES)} limit reached` +
 										(fullOutputPath ? `. Full output: ${fullOutputPath}` : ""),
 								);
 								details.truncation = truncation;
