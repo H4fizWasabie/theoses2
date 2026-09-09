@@ -170,6 +170,10 @@ export {
 } from "./core/extensions/index.ts";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
 export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
+export {
+	configureHttpDispatcher,
+	DEFAULT_HTTP_IDLE_TIMEOUT_MS,
+} from "./core/http-dispatcher.ts";
 export { convertToLlm } from "./core/messages.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
 export {
@@ -277,10 +281,6 @@ export {
 	type ToolSourceSettings,
 	type TuiMode,
 } from "./core/settings-manager.ts";
-export {
-	configureHttpDispatcher,
-	DEFAULT_HTTP_IDLE_TIMEOUT_MS,
-} from "./core/http-dispatcher.ts";
 // Skills
 export {
 	formatSkillsForPrompt,
