@@ -186,7 +186,10 @@ export function createLsToolDefinition(
 
 						const rawOutput = results.join("\n");
 						// Apply byte truncation. There is no separate line limit because entry count is already capped.
-						const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER, maxBytes: TOOL_OUTPUT_MAX_BYTES });
+						const truncation = truncateHead(rawOutput, {
+							maxLines: Number.MAX_SAFE_INTEGER,
+							maxBytes: TOOL_OUTPUT_MAX_BYTES,
+						});
 						let output = truncation.content;
 						const details: LsToolDetails = {};
 						// Build actionable notices for truncation and entry limits.

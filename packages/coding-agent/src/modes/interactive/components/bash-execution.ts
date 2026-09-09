@@ -4,9 +4,9 @@
 
 import { Container, Loader, Spacer, Text, type TUI } from "theoses-tui";
 import {
-	type TruncationResult,
 	TOOL_OUTPUT_MAX_BYTES,
 	TOOL_OUTPUT_MAX_LINES,
+	type TruncationResult,
 	truncateTail,
 } from "../../../core/tools/truncate.ts";
 import { stripAnsi } from "../../../utils/ansi.ts";
