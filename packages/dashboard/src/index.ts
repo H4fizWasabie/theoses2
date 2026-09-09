@@ -7,6 +7,7 @@ import type { AgentMessage } from "theoses-agent-core";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
+	configureHttpDispatcher,
 	createAgentSession,
 	getAgentDir,
 	maybeRunConsolidation,
@@ -16,6 +17,9 @@ import {
 import { deletePath, FileConflictError, listDirectory, readTextFile, renamePath, writeTextFile } from "./files.ts";
 import { readMemoryGraph } from "./memory-graph.ts";
 import { saveTelegramConfig, telegramConfigStatus } from "./telegram-config.ts";
+
+// See packages/telegram/src/index.ts for why this is applied unconditionally here too.
+configureHttpDispatcher();
 
 const DASHBOARD_CHANNEL = "dashboard";
 const TELEGRAM_CHANNEL = "telegram";
