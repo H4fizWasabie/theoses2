@@ -519,6 +519,14 @@ const graphView = { offsetX: 0, offsetY: 0, scale: 1 };
 
 function graphCanvas() { return $("graph-canvas"); }
 
+/** Lightens a "#rrggbb" color toward white by `amount` (0-1), for legible labels that still carry the node's cluster hue. */
+function lightenHexColor(hex, amount) {
+  const num = parseInt(hex.slice(1), 16);
+  const r = (num >> 16) & 255, g = (num >> 8) & 255, b = num & 255;
+  const mix = (c) => Math.round(c + (255 - c) * amount);
+  return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+}
+
 /** Union-find over edges: nodes connected (directly or transitively) belong to the same cluster. */
 function computeGraphClusters(nodes, edges) {
   const parent = new Map(nodes.map((node) => [node.id, node.id]));
@@ -558,6 +566,7 @@ function layoutGraphClusters(nodes, edges) {
       node.y = node.anchorY + (Math.random() - 0.5) * 8;
       node.vx = 0; node.vy = 0;
       node.clusterColor = color;
+      node.labelColor = lightenHexColor(color, 0.55);
       node.clusterSize = cluster.length;
     });
   });
@@ -620,7 +629,7 @@ function drawGraph(graph) {
   ctx.translate(graphView.offsetX, graphView.offsetY);
   ctx.scale(graphView.scale, graphView.scale);
 
-  ctx.strokeStyle = "#d5d7d3";
+  ctx.strokeStyle = "rgba(213, 215, 211, 0.28)";
   ctx.lineWidth = 1 / graphView.scale;
   for (const edge of graph.edges) {
     const source = graph.nodes.find((n) => n.id === edge.source);
@@ -643,8 +652,8 @@ function drawGraph(graph) {
     ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
     ctx.fill();
     if (showLabels || node === graphHoverNode) {
-      ctx.fillStyle = "#202321";
-      ctx.font = `${11 / graphView.scale}px Inter, sans-serif`;
+      ctx.fillStyle = node.labelColor || "#e4e6e2";
+      ctx.font = `${11 / graphView.scale}px "IBM Plex Sans", sans-serif`;
       ctx.fillText((node.subject || node.id).slice(0, 60), node.x + radius + 4 / graphView.scale, node.y + 4 / graphView.scale);
     }
   }
