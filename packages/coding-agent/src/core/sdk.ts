@@ -62,7 +62,7 @@ export interface CreateAgentSessionOptions {
 	 * Optional default tool suppression mode when no explicit allowlist is provided.
 	 *
 	 * - "all": start with no tools enabled
-	 * - "builtin": disable the default built-in tools (read, bash, edit, write, working_note, remember, save_note,
+	 * - "builtin": disable the default built-in tools (read, bash, edit, write, working_note, note_operations, remember, save_note,
 	 *   convert_doc, web_search, generate_image) but keep extension/custom tools enabled
 	 */
 	noTools?: "all" | "builtin";
@@ -71,7 +71,7 @@ export interface CreateAgentSessionOptions {
 	 *
 	 * When omitted, Theoses uses the `defaultTools` setting for the initial built-in
 	 * selection when configured. Otherwise it enables the default built-in tools
-	 * (read, bash, edit, write, working_note, remember, save_note, convert_doc, web_search,
+	 * (read, bash, edit, write, working_note, note_operations, remember, save_note, convert_doc, web_search,
 	 * generate_image). Extension/custom tools remain enabled unless `noTools` changes that
 	 * default. When provided, only the listed tool names are enabled.
 	 */
@@ -308,6 +308,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		"edit",
 		"write",
 		"working_note",
+		"note_operations",
 		"remember",
 		"save_note",
 		"convert_doc",

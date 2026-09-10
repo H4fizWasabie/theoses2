@@ -5,12 +5,15 @@ import type { ToolDefinition } from "../extensions/types.ts";
 
 const workingNoteSchema = Type.Object({
 	note: Type.Optional(
-		Type.String({ description: "The complete replacement Working Note, capped at 2000 characters" }),
+		Type.String({
+			description:
+				"One fact or line to append to the Working Note (not a replacement — earlier lines are kept, oldest dropped only once the note exceeds its cap)",
+		}),
 	),
 	clear: Type.Optional(
 		Type.Boolean({
 			description:
-				"Set to true once the task the Working Note was tracking is fully complete, to clear it before starting on something unrelated. Omit `note` when clearing.",
+				"Set to true to clear the Working Note early, before its task is done (e.g. abandoning an approach). The harness already clears it automatically once the current operation finishes, so this is only for clearing mid-operation. Omit `note` when clearing.",
 		}),
 	),
 });
@@ -25,9 +28,9 @@ export function createWorkingNoteToolDefinition(
 		name: "working_note",
 		label: "working_note",
 		description:
-			"Replace the per-channel-session Working Note with concise established facts and open discrepancies. " +
-			"Call with `clear: true` once the task it was tracking is fully complete (not while a clarifying question to the user is still outstanding), so unrelated context doesn't bleed into the next task.",
-		promptSnippet: "Update or clear the bounded Working Note",
+			"Append one concise established fact, path, or open discrepancy to the current operation's Working Note — a scratchpad for things this operation must not re-discover. " +
+			"It is cleared automatically by the harness once the operation completes, so it does not need to be cleared manually except to abandon it early (see `clear`).",
+		promptSnippet: "Append to or clear the bounded Working Note",
 		parameters: workingNoteSchema,
 		execute: async (_toolCallId, { note, clear: shouldClear }: WorkingNoteToolInput) => {
 			if (shouldClear) {

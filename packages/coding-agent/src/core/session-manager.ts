@@ -1118,15 +1118,33 @@ export class SessionManager {
 		return note;
 	}
 
-	appendWorkingNote(note: string): string {
-		const bounded = note.trim().slice(0, WORKING_NOTE_WRITE_CAP);
-		if (!bounded) throw new Error("Working Note cannot be empty");
+	/**
+	 * Appends one line to the Working Note (issue #173): the model, and the
+	 * harness itself (e.g. auto-logged bash commands), add facts incrementally
+	 * rather than resending the whole note each time. Oldest whole lines are
+	 * dropped once the combined note exceeds WORKING_NOTE_WRITE_CAP, so a
+	 * single overlong line is hard-truncated from its start rather than
+	 * silently dropping the entire note.
+	 */
+	appendWorkingNote(line: string): string {
+		const trimmedLine = line.trim();
+		if (!trimmedLine) throw new Error("Working Note line cannot be empty");
+		const existing = this.getWorkingNote();
+		let combined = existing ? `${existing}\n${trimmedLine}` : trimmedLine;
+		let lines = combined.split("\n");
+		while (combined.length > WORKING_NOTE_WRITE_CAP && lines.length > 1) {
+			lines = lines.slice(1);
+			combined = lines.join("\n");
+		}
+		if (combined.length > WORKING_NOTE_WRITE_CAP) {
+			combined = combined.slice(combined.length - WORKING_NOTE_WRITE_CAP);
+		}
 		const entry: WorkingNoteEntry = {
 			type: "working_note",
 			id: generateId(this.byId),
 			parentId: this.leafId,
 			timestamp: new Date().toISOString(),
-			note: bounded,
+			note: combined,
 		};
 		this._appendEntry(entry);
 		return entry.id;

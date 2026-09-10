@@ -51,6 +51,12 @@ export {
 } from "./ls.ts";
 export { createMemoryToolDefinitions } from "./memory.ts";
 export {
+	appendOperationalNote,
+	createOperationalNotesToolDefinition,
+	OPERATIONAL_NOTES_MAX_BYTES,
+	type OperationalNoteInput,
+} from "./operational-notes.ts";
+export {
 	createLocalPowerShellOperations,
 	createPowerShellTool,
 	createPowerShellToolDefinition,
@@ -105,6 +111,7 @@ import { createGenerateImageToolDefinition, type GenerateImageOperations } from 
 import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.ts";
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.ts";
 import { createMemoryToolDefinitions } from "./memory.ts";
+import { createOperationalNotesToolDefinition } from "./operational-notes.ts";
 import { createPowerShellTool, createPowerShellToolDefinition, type PowerShellToolOptions } from "./powershell.ts";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -124,6 +131,7 @@ export type ToolName =
 	| "find"
 	| "ls"
 	| "working_note"
+	| "note_operations"
 	| "remember"
 	| "save_note"
 	| "convert_doc"
@@ -139,6 +147,7 @@ export const allToolNames: Set<ToolName> = new Set([
 	"find",
 	"ls",
 	"working_note",
+	"note_operations",
 	"remember",
 	"save_note",
 	"convert_doc",
@@ -157,6 +166,7 @@ export interface ToolsOptions {
 	ls?: LsToolOptions;
 	workingNote?: (note: string) => void;
 	workingNoteClear?: () => void;
+	operationalNotes?: { path?: string };
 	memory?: MemoryStore;
 	onMemorySaved?: () => void;
 	convertDoc?: { operations?: ConvertDocOperations };
@@ -187,6 +197,8 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 				options?.workingNote ?? (() => {}),
 				options?.workingNoteClear ?? (() => {}),
 			);
+		case "note_operations":
+			return createOperationalNotesToolDefinition(options?.operationalNotes);
 		case "remember":
 		case "save_note": {
 			const definitions = createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore());
@@ -228,6 +240,8 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 					options?.workingNoteClear ?? (() => {}),
 				),
 			);
+		case "note_operations":
+			return wrapToolDefinition(createOperationalNotesToolDefinition(options?.operationalNotes));
 		case "remember":
 		case "save_note": {
 			const definitions = createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore());
@@ -278,6 +292,7 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 			options?.workingNote ?? (() => {}),
 			options?.workingNoteClear ?? (() => {}),
 		),
+		note_operations: createOperationalNotesToolDefinition(options?.operationalNotes),
 		remember: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore(), options?.onMemorySaved)[0]!,
 		save_note: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore(), options?.onMemorySaved)[1]!,
 		convert_doc: createConvertDocToolDefinition(cwd, options?.convertDoc),
@@ -319,6 +334,7 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		working_note: wrapToolDefinition(
 			createWorkingNoteToolDefinition(options?.workingNote ?? (() => {}), options?.workingNoteClear ?? (() => {})),
 		),
+		note_operations: wrapToolDefinition(createOperationalNotesToolDefinition(options?.operationalNotes)),
 		remember: wrapToolDefinition(createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[0]!),
 		save_note: wrapToolDefinition(createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[1]!),
 		convert_doc: wrapToolDefinition(createConvertDocToolDefinition(cwd, options?.convertDoc)),

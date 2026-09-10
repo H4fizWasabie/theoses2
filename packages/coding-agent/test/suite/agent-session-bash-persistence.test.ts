@@ -50,6 +50,30 @@ describe("AgentSession bash and persistence characterization", () => {
 
 		expect(harness.session.hasPendingBashMessages).toBe(false);
 		expect(harness.session.messages[harness.session.messages.length - 1]?.role).toBe("bashExecution");
+	});
+
+	it("auto-logs the bash command into the Working Note (issue #173)", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+
+		harness.session.recordBashResult("echo hi", {
+			output: "hi",
+			exitCode: 0,
+			cancelled: false,
+			truncated: false,
+		});
+
+		expect(harness.sessionManager.getWorkingNote()).toBe("ran: echo hi");
+
+		harness.session.recordBashResult("ls -la", {
+			output: "",
+			exitCode: 0,
+			cancelled: false,
+			truncated: false,
+		});
+
+		// Append-only: the second command's log line joins the first rather than replacing it.
+		expect(harness.sessionManager.getWorkingNote()).toBe("ran: echo hi\nran: ls -la");
 		expect(getEntryTypes(harness)).toContain("message");
 	});
 
