@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { ThinkingLevel } from "theoses-agent-core";
 import { type Api, contentText, type Model, type ToolCall, type ToolResultMessage } from "theoses-ai";
 import { type Static, Type } from "typebox";
 import { getAgentDir } from "../config.ts";
@@ -40,8 +41,18 @@ export function shouldTriggerConsolidation(userMessageText: string, turnsSinceCh
 // ---------------------------------------------------------------------------
 
 interface CheckpointFile {
-	[channelSessionKey: string]: { lastEntryId: string | null };
+	[channelSessionKey: string]: { lastEntryId: string | null; lastFailureAt?: string };
 }
+
+/**
+ * Issue #177: without a cooldown, a failing checkpoint never advances (by design — see
+ * writeCheckpoint's comment), which meant `turnsSinceCheckpoint` stayed >= CONSOLIDATION_TURN_CEILING
+ * forever and every single subsequent turn re-triggered consolidation again, each time reprocessing
+ * a larger accumulated window. Confirmed in production: this compounded into 500K+ token consolidation
+ * calls firing every 1-3 minutes, hammering the same process the live chat runs on. A failure now
+ * blocks re-triggering for this window instead of retrying on every turn.
+ */
+const CONSOLIDATION_FAILURE_COOLDOWN_MS = 15 * 60 * 1000;
 
 function checkpointPath(): string {
 	// Derived from getAgentDir() (respects THEOSES_CODING_AGENT_DIR) rather than a bare homedir()
@@ -66,11 +77,21 @@ function readCheckpoints(): CheckpointFile {
 	}
 }
 
+/** Clears any prior failure marker for this key — a successful pass means the cooldown no longer applies. */
 function writeCheckpoint(key: string, lastEntryId: string | null): void {
 	const path = checkpointPath();
 	mkdirSync(dirname(path), { recursive: true });
 	const all = readCheckpoints();
 	all[key] = { lastEntryId };
+	writeFileSync(path, JSON.stringify(all, null, 2));
+}
+
+/** Records a failure without touching lastEntryId, so the next trigger still resumes from the same window once the cooldown passes. */
+function writeFailure(key: string, at: string): void {
+	const path = checkpointPath();
+	mkdirSync(dirname(path), { recursive: true });
+	const all = readCheckpoints();
+	all[key] = { lastEntryId: all[key]?.lastEntryId ?? null, lastFailureAt: at };
 	writeFileSync(path, JSON.stringify(all, null, 2));
 }
 
@@ -268,6 +289,15 @@ async function getConsolidationSession(
 			sessionManager,
 			modelRuntime,
 			model,
+			// Issue #177: DeepSeek v4 flash enters an endless reasoning spiral (content:null,
+			// finish:length, at any token budget) on large JSON/tool-mode prompts unless reasoning is
+			// explicitly disabled — the exact defect mino-oss's own team found and fixed for this same
+			// model (mino-agent commits 252ace0/4bca19d/eae17ff). "off" is a real runtime-supported
+			// value throughout the reasoning pipeline (see clampThinkingLevel's ModelThinkingLevel
+			// param) even though this option's public type is the narrower ThinkingLevel — scoped to
+			// this one call site rather than widening the type, since GLM 5.3 Flash (the main chat
+			// model) mandates reasoning and would reject a disabled request outright (mino PR #441).
+			thinkingLevel: "off" as ThinkingLevel,
 			// Restrict to exactly the 4 custom tools this pass uses — `tools` is an allowlist
 			// that applies to customTools too (an empty array would silently disable them, not
 			// just the built-ins). search_memory replaces the need for read/grep/find/ls against
@@ -293,6 +323,14 @@ export interface MaybeRunConsolidationOptions {
 }
 
 /**
+ * Issue #177: tracks channel-session keys with a consolidation pass currently in flight. Necessary
+ * because `maybeRunConsolidation` is fire-and-forget (never awaited by its caller) — without this, a
+ * new trigger firing before a prior attempt for the same session finished could start an overlapping
+ * pass, each holding its own multi-hundred-K-token transcript in memory at once.
+ */
+const inFlightConsolidations = new Set<string>();
+
+/**
  * Fire-and-forget entry point: checks the trigger, and if it fires, runs consolidation over
  * every turn since the last successful checkpoint. Never throws — callers should not await this
  * in the response path; call it and let it run in the background (`.catch` is handled internally).
@@ -315,6 +353,20 @@ const MAX_TOOL_ARGS_CHARS = 200;
 
 function truncate(text: string, maxChars: number): string {
 	return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+}
+
+/**
+ * Issue #177: hard cap on the whole transcript, mirroring mino-oss's own 100K-char cap for the same
+ * consolidation-model defect (mino-agent commit 4bca19d, "consolidation prompt cap - deepseek
+ * reasoning spiral"). Per-entry truncation (MAX_TOOL_RESULT_CHARS/MAX_TOOL_ARGS_CHARS) bounds tool
+ * noise, but user/assistant text is kept in full — a single very long message could still blow past
+ * this even within one CONSOLIDATION_TURN_CEILING-sized chunk. Keeps the tail: the most recent turns
+ * are more likely to contain what the window was triggered for.
+ */
+export const MAX_TRANSCRIPT_CHARS = 100_000;
+
+export function capTranscript(text: string): string {
+	return text.length > MAX_TRANSCRIPT_CHARS ? text.slice(text.length - MAX_TRANSCRIPT_CHARS) : text;
 }
 
 function summarizeToolCall(call: ToolCall): string {
@@ -395,7 +447,7 @@ async function runConsolidationPass(params: {
 	const { cwd, channel, channelSessionId, window, modelRuntime, memoryStore, episodicStore } = params;
 	if (window.length === 0) return;
 
-	const transcript = entriesToTranscript(window);
+	const transcript = capTranscript(entriesToTranscript(window));
 	const model = resolveConsolidationModel(modelRuntime);
 	const { agentSession } = await getConsolidationSession(
 		cwd,
@@ -439,26 +491,58 @@ async function runConsolidationPass(params: {
 
 async function runIfTriggered(options: MaybeRunConsolidationOptions): Promise<void> {
 	const { cwd, channel, channelSessionId, userMessageText, mainSessionManager, modelRuntime } = options;
-	const memoryStore = options.memoryStore ?? new FileMemoryStore();
-	const episodicStore = options.episodicStore ?? (await EpisodicStore.create());
 
+	// Checked and claimed before any `await` in this function — otherwise two near-simultaneous
+	// calls for the same key could both pass this check before either reaches the `add`, since the
+	// guard would only be reached after already yielding once (e.g. to EpisodicStore.create()).
 	const key = channelSessionKey(channel, channelSessionId);
-	const checkpoints = readCheckpoints();
-	const lastEntryId = checkpoints[key]?.lastEntryId ?? null;
+	if (inFlightConsolidations.has(key)) return;
+	inFlightConsolidations.add(key);
 
-	const branch = mainSessionManager.getBranch();
-	const startIndex = lastEntryId ? branch.findIndex((e) => e.id === lastEntryId) + 1 : 0;
-	const window = branch.slice(startIndex).filter((e): e is SessionMessageEntry => e.type === "message");
-	if (window.length === 0) return;
+	try {
+		const memoryStore = options.memoryStore ?? new FileMemoryStore();
+		const episodicStore = options.episodicStore ?? (await EpisodicStore.create());
 
-	if (!shouldTriggerConsolidation(userMessageText, window.length)) return;
+		const checkpoints = readCheckpoints();
+		const entry = checkpoints[key];
+		if (entry?.lastFailureAt && Date.now() - Date.parse(entry.lastFailureAt) < CONSOLIDATION_FAILURE_COOLDOWN_MS) {
+			return;
+		}
+		const lastEntryId = entry?.lastEntryId ?? null;
 
-	await runConsolidationPass({ cwd, channel, channelSessionId, window, modelRuntime, memoryStore, episodicStore });
+		const branch = mainSessionManager.getBranch();
+		const startIndex = lastEntryId ? branch.findIndex((e) => e.id === lastEntryId) + 1 : 0;
+		const window = branch.slice(startIndex).filter((e): e is SessionMessageEntry => e.type === "message");
+		if (window.length === 0) return;
 
-	// Only advance the checkpoint on success — a failure above throws before this line, so the
-	// window rolls into the next trigger instead of being silently dropped.
-	const lastWindowEntry = window[window.length - 1];
-	if (lastWindowEntry) writeCheckpoint(key, lastWindowEntry.id);
+		if (!shouldTriggerConsolidation(userMessageText, window.length)) return;
+
+		// Issue #177: chunk the live trigger the same way backfillFromSessionLog already does, so a
+		// live pass can never balloon past CONSOLIDATION_TURN_CEILING messages regardless of how long
+		// a failing checkpoint left the window growing. Each chunk's checkpoint advances immediately
+		// on success, so a later chunk's failure doesn't roll back progress already made.
+		for (let start = 0; start < window.length; start += CONSOLIDATION_TURN_CEILING) {
+			const chunk = window.slice(start, start + CONSOLIDATION_TURN_CEILING);
+			try {
+				await runConsolidationPass({
+					cwd,
+					channel,
+					channelSessionId,
+					window: chunk,
+					modelRuntime,
+					memoryStore,
+					episodicStore,
+				});
+			} catch (error) {
+				writeFailure(key, new Date().toISOString());
+				throw error;
+			}
+			const lastChunkEntry = chunk[chunk.length - 1];
+			if (lastChunkEntry) writeCheckpoint(key, lastChunkEntry.id);
+		}
+	} finally {
+		inFlightConsolidations.delete(key);
+	}
 }
 
 // ---------------------------------------------------------------------------
