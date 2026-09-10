@@ -1,15 +1,27 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { ThinkingLevel } from "theoses-agent-core";
-import { type Api, contentText, type Model, type ToolCall, type ToolResultMessage } from "theoses-ai";
-import { type Static, Type } from "typebox";
+import {
+	type Api,
+	contentText,
+	type Model,
+	retryAssistantCall,
+	type ToolCall,
+	type ToolResultMessage,
+} from "theoses-ai";
+import type { Context, SimpleStreamOptions } from "theoses-ai/compat";
 import { getAgentDir } from "../config.ts";
-import type { AgentSession } from "./agent-session.ts";
 import { EpisodicStore } from "./episodic-store.ts";
-import type { ToolDefinition } from "./extensions/types.ts";
-import { EDGE_RELATIONS, FileMemoryStore } from "./memory-store.ts";
+import { EDGE_RELATIONS, type EdgeRelation, FileMemoryStore } from "./memory-store.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { SessionManager, type SessionMessageEntry } from "./session-manager.ts";
+
+/**
+ * Issue #180: single-attempt, single-turn retry policy for the one structured-output call a
+ * consolidation pass now makes. Mirrors SettingsManager.getRetrySettings()'s defaults (enabled,
+ * 3 retries, 2s base delay) — this module runs headless in the background and has no
+ * SettingsManager instance of its own to read those from.
+ */
+const CONSOLIDATION_RETRY_POLICY = { enabled: true, maxRetries: 3, baseDelayMs: 2000 };
 
 /** Case-insensitive substring match anywhere in the user's message fires a consolidation pass. */
 export const CONSOLIDATION_TRIGGER_PHRASES = [
@@ -109,7 +121,7 @@ const CONSOLIDATION_MODEL_ID = "deepseek/deepseek-v4-flash-0731";
  * `sendSessionAffinityHeaders`/`sessionAffinityFormat` are already auto-detected true for any
  * openrouter.ai baseUrl (see `packages/ai/src/api/openai-completions.ts`'s `isOpenRouter`
  * detection), so no extra wiring is needed there — a stable per-Channel-Session affinity id
- * (see `getConsolidationSession` below) is what makes that caching actually land across passes.
+ * (see `consolidationSessionAffinityId` below) is what makes that caching actually land across passes.
  */
 export function resolveConsolidationModel(modelRuntime: ModelRuntime): Model<Api> {
 	const model = modelRuntime.getModel("openrouter", CONSOLIDATION_MODEL_ID);
@@ -127,7 +139,8 @@ export function resolveConsolidationModel(modelRuntime: ModelRuntime): Model<Api
 		// providers reject that outright — confirmed via OpenRouter's own error metadata:
 		// `provider_error_code: "queue_timeout"`, `limit_source: "upstream_provider_shared_pool"` —
 		// committing to reserve output budget that large can't fit their queue. Consolidation only
-		// emits a handful of structured tool calls; 32K is generous headroom, not a real constraint.
+		// emits one JSON object (facts + edges + episode) per chunk; 32K is generous headroom, not a
+		// real constraint.
 		maxTokens: 32000,
 		compat: {
 			...(model as Model<"openai-completions">).compat,
@@ -148,166 +161,186 @@ export function resolveConsolidationModel(modelRuntime: ModelRuntime): Model<Api
 }
 
 // ---------------------------------------------------------------------------
-// Custom tools bound to a specific run's stores, given to the consolidation model.
-// ---------------------------------------------------------------------------
-
-function buildConsolidationTools(memoryStore: FileMemoryStore, episodicStore: EpisodicStore): ToolDefinition[] {
-	const emitFactSchema = Type.Object({
-		subject: Type.String({ description: "A present, durable fact — one sentence." }),
-		body: Type.Optional(Type.String({ description: "Optional 1-3 sentence elaboration." })),
-	});
-	const emitEdgeSchema = Type.Object({
-		fromId: Type.String({ description: "The node id the edge originates from." }),
-		targetId: Type.String({ description: "The node id the edge points to." }),
-		rel: Type.Union(
-			EDGE_RELATIONS.map((r) => Type.Literal(r)),
-			{ description: `Relation type. One of: ${EDGE_RELATIONS.join(", ")}` },
-		),
-	});
-	const emitEpisodeSchema = Type.Object({
-		summary: Type.String({ description: "One-sentence summary of what happened in this window." }),
-		startedAt: Type.String({ description: "ISO timestamp of the window's first turn." }),
-		endedAt: Type.String({ description: "ISO timestamp of the window's last turn." }),
-		relatedNodeIds: Type.Optional(Type.Array(Type.String())),
-	});
-
-	return [
-		{
-			name: "search_memory",
-			label: "search_memory",
-			description:
-				"List existing memory node ids and subjects, for dedup/edge-authoring/supersession checks before emitting new facts.",
-			promptSnippet: "List existing memory nodes",
-			parameters: Type.Object({}),
-			execute: async () => {
-				const nodes = memoryStore.listNodes();
-				const text = nodes.map((n) => `${n.id}: ${n.subject}`).join("\n") || "No existing memory nodes.";
-				return { content: [{ type: "text", text }], details: undefined };
-			},
-		},
-		{
-			name: "emit_fact",
-			label: "emit_fact",
-			description:
-				"Create a new semantic memory node for a durable fact surfaced in this window. No durability filter — capture anything that would matter to look up later, not just high-confidence signals. Returns the new node's id for use with emit_edge.",
-			promptSnippet: "Record a durable fact",
-			parameters: emitFactSchema,
-			execute: async (_id, { subject, body }: Static<typeof emitFactSchema>) => {
-				const node = memoryStore.createNode({ subject, body });
-				return { content: [{ type: "text", text: node.id }], details: undefined };
-			},
-		},
-		{
-			name: "emit_edge",
-			label: "emit_edge",
-			description:
-				"Link two memory nodes with a typed relation. Use rel: supersedes when a new fact updates or corrects an existing one — the old node is kept, not deleted.",
-			promptSnippet: "Link two memory nodes",
-			parameters: emitEdgeSchema,
-			execute: async (_id, { fromId, targetId, rel }: Static<typeof emitEdgeSchema>) => {
-				memoryStore.addEdge(fromId, { target: targetId, rel });
-				return { content: [{ type: "text", text: "Edge recorded." }], details: undefined };
-			},
-		},
-		{
-			name: "emit_episode",
-			label: "emit_episode",
-			description: "Record what happened during this conversation window as an episodic memory entry.",
-			promptSnippet: "Record an episode",
-			parameters: emitEpisodeSchema,
-			execute: async (_id, input: Static<typeof emitEpisodeSchema>) => {
-				episodicStore.recordEpisode({
-					startedAt: input.startedAt,
-					endedAt: input.endedAt,
-					summary: input.summary,
-					relatedSemanticNodeIds: input.relatedNodeIds,
-				});
-				return { content: [{ type: "text", text: "Episode recorded." }], details: undefined };
-			},
-		},
-	];
-}
-
-// ---------------------------------------------------------------------------
 // Orchestration
 // ---------------------------------------------------------------------------
 
-const CONSOLIDATION_INSTRUCTIONS = `You are Theoses's memory consolidation pass. You are given a window of a conversation
-that just happened. Your job, in one pass:
+/**
+ * Issue #180: a single structured-output call per chunk, not a multi-turn agentic tool loop.
+ * The prior design had the model call search_memory once, then one emit_fact/emit_edge per
+ * durable fact found, then emit_episode — every one of those turns being a fresh LLM call that
+ * resent the entire accumulated conversation so far in the pass. A window with 18 facts cost on
+ * the order of 18 sequential re-sends of an ever-growing prompt. A keyword-narrowed slice of
+ * existing node subjects is embedded directly in the prompt (`buildExistingNodesSection` below)
+ * instead of a live search_memory call, since dedup checking doesn't need a tool round-trip when
+ * the candidate nodes are cheap to include once. Local ids (f1, f2, ...) let the model wire up
+ * edges and the episode's related facts within its own single response, before any real node id
+ * exists.
+ */
+const CONSOLIDATION_INSTRUCTIONS = `You are Theoses's memory consolidation pass. You are given a window of a
+conversation that just happened, and a list of memory nodes that already exist. Extract durable facts,
+relations between them, and a summary of what happened — all as a single JSON object. Do not call any tools.
 
-1. Call search_memory to see what's already recorded.
-2. For each durable fact in the window (preferences, facts about people/projects/systems, standing
-   decisions — no durability filter, capture generously), call emit_fact. If a fact already exists
-   (same meaning, different wording), do not re-emit it — skip it. If a new fact contradicts an
-   existing one, emit_fact for the new one, then emit_edge with rel: supersedes from the new node
-   to the old node.
-3. For facts that relate to each other or to existing nodes, call emit_edge with an appropriate
-   relation type.
-4. Call emit_episode exactly once, summarizing what happened in this window as a whole (not
-   individual facts), with startedAt/endedAt spanning the window's timestamps.
+Return ONLY a JSON object with this exact shape, no markdown fences, no commentary:
+{
+  "facts": [{"id": "f1", "subject": "one durable fact, one sentence", "body": "optional 1-3 sentence elaboration"}],
+  "edges": [{"from": "f1 or an existing node id", "to": "f2 or an existing node id", "rel": "one of: ${EDGE_RELATIONS.join(", ")}"}],
+  "episode": {"summary": "one-sentence summary of what happened in this window as a whole", "startedAt": "ISO timestamp of the window's first turn", "endedAt": "ISO timestamp of the window's last turn", "relatedFactIds": ["f1"]}
+}
 
-Respond with a brief plain-text confirmation once done. Do not ask questions — this is a
-non-interactive background pass.`;
+Rules:
+- facts: preferences, facts about people/projects/systems, standing decisions — no durability filter,
+  capture generously. "id" is a short local id (f1, f2, ...) used only to wire up edges/relatedFactIds
+  within this response; it is not the real, persisted node id. If a fact in the window already exists in
+  "Existing memory nodes" below (same meaning, different wording), do not re-emit it — skip it. If a new
+  fact contradicts an existing one, still emit the new fact and add an edge with rel: supersedes from the
+  new fact's local id to the existing node's real id.
+- edges: link facts that relate to each other or to an existing node. "from"/"to" may be a local fact id
+  (f1) or a real existing node id copied from the list below.
+- episode: required, exactly one, summarizing the window as a whole (not individual facts). relatedFactIds
+  may reference local fact ids and/or real existing node ids.`;
 
-interface ConsolidationSession {
-	agentSession: AgentSession;
+/**
+ * Existing memory nodes to embed in the prompt for dedup/edge-authoring/supersession checks —
+ * keyword-narrowed against the window's own text, not a dump of the whole store. Mirrors
+ * mino-oss's graphCandidates/keywordCandidates (memory.go): mino caps its own candidate list to
+ * the top 8 matches for the same reason — a full dump would make a single pass's prompt size
+ * scale with total memory-store size instead of the window's size, which is exactly the growth
+ * issue #180 is about. Reuses `remember()` (the live-recall path) rather than a bespoke scorer,
+ * since it already does keyword-entry + edge-walk scoring over the same node set.
+ */
+function buildExistingNodesSection(memoryStore: FileMemoryStore, transcript: string): string {
+	const candidates = memoryStore.remember(transcript);
+	return candidates.map((c) => `${c.id}: ${c.text}`).join("\n") || "No existing memory nodes.";
+}
+
+interface ParsedFact {
+	id: string;
+	subject: string;
+	body?: string;
+}
+
+interface ParsedEdge {
+	from: string;
+	to: string;
+	rel: EdgeRelation;
+}
+
+interface ParsedEpisode {
+	summary: string;
+	startedAt: string;
+	endedAt: string;
+	relatedFactIds?: string[];
+}
+
+interface ParsedConsolidation {
+	facts: ParsedFact[];
+	edges: ParsedEdge[];
+	episode: ParsedEpisode;
+}
+
+function isEdgeRelation(value: unknown): value is EdgeRelation {
+	return typeof value === "string" && (EDGE_RELATIONS as readonly string[]).includes(value);
+}
+
+/**
+ * Tolerant JSON parsing for the model's structured-output response — same precedent as
+ * compaction.ts's DISTILLATION_PROMPT/distillMemory path for the same model family: strip
+ * markdown code fences if present, then validate shape field-by-field rather than trusting the
+ * whole payload, since nothing here is schema-enforced at the API level.
+ */
+function parseConsolidationResponse(text: string): ParsedConsolidation {
+	const cleaned = text.trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
+	const parsed: unknown = JSON.parse(cleaned);
+	if (typeof parsed !== "object" || parsed === null) {
+		throw new Error("Consolidation response was not a JSON object");
+	}
+	const obj = parsed as Record<string, unknown>;
+
+	const facts: ParsedFact[] = Array.isArray(obj.facts)
+		? obj.facts
+				.filter(
+					(f): f is Record<string, unknown> =>
+						typeof f === "object" &&
+						f !== null &&
+						typeof (f as Record<string, unknown>).id === "string" &&
+						typeof (f as Record<string, unknown>).subject === "string",
+				)
+				.map((f) => ({
+					id: f.id as string,
+					subject: f.subject as string,
+					body: typeof f.body === "string" ? f.body : undefined,
+				}))
+		: [];
+
+	const edges: ParsedEdge[] = Array.isArray(obj.edges)
+		? obj.edges
+				.filter(
+					(e): e is Record<string, unknown> =>
+						typeof e === "object" &&
+						e !== null &&
+						typeof (e as Record<string, unknown>).from === "string" &&
+						typeof (e as Record<string, unknown>).to === "string" &&
+						isEdgeRelation((e as Record<string, unknown>).rel),
+				)
+				.map((e) => ({ from: e.from as string, to: e.to as string, rel: e.rel as EdgeRelation }))
+		: [];
+
+	const episodeValue = obj.episode;
+	if (typeof episodeValue !== "object" || episodeValue === null) {
+		throw new Error("Consolidation response is missing an episode");
+	}
+	const episodeObj = episodeValue as Record<string, unknown>;
+	if (
+		typeof episodeObj.summary !== "string" ||
+		typeof episodeObj.startedAt !== "string" ||
+		typeof episodeObj.endedAt !== "string"
+	) {
+		throw new Error("Consolidation response's episode is missing required fields");
+	}
+	const relatedFactIds = Array.isArray(episodeObj.relatedFactIds)
+		? episodeObj.relatedFactIds.filter((id): id is string => typeof id === "string")
+		: undefined;
+
+	return {
+		facts,
+		edges,
+		episode: {
+			summary: episodeObj.summary,
+			startedAt: episodeObj.startedAt,
+			endedAt: episodeObj.endedAt,
+			relatedFactIds,
+		},
+	};
+}
+
+/** Writes the parsed response to the memory/episodic stores, resolving local fact ids to real node ids. */
+function applyConsolidationResult(
+	parsed: ParsedConsolidation,
+	memoryStore: FileMemoryStore,
+	episodicStore: EpisodicStore,
+): void {
+	const idMap = new Map<string, string>();
+	for (const fact of parsed.facts) {
+		const node = memoryStore.createNode({ subject: fact.subject, body: fact.body });
+		idMap.set(fact.id, node.id);
+	}
+	const resolve = (id: string): string => idMap.get(id) ?? id;
+
+	for (const edge of parsed.edges) {
+		memoryStore.addEdge(resolve(edge.from), { target: resolve(edge.to), rel: edge.rel });
+	}
+
+	episodicStore.recordEpisode({
+		startedAt: parsed.episode.startedAt,
+		endedAt: parsed.episode.endedAt,
+		summary: parsed.episode.summary,
+		relatedSemanticNodeIds: parsed.episode.relatedFactIds?.map(resolve),
+	});
 }
 
 /** Filename-safe deterministic id, stable per Channel Session, for OpenRouter cache-affinity only. */
 function consolidationSessionAffinityId(channel: string, channelSessionId: string): string {
 	return `consolidation-${channel}-${channelSessionId}`.replace(/[^A-Za-z0-9._-]/g, "-");
-}
-
-/**
- * Always creates a fresh, one-shot session — never reuses/appends to a prior consolidation pass's
- * conversation. Real production incident: caching and reusing the same AgentSession across passes
- * (the original design here) meant every retry re-sent the full accumulated history on top of the
- * last, compounding a single pass past 1M input tokens across a handful of retries. Continuity
- * across passes comes from `search_memory` against the persisted store, not raw conversation
- * history — so a stateless session loses nothing real. The session-affinity id is still deterministic
- * per Channel Session (not the fresh session's own random id) so OpenRouter's prompt-caching still
- * gets a stable key to pin to, independent of this being a new session object each call.
- */
-async function getConsolidationSession(
-	cwd: string,
-	channel: string,
-	channelSessionId: string,
-	model: Model<Api>,
-	modelRuntime: ModelRuntime,
-	memoryStore: FileMemoryStore,
-	episodicStore: EpisodicStore,
-): Promise<ConsolidationSession> {
-	const key = channelSessionKey(channel, channelSessionId);
-	const sessionManager = SessionManager.create(cwd, undefined, {
-		channel: "consolidation",
-		channelSessionId: key,
-		id: consolidationSessionAffinityId(channel, channelSessionId),
-	});
-	const { session } = await import("./sdk.ts").then((sdk) =>
-		sdk.createAgentSession({
-			cwd,
-			sessionManager,
-			modelRuntime,
-			model,
-			// Issue #177: DeepSeek v4 flash enters an endless reasoning spiral (content:null,
-			// finish:length, at any token budget) on large JSON/tool-mode prompts unless reasoning is
-			// explicitly disabled — the exact defect mino-oss's own team found and fixed for this same
-			// model (mino-agent commits 252ace0/4bca19d/eae17ff). "off" is a real runtime-supported
-			// value throughout the reasoning pipeline (see clampThinkingLevel's ModelThinkingLevel
-			// param) even though this option's public type is the narrower ThinkingLevel — scoped to
-			// this one call site rather than widening the type, since GLM 5.3 Flash (the main chat
-			// model) mandates reasoning and would reject a disabled request outright (mino PR #441).
-			thinkingLevel: "off" as ThinkingLevel,
-			// Restrict to exactly the 4 custom tools this pass uses — `tools` is an allowlist
-			// that applies to customTools too (an empty array would silently disable them, not
-			// just the built-ins). search_memory replaces the need for read/grep/find/ls against
-			// the memory store, and every extra tool schema grows the request size — which is
-			// exactly what tipped a real run into a 429 on OpenInference's low-throughput tier.
-			tools: ["search_memory", "emit_fact", "emit_edge", "emit_episode"],
-			customTools: buildConsolidationTools(memoryStore, episodicStore),
-		}),
-	);
-	return { agentSession: session };
 }
 
 export interface MaybeRunConsolidationOptions {
@@ -432,11 +465,10 @@ function entriesToTranscript(entries: SessionMessageEntry[]): string {
 
 /**
  * Runs one consolidation pass over an already-extracted window of message entries. Shared by both
- * the live trigger path and backfill — the extraction prompt and tool set are identical either way,
- * only how the window and target session are chosen differs.
+ * the live trigger path and backfill — the extraction prompt is identical either way, only how the
+ * window and target session are chosen differs.
  */
 async function runConsolidationPass(params: {
-	cwd: string;
 	channel: string;
 	channelSessionId: string;
 	window: SessionMessageEntry[];
@@ -444,53 +476,47 @@ async function runConsolidationPass(params: {
 	memoryStore: FileMemoryStore;
 	episodicStore: EpisodicStore;
 }): Promise<void> {
-	const { cwd, channel, channelSessionId, window, modelRuntime, memoryStore, episodicStore } = params;
+	const { channel, channelSessionId, window, modelRuntime, memoryStore, episodicStore } = params;
 	if (window.length === 0) return;
 
 	const transcript = capTranscript(entriesToTranscript(window));
 	const model = resolveConsolidationModel(modelRuntime);
-	const { agentSession } = await getConsolidationSession(
-		cwd,
-		channel,
-		channelSessionId,
-		model,
-		modelRuntime,
-		memoryStore,
-		episodicStore,
-	);
+	const existingNodes = buildExistingNodesSection(memoryStore, transcript);
 
-	// A turn that ends without ever calling emit_episode (per CONSOLIDATION_INSTRUCTIONS, it must
-	// fire exactly once) or that hits a hard provider failure produces no error by itself — the
-	// agent loop settles normally either way. Watch for both explicitly so a silently-empty pass
-	// (seen in practice: 429s exhausting retries, `agent_settled` firing with nothing written)
-	// throws instead of being reported as done, which would wrongly advance the checkpoint.
-	let episodeEmitted = false;
-	let retryFailure: string | undefined;
-	let messageError: string | undefined;
-	const unsubscribe = agentSession.subscribe((event) => {
-		if (event.type === "tool_execution_end" && event.toolName === "emit_episode") episodeEmitted = true;
-		if (event.type === "auto_retry_end" && !event.success) retryFailure = event.finalError;
-		if (event.type === "message_end" && event.message.role === "assistant" && event.message.stopReason === "error") {
-			messageError = event.message.errorMessage ?? "unknown error";
-		}
-		if (process.env.THEOSES_DEBUG_CONSOLIDATION) {
-			console.error("CONSOLIDATION_EVENT", event.type, JSON.stringify(event).slice(0, 500));
-		}
-	});
-	try {
-		await agentSession.prompt(`${CONSOLIDATION_INSTRUCTIONS}\n\n--- Conversation window ---\n${transcript}`);
-		await agentSession.agent.waitForIdle();
-	} finally {
-		unsubscribe();
+	const promptText = `${CONSOLIDATION_INSTRUCTIONS}\n\n--- Existing memory nodes ---\n${existingNodes}\n\n--- Conversation window ---\n${transcript}`;
+	const context: Context = {
+		messages: [{ role: "user", content: [{ type: "text", text: promptText }], timestamp: Date.now() }],
+	};
+	// toolChoice: "none" and no `reasoning` option — omitting `reasoning` entirely still lands the
+	// model in its off/disabled state on the wire for every thinkingFormat branch that supports one
+	// (see openai-completions.ts's per-format reasoning handling), which is what issue #177 needed
+	// explicitly for this same model; no separate cast is needed for a single non-agentic call.
+	const streamOptions: SimpleStreamOptions = {
+		maxTokens: model.maxTokens,
+		toolChoice: "none",
+		sessionId: consolidationSessionAffinityId(channel, channelSessionId),
+	};
+
+	if (process.env.THEOSES_DEBUG_CONSOLIDATION) {
+		console.error("CONSOLIDATION_PROMPT", promptText.slice(0, 500));
 	}
 
-	if (retryFailure) throw new Error(`Consolidation pass failed after retries: ${retryFailure}`);
-	if (messageError) throw new Error(`Consolidation pass errored: ${messageError}`);
-	if (!episodeEmitted) throw new Error("Consolidation pass ended without calling emit_episode");
+	const response = await retryAssistantCall(
+		() => modelRuntime.completeSimple(model, context, streamOptions),
+		CONSOLIDATION_RETRY_POLICY,
+		undefined,
+	);
+
+	if (response.stopReason === "aborted") throw new Error("Consolidation pass was aborted");
+	if (response.stopReason === "error")
+		throw new Error(`Consolidation pass errored: ${response.errorMessage ?? "unknown error"}`);
+
+	const parsed = parseConsolidationResponse(contentText(response.content));
+	applyConsolidationResult(parsed, memoryStore, episodicStore);
 }
 
 async function runIfTriggered(options: MaybeRunConsolidationOptions): Promise<void> {
-	const { cwd, channel, channelSessionId, userMessageText, mainSessionManager, modelRuntime } = options;
+	const { channel, channelSessionId, userMessageText, mainSessionManager, modelRuntime } = options;
 
 	// Checked and claimed before any `await` in this function — otherwise two near-simultaneous
 	// calls for the same key could both pass this check before either reaches the `add`, since the
@@ -525,7 +551,6 @@ async function runIfTriggered(options: MaybeRunConsolidationOptions): Promise<vo
 			const chunk = window.slice(start, start + CONSOLIDATION_TURN_CEILING);
 			try {
 				await runConsolidationPass({
-					cwd,
 					channel,
 					channelSessionId,
 					window: chunk,
@@ -561,10 +586,9 @@ export interface BackfillOptions {
  * Runs consolidation over an entire historical session-log file, sub-chunked into windows of at
  * most CONSOLIDATION_TURN_CEILING messages — the same bound the live trigger enforces, so a
  * backfilled file never produces a single pass larger than live consolidation ever would. Chunks
- * run sequentially, not in parallel: each chunk's search_memory call needs to see facts the prior
- * chunk already wrote, for dedup/supersession continuity within one file. Each chunk is still its
- * own fresh, stateless session (getConsolidationSession creates a new one every call) — chunking
- * bounds a single pass's size, it doesn't reintroduce cross-call accumulation.
+ * run sequentially, not in parallel: each chunk's prompt embeds a fresh keyword-narrowed read of
+ * the memory store (`buildExistingNodesSection`), so it needs to see facts the prior chunk already
+ * wrote, for dedup/supersession continuity within one file.
  * Does not touch the live checkpoint file — backfill is a separate, explicit operation.
  */
 export async function backfillFromSessionLog(path: string, options: BackfillOptions): Promise<void> {
@@ -580,7 +604,6 @@ export async function backfillFromSessionLog(path: string, options: BackfillOpti
 	for (let start = 0; start < window.length; start += CONSOLIDATION_TURN_CEILING) {
 		const chunk = window.slice(start, start + CONSOLIDATION_TURN_CEILING);
 		await runConsolidationPass({
-			cwd: options.cwd,
 			channel: header.channel,
 			channelSessionId: header.channelSessionId,
 			window: chunk,
