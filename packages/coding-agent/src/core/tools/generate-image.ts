@@ -65,35 +65,32 @@ function sniffMimeType(data: Buffer): string {
 	return "image/jpeg";
 }
 
+/**
+ * OpenRouter's dedicated image endpoint (not /chat/completions — dedicated
+ * image models like meta/muse-image 404 there with "cannot be used with the
+ * chat/completions endpoint. Use the /api/v1/images endpoint instead").
+ * Verified to also work for chat-style image models (e.g.
+ * google/gemini-3.1-flash-lite-image), so it's used uniformly.
+ */
 async function generateWithOpenRouter(prompt: string, signal?: AbortSignal): Promise<GeneratedImage> {
 	const apiKey = process.env.OPENROUTER_API_KEY;
 	if (!apiKey) throw new Error("OPENROUTER_API_KEY not set");
 	const model = process.env.THEOSES_OPENROUTER_IMAGE_MODEL || DEFAULT_OPENROUTER_IMAGE_MODEL;
-	const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+	const response = await fetch("https://openrouter.ai/api/v1/images", {
 		method: "POST",
 		headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-		body: JSON.stringify({
-			model,
-			messages: [{ role: "user", content: prompt }],
-			modalities: ["image", "text"],
-		}),
+		body: JSON.stringify({ model, prompt }),
 		signal,
 	});
 	if (!response.ok) {
 		const message = await response.text();
 		throw new Error(`OpenRouter ${response.status}: ${message.slice(0, 200)}`);
 	}
-	const body = (await response.json()) as {
-		choices?: Array<{ message?: { images?: Array<{ image_url?: { url?: string } }> } }>;
-	};
-	const dataUrl = body.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-	const match = dataUrl?.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
-	if (!match) throw new Error("OpenRouter: no image in response");
-	return {
-		data: Buffer.from(match[2] ?? "", "base64"),
-		mimeType: match[1] ?? "image/png",
-		provider: `OpenRouter (${model})`,
-	};
+	const body = (await response.json()) as { data?: Array<{ b64_json?: string }> };
+	const base64 = body.data?.[0]?.b64_json;
+	if (!base64) throw new Error("OpenRouter: no image in response");
+	const data = Buffer.from(base64, "base64");
+	return { data, mimeType: sniffMimeType(data), provider: `OpenRouter (${model})` };
 }
 
 async function generateWithPollinations(prompt: string, signal?: AbortSignal): Promise<GeneratedImage> {
