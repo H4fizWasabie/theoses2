@@ -40,6 +40,30 @@ describe("AgentSession prompt characterization", () => {
 		expect(harness.getPendingResponseCount()).toBe(0);
 	});
 
+	it("auto-clears the Working Note once an operation completes (issue #173)", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+
+		harness.sessionManager.appendWorkingNote("leftover from a previous operation");
+		expect(harness.sessionManager.getWorkingNote()).toBe("leftover from a previous operation");
+
+		harness.setResponses([fauxAssistantMessage("hello")]);
+		await harness.session.prompt("hi");
+
+		expect(harness.sessionManager.getWorkingNote()).toBe("");
+	});
+
+	it("leaves the Working Note in place when an operation aborts or errors (issue #173)", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+
+		harness.sessionManager.appendWorkingNote("ran: risky-command");
+		harness.setResponses([fauxAssistantMessage("partial", { stopReason: "aborted" })]);
+		await harness.session.prompt("hi");
+
+		expect(harness.sessionManager.getWorkingNote()).toBe("ran: risky-command");
+	});
+
 	it("handles a tool call turn and waits for the follow-up LLM response", async () => {
 		const toolRuns: string[] = [];
 		const echoTool: AgentTool = {

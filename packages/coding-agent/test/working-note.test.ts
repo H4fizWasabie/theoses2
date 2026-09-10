@@ -17,6 +17,27 @@ describe("Theoses2 Working Note", () => {
 		expect(manager.getBranch().at(-1)?.type).toBe("working_note");
 	});
 
+	it("appends rather than replaces across multiple calls (issue #173)", () => {
+		const manager = SessionManager.inMemory();
+		manager.appendWorkingNote("fact one");
+		manager.appendWorkingNote("fact two");
+
+		expect(manager.getWorkingNote()).toBe("fact one\nfact two");
+	});
+
+	it("drops the oldest whole lines once the combined note exceeds the cap", () => {
+		const manager = SessionManager.inMemory();
+		const line = "x".repeat(Math.floor(WORKING_NOTE_WRITE_CAP / 2));
+		manager.appendWorkingNote(`first ${line}`);
+		manager.appendWorkingNote(`second ${line}`);
+		manager.appendWorkingNote(`third ${line}`);
+
+		const note = manager.getWorkingNote();
+		expect(note.length).toBeLessThanOrEqual(WORKING_NOTE_WRITE_CAP);
+		expect(note).not.toContain("first");
+		expect(note).toContain("third");
+	});
+
 	it("clears the note once the task tracking it is complete", () => {
 		const manager = SessionManager.inMemory();
 		manager.appendWorkingNote("established facts about task A");

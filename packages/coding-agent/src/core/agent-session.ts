@@ -268,6 +268,8 @@ export interface PromptOptions {
 }
 
 const REPLY_CONTEXT_CAP = 2000;
+/** Issue #173: bounds one auto-logged bash command line in the Working Note (the command, not its output — the how, not the what). */
+const BASH_AUTO_LOG_COMMAND_CAP = 200;
 const ABORT_NOTICE =
 	"[Abort Notice: The previous task was cancelled. Do not resume it unless the user explicitly asks you to.]";
 
@@ -696,6 +698,16 @@ export class AgentSession {
 						? "failed"
 						: "completed";
 			this.sessionManager.appendOperationFinished(outcome);
+			// Issue #173: the Working Note is a scratchpad for the operation in
+			// progress, not a cross-operation memory — the harness owns clearing
+			// it so stale context from a finished task never bleeds into an
+			// unrelated later one, instead of relying on the model to remember
+			// to call working_note({ clear: true }). Left in place on
+			// "aborted"/"failed" so a retry or the WORKING_NOTE_STALE_TURNS
+			// backstop can still make use of it.
+			if (outcome === "completed" && this.sessionManager.getWorkingNote()) {
+				this.sessionManager.clearWorkingNote();
+			}
 		}
 
 		// Handle session persistence
@@ -2918,6 +2930,7 @@ export class AgentSession {
 					"edit",
 					"write",
 					"working_note",
+					"note_operations",
 					"remember",
 					"save_note",
 					"convert_doc",
@@ -3137,6 +3150,17 @@ export class AgentSession {
 	 * Used by executeBash and by extensions that handle bash execution themselves.
 	 */
 	recordBashResult(command: string, result: BashResult, options?: { excludeFromContext?: boolean }): void {
+		// Issue #173: mechanically record the command in the Working Note,
+		// independent of whether the model itself calls working_note — a
+		// harness-owned safety net so the exact path/method a later tool call
+		// in this same operation needs isn't only recoverable by re-reading
+		// full history (or lost entirely once compaction drops it).
+		if (command.trim()) {
+			const loggedCommand =
+				command.length > BASH_AUTO_LOG_COMMAND_CAP ? `${command.slice(0, BASH_AUTO_LOG_COMMAND_CAP)}…` : command;
+			this.sessionManager.appendWorkingNote(`ran: ${loggedCommand}`);
+		}
+
 		const bashMessage: BashExecutionMessage = {
 			role: "bashExecution",
 			command,

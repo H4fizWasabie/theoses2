@@ -586,3 +586,14 @@ export function getDebugLogPath(): string {
 export function getGeneratedImagesDir(): string {
 	return join(getAgentDir(), "generated-images");
 }
+
+/**
+ * Get path to operational-notes.md (issue #173): a durable, cross-session,
+ * section-based scratchpad for things learned operating the system that
+ * aren't yet worth promoting to a permanent semantic-graph fact via
+ * save_note. Unlike the Working Note, this is never auto-injected into the
+ * system prompt — it's consulted with `read` when a task touches its topic.
+ */
+export function getOperationalNotesPath(): string {
+	return join(getAgentDir(), "operational-notes.md");
+}
