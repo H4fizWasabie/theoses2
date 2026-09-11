@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.25] - 2026-09-11
+
 ### Removed
 
 - Removed the hosted `radius.pi.dev` default gateway; Radius now requires an explicit configured gateway ([#19](https://github.com/H4fizWasabie/theoses2/issues/19)).

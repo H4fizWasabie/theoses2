@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.25] - 2026-09-11
+
 ### Added
 
 - Added the private dashboard chat and filesystem workbench.
