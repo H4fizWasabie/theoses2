@@ -916,6 +916,16 @@ export interface CompactionPreparation {
 		 * marker's beforeEntryId — this became the new boundaryStart. */
 		resetAtIndex: number;
 	};
+	/**
+	 * Issue #204: set when a chainReset left nothing to summarize (the new task's own turns
+	 * already fit under keepRecentTokens, so the cut point lands exactly at the reset boundary).
+	 * Without this, prepareCompaction would return undefined here, leaving the task_boundary
+	 * marker "unconsumed" — every later threshold/turn check would rediscover the same marker
+	 * and repeat this same no-op indefinitely, each time paying for a real
+	 * task-boundary-detector call with nothing to show for it. `compact()` short-circuits on
+	 * this flag and skips the summarization LLM call entirely.
+	 */
+	trivialReset?: boolean;
 }
 
 export function prepareCompaction(
@@ -980,7 +990,12 @@ export function prepareCompaction(
 	// Get UUID of first kept entry
 	const firstKeptEntry = pathEntries[cutPoint.firstKeptEntryIndex];
 	if (!firstKeptEntry?.id) {
-		return undefined; // Session needs migration
+		// Session needs migration. Distinct from the "nothing to compact" no-op below — this is
+		// an anomalous state (issue #204), so it's worth a log line instead of failing silently.
+		console.error(
+			`[compaction] prepareCompaction: cut point index ${cutPoint.firstKeptEntryIndex} has no entry id (session may need migration); aborting this pass`,
+		);
+		return undefined;
 	}
 	const firstKeptEntryId = firstKeptEntry.id;
 
@@ -1007,7 +1022,23 @@ export function prepareCompaction(
 	}
 
 	if (messagesToSummarize.length === 0 && turnPrefixMessages.length === 0) {
-		return undefined;
+		if (!chainReset) return undefined;
+		// Issue #204: a chain reset must still commit even with nothing to summarize, or the
+		// task_boundary marker never gets consumed and this same reset repeats on every future
+		// compaction check. Skip file-op extraction too — there's nothing to extract from.
+		return {
+			firstKeptEntryId,
+			messagesToSummarize,
+			messagesToSummarizeEntryIds,
+			turnPrefixMessages,
+			isSplitTurn: cutPoint.isSplitTurn,
+			tokensBefore,
+			previousSummary,
+			fileOps: createFileOps(),
+			settings,
+			chainReset,
+			trivialReset: true,
+		};
 	}
 
 	// Extract file operations from messages and previous compaction (skipped when chainReset
@@ -1085,7 +1116,21 @@ export async function compact(
 		previousSummary,
 		fileOps,
 		settings,
+		chainReset,
+		trivialReset,
 	} = preparation;
+
+	// Issue #204: nothing to summarize after a chain reset — commit immediately without an
+	// LLM call. Calling generateSummaryWithUsage here would serialize an empty conversation
+	// and no previous summary, producing a nonsense summarization request at real cost.
+	if (trivialReset) {
+		return {
+			summary: `Prior session context dropped after a topic shift ("${chainReset?.taskSummary}"). No earlier summary carried forward.`,
+			firstKeptEntryId,
+			tokensBefore,
+			details: fileOps ? computeFileLists(fileOps) : undefined,
+		};
+	}
 
 	// Generate summaries and merge into one
 	let summary: string;
