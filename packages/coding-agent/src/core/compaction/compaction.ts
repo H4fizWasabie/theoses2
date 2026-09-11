@@ -16,10 +16,7 @@ import {
 	type SessionEntry,
 	sessionEntryToContextMessages,
 } from "../session-manager.ts";
-import {
-	TASK_BOUNDARY_CUSTOM_TYPE,
-	type TaskBoundaryData,
-} from "../task-boundary-detector.ts";
+import { TASK_BOUNDARY_CUSTOM_TYPE, type TaskBoundaryData } from "../task-boundary-detector.ts";
 import {
 	computeFileLists,
 	createFileOps,

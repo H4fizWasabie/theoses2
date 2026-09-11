@@ -20,7 +20,7 @@ function messageEntry(role: "user" | "assistant", text: string): SessionMessageE
 	const message: AgentMessage =
 		role === "user"
 			? { role: "user", content: text, timestamp: Date.now() }
-			: { role: "assistant", content: [{ type: "text", text }], timestamp: Date.now() } as AgentMessage;
+			: ({ role: "assistant", content: [{ type: "text", text }], timestamp: Date.now() } as AgentMessage);
 	return { type: "message", id: nextId(), parentId: null, timestamp: new Date().toISOString(), message };
 }
 

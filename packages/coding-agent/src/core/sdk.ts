@@ -129,14 +129,6 @@ export {
 	shouldTriggerConsolidation,
 } from "./memory-consolidation.ts";
 export {
-	findLastUserMessageEntryId,
-	type MaybeDetectTaskBoundaryOptions,
-	maybeDetectTaskBoundary,
-	resolveTaskBoundaryModel,
-	type TaskBoundaryData,
-	type TaskDescriptorData,
-} from "./task-boundary-detector.ts";
-export {
 	EDGE_RELATIONS,
 	type EdgeRelation,
 	FileMemoryStore,
@@ -145,6 +137,14 @@ export {
 } from "./memory-store.ts";
 export type { PromptTemplate } from "./prompt-templates.ts";
 export type { Skill } from "./skills.ts";
+export {
+	findLastUserMessageEntryId,
+	type MaybeDetectTaskBoundaryOptions,
+	maybeDetectTaskBoundary,
+	resolveTaskBoundaryModel,
+	type TaskBoundaryData,
+	type TaskDescriptorData,
+} from "./task-boundary-detector.ts";
 export type {
 	HttpSidecarToolSourceOptions,
 	McpHttpToolSourceOptions,

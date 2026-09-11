@@ -171,10 +171,7 @@ async function callDetector(
 		if (response.stopReason === "aborted" || response.stopReason === "error") return undefined;
 		return parseTaskBoundaryResponse(contentText(response.content));
 	} catch (error) {
-		console.error(
-			"Task-boundary detection call failed:",
-			error instanceof Error ? error.message : error,
-		);
+		console.error("Task-boundary detection call failed:", error instanceof Error ? error.message : error);
 		return undefined;
 	}
 }
