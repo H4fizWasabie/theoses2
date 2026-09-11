@@ -195,6 +195,61 @@ describe("openai-completions tool_choice", () => {
 		expect("strict" in (tool ?? {})).toBe(false);
 	});
 
+	it("omits strict for DeepSeek models routed through an aggregator like OpenRouter", async () => {
+		// DeepSeek V4.1 Flash: "supports response_format for JSON output, without JSON-schema
+		// enforcement" (OpenRouter docs) - no explicit compat.supportsStrictMode override exists
+		// for this model, so detection must infer false for any deepseek/* id regardless of which
+		// provider/aggregator is routing the request. Sending strict:true was rejected as an
+		// invalid request by at least one upstream (observed: Novita).
+		const model: Model<"openai-completions"> = {
+			id: "deepseek/deepseek-v4.1-flash",
+			name: "DeepSeek V4.1 Flash",
+			api: "openai-completions",
+			provider: "openrouter",
+			baseUrl: "https://openrouter.ai/api/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1_048_576,
+			maxTokens: 384_000,
+		};
+		const tools: Tool[] = [
+			{
+				name: "ping",
+				description: "Ping tool",
+				parameters: Type.Object({
+					ok: Type.Boolean(),
+				}),
+			},
+		];
+		let payload: unknown;
+
+		await streamSimple(
+			model,
+			{
+				messages: [
+					{
+						role: "user",
+						content: "Call ping with ok=true",
+						timestamp: Date.now(),
+					},
+				],
+				tools,
+			},
+			{
+				apiKey: "test",
+				onPayload: (params: unknown) => {
+					payload = params;
+				},
+			} as unknown as Parameters<typeof streamSimple>[2],
+		).result();
+
+		const params = (payload ?? mockState.lastParams) as { tools?: Array<{ function?: Record<string, unknown> }> };
+		const tool = params.tools?.[0]?.function;
+		expect(tool).toBeTruthy();
+		expect("strict" in (tool ?? {})).toBe(false);
+	});
+
 	it("maps Groq Qwen reasoning levels to default reasoning_effort", async () => {
 		const model = getModel("groq", "qwen/qwen3.6-27b")!;
 		let payload: unknown;

@@ -1576,6 +1576,13 @@ function detectCompat(model: Model<"openai-completions">): ResolvedOpenAIComplet
 	const isNvidia = provider === "nvidia" || baseUrl.includes("integrate.api.nvidia.com");
 	const isAntLing = provider === "ant-ling" || baseUrl.includes("api.ant-ling.com");
 	const isDeepSeek = provider === "deepseek" || baseUrl.toLowerCase().includes("deepseek.com");
+	// OpenRouter's own docs for DeepSeek V4.1 Flash: "supports response_format for JSON output,
+	// without JSON-schema enforcement" - i.e. no strict mode, regardless of which upstream
+	// provider OpenRouter routes the request to. isDeepSeek above only matches the direct
+	// api.deepseek.com provider, so aggregator-routed DeepSeek models (openrouter, vercel-ai-
+	// gateway, etc.) fell through to the strict-mode default of true, attaching `strict: true`
+	// to every tool schema - some backends (observed: Novita) reject that as an invalid request.
+	const isAggregatedDeepSeek = !isDeepSeek && model.id.toLowerCase().startsWith("deepseek/");
 
 	const isNonStandard =
 		isNvidia ||
@@ -1639,7 +1646,7 @@ function detectCompat(model: Model<"openai-completions">): ResolvedOpenAIComplet
 		zaiToolStream: false,
 		supportsThinkingTokenBudget: false,
 		thinkingTokenBudgetField: undefined,
-		supportsStrictMode: !isMoonshot && !isTogether && !isCloudflareAiGateway && !isNvidia,
+		supportsStrictMode: !isMoonshot && !isTogether && !isCloudflareAiGateway && !isNvidia && !isAggregatedDeepSeek,
 		supportsOpenAIGrammarTools: false,
 		cacheControlFormat,
 		// OpenRouter uses this to pin a session's requests to the same backing
