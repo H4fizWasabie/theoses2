@@ -146,6 +146,7 @@ export {
 	type MemoryEdge,
 	type MemoryNode,
 } from "./memory-store.ts";
+export { stripClockAnnotation } from "./clock.ts";
 export type { PromptTemplate } from "./prompt-templates.ts";
 export type { Skill } from "./skills.ts";
 export {

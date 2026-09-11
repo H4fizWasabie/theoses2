@@ -247,6 +247,7 @@ export {
 	type PromptTemplate,
 	resolveTaskBoundaryModel,
 	shouldTriggerConsolidation,
+	stripClockAnnotation,
 	type TaskBoundaryData,
 	type TaskDescriptorData,
 } from "./core/sdk.ts";
