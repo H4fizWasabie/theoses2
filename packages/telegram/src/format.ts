@@ -19,6 +19,10 @@ const RE_QUOTE = /^>\s?(.*)$/;
 const RE_QUOTE_EXPANDABLE = /^>!\s?(.*)$/;
 const RE_DIVIDER = /^\|[\s\-:|]+\|$/;
 const RE_TAG = /<[^>]+>/g;
+const ESCAPED_PIPE = /\\\|/g;
+const PIPE_SENTINEL = "\x00PIPE\x00";
+const RE_ENTITY = /&(amp|lt|gt|quot|#39);/g;
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" };
 
 const STASH_MARK = (index: number) => `\x00STASH${index}\x00`;
 const STASH_PATTERN = /\x00STASH(\d+)\x00/;
@@ -79,21 +83,32 @@ function formatBlockquotes(text: string, put: (rendered: string) => string): str
 	return out.join("\n");
 }
 
+/** Visible text length: tags removed, entities decoded (for column sizing). */
+function visibleLength(cell: string): number {
+	const plain = cell.replaceAll(RE_TAG, "").replaceAll(RE_ENTITY, (_m, e) => ENTITIES[e] ?? "");
+	return [...plain].length;
+}
+
 /** Pads cells to column width, with a rule under the header row. */
 function renderPipeTable(rows: string[]): string {
 	const cells: string[][] = [];
+	const visLens: number[][] = [];
 	const widths: number[] = [];
 	for (const row of rows) {
-		const parts = row.split("|").slice(1, -1);
-		const cleaned = parts.map((cell) => cell.trim().replaceAll(RE_TAG, ""));
-		cleaned.forEach((cell, i) => {
-			widths[i] = Math.max(widths[i] ?? 0, [...cell].length);
+		const parts = row
+			.split("|")
+			.slice(1, -1)
+			.map((cell) => cell.trim().replaceAll(PIPE_SENTINEL, "|"));
+		const lens = parts.map((cell) => visibleLength(cell));
+		lens.forEach((len, i) => {
+			widths[i] = Math.max(widths[i] ?? 0, len);
 		});
-		cells.push(cleaned);
+		cells.push(parts);
+		visLens.push(lens);
 	}
 	const lines: string[] = [];
 	cells.forEach((row, rowIndex) => {
-		lines.push(row.map((cell, i) => cell + " ".repeat(widths[i] - [...cell].length)).join("  "));
+		lines.push(row.map((cell, i) => cell + " ".repeat(Math.max(0, widths[i] - visLens[rowIndex][i]))).join("  "));
 		if (rowIndex === 0 && cells.length > 1) {
 			lines.push(widths.map((width) => "─".repeat(width)).join("  "));
 		}
@@ -112,7 +127,7 @@ function formatPipeTables(text: string): string {
 	for (const line of text.split("\n")) {
 		const trimmed = line.trim();
 		if (trimmed.startsWith("|") && trimmed.endsWith("|") && trimmed.length > 1) {
-			if (!RE_DIVIDER.test(trimmed)) table.push(trimmed);
+			if (!RE_DIVIDER.test(trimmed)) table.push(trimmed.replaceAll(ESCAPED_PIPE, PIPE_SENTINEL));
 			continue;
 		}
 		flush();
