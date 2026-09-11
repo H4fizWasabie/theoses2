@@ -43,23 +43,6 @@ interface RawApiWithRichMessage {
 	sendRichMessage(params: SendRichMessageParams): Promise<{ message_id: number }>;
 }
 
-// Mirrors createAgentSession's own default tool set, plus convert_doc: Telegram
-// document uploads are stored as artifacts (see the `ctx.message.document` branch
-// below) and need convert_doc enabled to ever be read, since no channel enables it
-// by default.
-const TELEGRAM_TOOLS = [
-	"read",
-	"bash",
-	"edit",
-	"write",
-	"working_note",
-	"remember",
-	"save_note",
-	"convert_doc",
-	"web_search",
-	"generate_image",
-];
-
 function chatId(ctx: Context): string | undefined {
 	return ctx.chat?.id.toString();
 }
@@ -244,7 +227,18 @@ async function sessionFor(
 		const sessionManager = matches[0]
 			? SessionManager.open(matches[0].path, undefined, cwd)
 			: SessionManager.create(cwd, undefined, key);
-		const { session } = await createAgentSession({ sessionManager, tools: TELEGRAM_TOOLS, thinkingLevel: "high" });
+		// No `tools:` allowlist here (unlike an earlier version of this code): passing one sets
+		// both the active set AND a hard gate that filters extension-registered tools out of the
+		// registry entirely (agent-session.ts's isAllowedTool), regardless of session age or
+		// process restarts - that's what silently kept every extension's tools (e.g. procura's
+		// four) off Telegram no matter how the extension or session were refreshed. Leaving it
+		// unset matches the dashboard channel: full SDK default tools plus every extension tool.
+		const { session } = await createAgentSession({ sessionManager, thinkingLevel: "high" });
+		// convert_doc isn't in the SDK's default active set. Telegram document uploads are stored
+		// as artifacts (see the `ctx.message.document` branch below) and need convert_doc enabled
+		// to ever be read - added on top of the full default+extension set rather than via
+		// `tools:`, which would reintroduce the gating problem above.
+		session.setActiveToolsByName([...session.getActiveToolNames(), "convert_doc"]);
 		return session;
 	})();
 	sessions.set(chat, created);
