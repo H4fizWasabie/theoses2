@@ -52,7 +52,7 @@ import { sleep } from "../utils/sleep.ts";
 import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
-import { formatClockAnnotation } from "./clock.ts";
+import { formatClockAnnotation, stripClockAnnotation } from "./clock.ts";
 import {
 	type CompactionPreparation,
 	type CompactionResult,
@@ -3456,7 +3456,7 @@ export class AgentSession {
 			if (entry.type !== "message") continue;
 			if (entry.message.role !== "user") continue;
 
-			const text = contentText(entry.message.content, "");
+			const text = stripClockAnnotation(contentText(entry.message.content, ""));
 			if (text) {
 				result.push({ entryId: entry.id, text });
 			}

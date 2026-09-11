@@ -11,6 +11,7 @@ import {
 	createAgentSessionServices,
 } from "../../../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../../../src/core/auth-storage.ts";
+import { stripClockAnnotation } from "../../../src/core/clock.ts";
 import { ModelRuntime } from "../../../src/core/model-runtime.ts";
 import { SessionManager } from "../../../src/core/session-manager.ts";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionFactory } from "../../../src/index.ts";
@@ -19,12 +20,14 @@ function getText(message: AgentSession["messages"][number]): string {
 	if (!("content" in message)) {
 		return "";
 	}
-	return typeof message.content === "string"
-		? message.content
-		: message.content
-				.filter((part): part is { type: "text"; text: string } => part.type === "text")
-				.map((part) => part.text)
-				.join("");
+	const text =
+		typeof message.content === "string"
+			? message.content
+			: message.content
+					.filter((part): part is { type: "text"; text: string } => part.type === "text")
+					.map((part) => part.text)
+					.join("");
+	return stripClockAnnotation(text);
 }
 
 describe("regression #2860: replaced session callbacks", () => {

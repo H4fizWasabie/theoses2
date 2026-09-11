@@ -119,6 +119,7 @@ export interface CreateAgentSessionResult {
 // Re-exports
 
 export * from "./agent-session-runtime.ts";
+export { stripClockAnnotation } from "./clock.ts";
 export { type EpisodeRecord, EpisodicStore } from "./episodic-store.ts";
 export type {
 	ExtensionAPI,
@@ -146,7 +147,6 @@ export {
 	type MemoryEdge,
 	type MemoryNode,
 } from "./memory-store.ts";
-export { stripClockAnnotation } from "./clock.ts";
 export type { PromptTemplate } from "./prompt-templates.ts";
 export type { Skill } from "./skills.ts";
 export {

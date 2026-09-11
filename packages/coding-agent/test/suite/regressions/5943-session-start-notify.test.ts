@@ -2,6 +2,7 @@ import { fauxAssistantMessage } from "theoses-ai";
 import { Container, Text } from "theoses-tui";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentSessionEvent } from "../../../src/core/agent-session.ts";
+import { stripClockAnnotation } from "../../../src/core/clock.ts";
 import type { ExtensionUIContext } from "../../../src/core/extensions/index.ts";
 import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode.ts";
 import { initTheme, type Theme, theme } from "../../../src/modes/interactive/theme/theme.ts";
@@ -213,12 +214,13 @@ function getMessageText(event: MessageEvent): string {
 	}
 	const content = message.content;
 	if (typeof content === "string") {
-		return content;
+		return stripClockAnnotation(content);
 	}
-	return content
+	const text = content
 		.filter((part): part is { type: "text"; text: string } => part.type === "text")
 		.map((part) => part.text)
 		.join("");
+	return stripClockAnnotation(text);
 }
 
 function createLoadedResourcesContext(): LoadedResourcesContext {

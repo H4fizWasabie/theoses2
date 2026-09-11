@@ -12,6 +12,7 @@ import type { FauxModelDefinition, FauxProviderRegistration, FauxResponseStep, M
 import { registerFauxProvider, streamSimple } from "theoses-ai/compat";
 import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
+import { stripClockAnnotation } from "../../src/core/clock.ts";
 import type { ExtensionRunner } from "../../src/core/extensions/index.ts";
 import { convertToLlm } from "../../src/core/messages.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
@@ -35,12 +36,13 @@ export function getMessageText(message: unknown): string {
 		return "";
 	}
 	if (typeof content === "string") {
-		return content;
+		return stripClockAnnotation(content);
 	}
-	return content
+	const text = content
 		.filter((part): part is MessageTextPart => part.type === "text")
 		.map((part) => part.text)
 		.join("\n");
+	return stripClockAnnotation(text);
 }
 
 export function getUserTexts(harness: Harness): string[] {
