@@ -903,17 +903,18 @@ export interface CompactionPreparation {
 	/** Compaction settions from settings.jsonl	*/
 	settings: CompactionSettings;
 	/**
-	 * Issue #186, shadow mode: set when a task_boundary marker (written by
-	 * task-boundary-detector.ts) falls within the span this compaction pass is about to chain
-	 * forward. This does NOT change firstKeptEntryId/previousSummary/fileOps yet — it only
-	 * reports what a boundary-aware reset would have done, for validation against real traffic
-	 * before the detector's verdicts are trusted to actually change compaction's behavior.
+	 * Issue #186: set when a task_boundary marker (written by task-boundary-detector.ts) fell
+	 * within the span this pass would otherwise have chained forward, and this pass reset the
+	 * chain at that point instead — dropping previousSummary and the previous compaction's
+	 * cumulative file-op tracking, so the abandoned task's Goal stops propagating into future
+	 * compactions. Validated in shadow mode (logged only, no behavior change) against real
+	 * Telegram/dashboard traffic before this became live; see issue #186 for that data.
 	 */
-	shadowChainReset?: {
+	chainReset?: {
 		taskSummary: string;
 		/** Index into the pathEntries this preparation was built from, resolved from the
-		 * marker's beforeEntryId. */
-		wouldResetAtIndex: number;
+		 * marker's beforeEntryId — this became the new boundaryStart. */
+		resetAtIndex: number;
 	};
 }
 
@@ -943,6 +944,31 @@ export function prepareCompaction(
 		boundaryStart = firstKeptEntryIndex >= 0 ? firstKeptEntryIndex : prevCompactionIndex + 1;
 	}
 	const boundaryEnd = pathEntries.length;
+
+	// Issue #186: a task_boundary marker in the span about to be chained forward means a
+	// topic shift was detected since the last compaction. Reset at that point instead of
+	// chaining: drop previousSummary, move boundaryStart forward (so the abandoned task's
+	// messages are neither summarized nor kept raw — they stay on disk but drop out of live
+	// context entirely), and skip seeding file-op tracking from the previous compaction below.
+	// Only the most recent marker in the span matters; anything before it is superseded.
+	let chainReset: CompactionPreparation["chainReset"];
+	let fileOpsPrevCompactionIndex = prevCompactionIndex;
+	for (let i = boundaryEnd - 1; i >= boundaryStart; i--) {
+		const entry = pathEntries[i];
+		if (entry.type !== "custom" || entry.customType !== TASK_BOUNDARY_CUSTOM_TYPE) continue;
+		const data = entry.data as TaskBoundaryData | undefined;
+		if (!data) continue;
+		const resetAtIndex = pathEntries.findIndex((e) => e.id === data.beforeEntryId);
+		if (resetAtIndex <= boundaryStart) continue; // anchor pruned, or already at/before the boundary — no-op
+		chainReset = { taskSummary: data.taskSummary, resetAtIndex };
+		boundaryStart = resetAtIndex;
+		previousSummary = undefined;
+		fileOpsPrevCompactionIndex = -1;
+		if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
+			console.error(`[compaction] resetting chain at index ${resetAtIndex}: "${data.taskSummary}"`);
+		}
+		break;
+	}
 
 	const tokensBefore = estimateContextTokens(buildSessionContext(pathEntries).messages).tokens;
 
@@ -984,34 +1010,15 @@ export function prepareCompaction(
 		return undefined;
 	}
 
-	// Extract file operations from messages and previous compaction
-	const fileOps = extractFileOperations(messagesToSummarize, pathEntries, prevCompactionIndex);
+	// Extract file operations from messages and previous compaction (skipped when chainReset
+	// fired above — the previous compaction's cumulative file list belongs to the abandoned task).
+	const fileOps = extractFileOperations(messagesToSummarize, pathEntries, fileOpsPrevCompactionIndex);
 
 	// Also extract file ops from turn prefix if splitting
 	if (cutPoint.isSplitTurn) {
 		for (const msg of turnPrefixMessages) {
 			extractFileOpsFromMessage(msg, fileOps);
 		}
-	}
-
-	// Issue #186, shadow mode: scan the span this pass is about to chain forward for the most
-	// recent task_boundary marker. Logged only — see CompactionPreparation.shadowChainReset.
-	let shadowChainReset: CompactionPreparation["shadowChainReset"];
-	for (let i = boundaryEnd - 1; i >= boundaryStart; i--) {
-		const entry = pathEntries[i];
-		if (entry.type !== "custom" || entry.customType !== TASK_BOUNDARY_CUSTOM_TYPE) continue;
-		const data = entry.data as TaskBoundaryData | undefined;
-		if (!data) continue;
-		const wouldResetAtIndex = pathEntries.findIndex((e) => e.id === data.beforeEntryId);
-		if (wouldResetAtIndex < 0) continue; // anchor entry pruned/unavailable; skip this marker
-		shadowChainReset = { taskSummary: data.taskSummary, wouldResetAtIndex };
-		if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
-			console.error(
-				`[compaction shadow] task_boundary in span — would reset chain at index ${wouldResetAtIndex} ` +
-					`(current boundaryStart ${boundaryStart}): "${data.taskSummary}"`,
-			);
-		}
-		break;
 	}
 
 	return {
@@ -1024,7 +1031,7 @@ export function prepareCompaction(
 		previousSummary,
 		fileOps,
 		settings,
-		...(shadowChainReset ? { shadowChainReset } : {}),
+		...(chainReset ? { chainReset } : {}),
 	};
 }
 
