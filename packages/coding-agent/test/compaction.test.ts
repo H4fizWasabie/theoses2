@@ -532,32 +532,42 @@ describe("prepareCompaction with previous compaction", () => {
 	});
 });
 
-describe("prepareCompaction shadow-mode task boundary detection (#186)", () => {
-	it("reports shadowChainReset when a task_boundary marker falls within the summarized span, without changing firstKeptEntryId or previousSummary", () => {
+describe("prepareCompaction task boundary chain reset (#186)", () => {
+	it("resets the chain at a task_boundary marker: drops previousSummary, moves boundaryStart past the abandoned task, and drops its file-op carryover", () => {
 		const u1 = createMessageEntry(createUserMessage("fix the auth bug".repeat(8)));
 		const a1 = createMessageEntry(createAssistantMessage("fixed it".repeat(8)));
-		// Written async, after u2's reply — anchored back to u2 via beforeEntryId, matching how
+		const u2 = createMessageEntry(createUserMessage("continuing the bug fix, add tests".repeat(8)));
+		const a2 = createMessageEntry(createAssistantMessage("added tests".repeat(8)));
+		// A previous compaction already ran, kept from u2 onward, and is carrying a summary plus
+		// file-op tracking forward — exactly the chaining behavior a task_boundary should stop.
+		const c0 = createCompactionEntry("Old summary: fixed the auth bug", u2.id);
+		(c0 as CompactionEntry).details = { readFiles: ["old-abandoned-task-file.ts"], modifiedFiles: [] };
+		const u3 = createMessageEntry(createUserMessage("what's the weather like".repeat(8)));
+		const a3 = createMessageEntry(createAssistantMessage("no tools for that".repeat(8), createMockUsage(5000, 1000)));
+		// Written async, after u3's reply — anchored back to u3 via beforeEntryId, matching how
 		// the real detector (task-boundary-detector.ts) anchors a marker.
-		const u2 = createMessageEntry(createUserMessage("what's the weather like".repeat(8)));
-		const a2 = createMessageEntry(createAssistantMessage("no tools for that".repeat(8), createMockUsage(5000, 1000)));
-		const boundary = createTaskBoundaryEntry("asking about the weather", u2.id);
-		const u3 = createMessageEntry(createUserMessage("anything else".repeat(8)));
-		const a3 = createMessageEntry(createAssistantMessage("nope".repeat(8), createMockUsage(8000, 2000)));
+		const boundary = createTaskBoundaryEntry("asking about the weather", u3.id);
+		const u4 = createMessageEntry(createUserMessage("anything else".repeat(8)));
+		const a4 = createMessageEntry(createAssistantMessage("nope".repeat(8), createMockUsage(8000, 2000)));
 
 		const settings: CompactionSettings = { ...DEFAULT_COMPACTION_SETTINGS, keepRecentTokens: 10 };
-		const pathEntries = [u1, a1, u2, a2, boundary, u3, a3];
+		const pathEntries = [u1, a1, u2, a2, c0, u3, a3, boundary, u4, a4];
 		const preparation = prepareCompaction(pathEntries, settings);
 
 		expect(preparation).toBeDefined();
-		expect(preparation!.shadowChainReset).toBeDefined();
-		expect(preparation!.shadowChainReset!.taskSummary).toBe("asking about the weather");
-		expect(pathEntries[preparation!.shadowChainReset!.wouldResetAtIndex].id).toBe(u2.id);
-		// Shadow mode (issue #186 Q15): detection is reported, but live behavior is unchanged —
-		// the marker must not have moved the actual cut point or dropped previousSummary.
+		expect(preparation!.chainReset).toBeDefined();
+		expect(preparation!.chainReset!.taskSummary).toBe("asking about the weather");
+		expect(pathEntries[preparation!.chainReset!.resetAtIndex].id).toBe(u3.id);
+		// The reset fired: no chained summary from c0, and c0's file-op tracking didn't carry over.
 		expect(preparation!.previousSummary).toBeUndefined();
+		expect(preparation!.fileOps.read.has("old-abandoned-task-file.ts")).toBe(false);
+		// u2/a2 (the abandoned bug-fix continuation, before the reset point) must not be
+		// resummarized either — they're excluded entirely, not folded into the new pass.
+		const summarizedText = extractText(preparation!.messagesToSummarize);
+		expect(summarizedText).not.toContain("continuing the bug fix");
 	});
 
-	it("does not report shadowChainReset when no task_boundary marker is present", () => {
+	it("does not set chainReset when no task_boundary marker is present", () => {
 		const u1 = createMessageEntry(createUserMessage("fix the auth bug".repeat(8)));
 		const a1 = createMessageEntry(createAssistantMessage("fixed it".repeat(8)));
 		const u2 = createMessageEntry(createUserMessage("now add a test for it".repeat(8)));
@@ -567,7 +577,7 @@ describe("prepareCompaction shadow-mode task boundary detection (#186)", () => {
 		const preparation = prepareCompaction([u1, a1, u2, a2], settings);
 
 		expect(preparation).toBeDefined();
-		expect(preparation!.shadowChainReset).toBeUndefined();
+		expect(preparation!.chainReset).toBeUndefined();
 	});
 
 	it("ignores a task_boundary marker whose beforeEntryId cannot be resolved in the current span", () => {
@@ -581,7 +591,24 @@ describe("prepareCompaction shadow-mode task boundary detection (#186)", () => {
 		const preparation = prepareCompaction([u1, a1, boundary, u2, a2], settings);
 
 		expect(preparation).toBeDefined();
-		expect(preparation!.shadowChainReset).toBeUndefined();
+		expect(preparation!.chainReset).toBeUndefined();
+	});
+
+	it("does not reset when the task_boundary marker sits at or before the current boundaryStart", () => {
+		const u1 = createMessageEntry(createUserMessage("fix the auth bug".repeat(8)));
+		const a1 = createMessageEntry(createAssistantMessage("fixed it".repeat(8)));
+		const u2 = createMessageEntry(createUserMessage("what's the weather like".repeat(8)));
+		// Anchored at u2 itself, which is also where boundaryStart already sits (no prior
+		// compaction, so boundaryStart is 0 — but here we test the equal-index no-op case
+		// directly via a marker anchored to the very first entry considered).
+		const boundary = createTaskBoundaryEntry("asking about the weather", u1.id);
+		const a2 = createMessageEntry(createAssistantMessage("no tools for that".repeat(8), createMockUsage(5000, 1000)));
+
+		const settings: CompactionSettings = { ...DEFAULT_COMPACTION_SETTINGS, keepRecentTokens: 10 };
+		const preparation = prepareCompaction([u1, a1, u2, boundary, a2], settings);
+
+		expect(preparation).toBeDefined();
+		expect(preparation!.chainReset).toBeUndefined();
 	});
 });
 
