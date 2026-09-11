@@ -9,10 +9,12 @@ vi.mock("theoses-coding-agent", () => ({
 	},
 	createAgentSession: vi.fn(),
 	maybeRunConsolidation: vi.fn(),
+	configureHttpDispatcher: vi.fn(),
+	findExactModelReferenceMatch: vi.fn(),
 }));
 
 import { createAgentSession, SessionManager } from "theoses-coding-agent";
-import { createTelegramBot } from "../src/index.ts";
+import { createTelegramBot, parseModelCommand } from "../src/index.ts";
 
 function messageUpdate(updateId: number, messageId: number, text: string): Update {
 	return {
@@ -83,5 +85,22 @@ describe("Telegram stop queueing", () => {
 		expect(session.prompt).toHaveBeenCalledTimes(1);
 		expect(session.abort).toHaveBeenCalledTimes(1);
 		expect(sendMessage).toHaveBeenCalledWith(1, expect.stringContaining("Also skipped your next queued message."));
+	});
+});
+
+describe("parseModelCommand", () => {
+	it("returns undefined for non-/model messages", () => {
+		expect(parseModelCommand("hello")).toBeUndefined();
+		expect(parseModelCommand("/modeling something")).toBeUndefined();
+	});
+
+	it("returns an empty string for bare /model", () => {
+		expect(parseModelCommand("/model")).toBe("");
+		expect(parseModelCommand("  /model  ")).toBe("");
+	});
+
+	it("returns the trimmed argument for /model <ref>", () => {
+		expect(parseModelCommand("/model deepseek/deepseek-v4.1-flash")).toBe("deepseek/deepseek-v4.1-flash");
+		expect(parseModelCommand("/model   z-ai/glm-5.3-flash  ")).toBe("z-ai/glm-5.3-flash");
 	});
 });

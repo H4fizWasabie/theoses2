@@ -5,6 +5,7 @@ import {
 	configureHttpDispatcher,
 	createAgentSession,
 	DefaultResourceLoader,
+	findExactModelReferenceMatch,
 	findLastUserMessageEntryId,
 	getAgentDir,
 	maybeDetectTaskBoundary,
@@ -79,6 +80,19 @@ const STOP_COMMANDS = new Set(["stop", "halt", "/stop", "/cancel"]);
 /** Recognizes an explicit "/stop"/"/cancel" command or a bare "stop"/"halt" message, case-insensitively. */
 function isStopCommand(text: string): boolean {
 	return STOP_COMMANDS.has(text.trim().toLowerCase());
+}
+
+/**
+ * Parses "/model <provider/id or bare id>" out of a message, or undefined if the message
+ * isn't a /model command. Unlike /stop, this only matches with an argument - "/model" alone
+ * has no interactive picker to fall back to here (unlike the CLI TUI), so it's left unhandled
+ * to just tell the user how to use it.
+ */
+export function parseModelCommand(text: string): string | undefined {
+	const trimmed = text.trim();
+	if (trimmed === "/model") return "";
+	if (trimmed.toLowerCase().startsWith("/model ")) return trimmed.slice("/model ".length).trim();
+	return undefined;
 }
 
 function messageText(ctx: Context): string {
@@ -404,6 +418,42 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			removeQueuedMessage(chat, messageId);
 			if (consumeStopRequest(chat, messageId)) return;
 			const session = await sessionFor(chat, cwd, sessions);
+
+			const modelArg = parseModelCommand(messageText(ctx));
+			if (modelArg !== undefined) {
+				if (!modelArg) {
+					const current = session.model;
+					await bot.api.sendMessage(
+						ctx.chat.id,
+						current
+							? `Current model: ${current.provider}/${current.id}\nSwitch with: /model <provider/id>`
+							: "No model set yet.\nSwitch with: /model <provider/id>",
+					);
+					return;
+				}
+				const match = findExactModelReferenceMatch(modelArg, [...session.modelRuntime.getAvailableSnapshot()]);
+				if (!match) {
+					await bot.api.sendMessage(
+						ctx.chat.id,
+						`No exact match for "${modelArg}". Use the canonical provider/id (e.g. deepseek/deepseek-v4.1-flash).`,
+					);
+					return;
+				}
+				try {
+					// Session-only switch (mirrors the CLI TUI's `/model` default of persist: false) -
+					// this changes what this Telegram conversation uses going forward, not the global
+					// default in settings.json (which only seeds brand-new sessions).
+					await session.setModel(match, { persist: false });
+					await bot.api.sendMessage(ctx.chat.id, `Model: ${match.provider}/${match.id}`);
+				} catch (error) {
+					await bot.api.sendMessage(
+						ctx.chat.id,
+						`Couldn't switch model: ${error instanceof Error ? error.message : String(error)}`,
+					);
+				}
+				return;
+			}
+
 			const images: string[] = [];
 			// Fallback prompt for caption-less attachments: without it, an empty string
 			// reaches the agent and the attachment is silently ignored (2026-09-08 fix).
