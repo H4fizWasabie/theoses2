@@ -38,21 +38,18 @@ function assistantWithThinking(thinking: string, sourceModel: Model<"openai-comp
 }
 
 describe("transformMessages cross-model thinking replay", () => {
-	it("bounds an oversized thinking trace when downgraded to text for a different model", () => {
+	it("drops an oversized thinking trace entirely when downgraded for a different model", () => {
 		const sourceModel = model("z-ai/glm-5.3-flash");
 		const destModel = model("deepseek/deepseek-v4.1-flash");
 		const hugeThinking = "x".repeat(500_000);
 
 		const [transformed] = transformMessages([assistantWithThinking(hugeThinking, sourceModel)], destModel);
 		if (transformed.role !== "assistant") throw new Error("expected assistant message");
-		const textBlock = transformed.content.find((b) => b.type === "text");
 
-		expect(textBlock).toBeTruthy();
-		expect(textBlock?.type === "text" && textBlock.text.length).toBeLessThan(hugeThinking.length);
-		expect(textBlock?.type === "text" && textBlock.text).toContain("more characters of prior reasoning omitted");
+		expect(transformed.content).toEqual([]);
 	});
 
-	it("leaves a short thinking trace untouched when downgraded for a different model", () => {
+	it("still downgrades a normal-sized thinking trace to text for a different model", () => {
 		const sourceModel = model("z-ai/glm-5.3-flash");
 		const destModel = model("deepseek/deepseek-v4.1-flash");
 		const shortThinking = "Deciding whether to call the read tool.";

@@ -11,12 +11,14 @@ import type {
 
 const NON_VISION_USER_IMAGE_PLACEHOLDER = "(image omitted: model does not support images)";
 const NON_VISION_TOOL_IMAGE_PLACEHOLDER = "(tool image omitted: model does not support images)";
-// A cross-model thinking block downgrades to plain text (see below) since the destination model
-// can't replay another model's reasoning signature. That text is supplementary context, not load-
-// bearing content, but with no bound a single verbose reasoning trace (some models routinely run
-// hundreds of thousands of characters at high effort) can blow past the destination model's context
-// window or a provider's per-message size limit, surfacing as an opaque "invalid request" error with
-// no indication of the actual cause.
+// Cross-model thinking blocks normally downgrade to plain text below - continuing a task only
+// needs the outcome (text/tool calls/tool results) a model's reasoning led to, not the scratch
+// work itself, but some callers (e.g. Copilot's silent OpenAI<->Anthropic backend migration for
+// the same logical assistant) rely on that text surviving for visible continuity. Only the size is
+// the actual problem: some models routinely produce hundreds of thousands of characters of
+// reasoning at high effort, and inlining that unbounded can blow past the destination model's
+// context window or a provider's per-message size limit, surfacing as an opaque "invalid request"
+// error. So drop it entirely once it's oversized, instead of inlining unbounded.
 const CROSS_MODEL_THINKING_TEXT_MAX_CHARS = 4000;
 
 function replaceImagesWithPlaceholder(content: (TextContent | ImageContent)[], placeholder: string): TextContent[] {
@@ -37,13 +39,6 @@ function replaceImagesWithPlaceholder(content: (TextContent | ImageContent)[], p
 	}
 
 	return result;
-}
-
-/** Bounds text carried over from another model's reasoning trace - see CROSS_MODEL_THINKING_TEXT_MAX_CHARS. */
-function truncateCrossModelThinking(text: string): string {
-	if (text.length <= CROSS_MODEL_THINKING_TEXT_MAX_CHARS) return text;
-	const omitted = text.length - CROSS_MODEL_THINKING_TEXT_MAX_CHARS;
-	return `${text.slice(0, CROSS_MODEL_THINKING_TEXT_MAX_CHARS)}\n\n(...${omitted} more characters of prior reasoning omitted)`;
 }
 
 function downgradeUnsupportedImages<TApi extends Api>(messages: Message[], model: Model<TApi>): Message[] {
@@ -124,9 +119,13 @@ export function transformMessages<TApi extends Api>(
 					// Skip empty thinking blocks, convert others to plain text
 					if (!block.thinking || block.thinking.trim() === "") return [];
 					if (isSameModel) return block;
+					// Cross-model: drop oversized traces entirely (see CROSS_MODEL_THINKING_TEXT_MAX_CHARS);
+					// normal-sized ones still downgrade to text below for callers that rely on that
+					// continuity (e.g. Copilot's backend migration).
+					if (block.thinking.length > CROSS_MODEL_THINKING_TEXT_MAX_CHARS) return [];
 					return {
 						type: "text" as const,
-						text: truncateCrossModelThinking(block.thinking),
+						text: block.thinking,
 					};
 				}
 
