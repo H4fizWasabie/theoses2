@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.25] - 2026-09-11
+
 ### Removed
 
 - Removed `pi.dev` version checks, install telemetry, remote catalog overlays, provider attribution, and installer-backed self-updates ([#19](https://github.com/H4fizWasabie/theoses2/issues/19)).
