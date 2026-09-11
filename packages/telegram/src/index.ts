@@ -4,13 +4,15 @@ import {
 	type AgentSessionEvent,
 	configureHttpDispatcher,
 	createAgentSession,
+	DefaultResourceLoader,
 	findLastUserMessageEntryId,
+	getAgentDir,
 	maybeDetectTaskBoundary,
 	maybeRunConsolidation,
 	type SessionInfo,
 	SessionManager,
 } from "theoses-coding-agent";
-import { chunkHtml, containsPipeTable, formatTelegramHtml, splitSections } from "./format.ts";
+import { chunkHtml, formatTelegramHtml, splitSections } from "./format.ts";
 
 // No settings.json override plumbing here (telegram doesn't load SettingsManager);
 // this applies the shared default idle timeout globally so a stalled/looping
@@ -48,6 +50,25 @@ interface RawApiWithRichMessage {
 	sendRichMessage(params: SendRichMessageParams): Promise<{ message_id: number }>;
 	editMessageText(params: EditMessageTextRichParams): Promise<{ message_id: number }>;
 }
+
+/**
+ * Telegram-only rich-message guidance (issues #195, #196). Headings and block quotes need no
+ * guidance - theoses already produces `#`/`##`/`###` and `>` today and they ride #194's
+ * unconditional rich attempt for free. Collapsible blocks and footnotes are genuinely new
+ * content structure with no existing habit to piggyback on, so both get a judgment framing
+ * (not a hardcoded length/tool-type rule, not "cite everything") per the resolved tickets.
+ */
+const TELEGRAM_RICH_FORMATTING_GUIDANCE = `TELEGRAM RICH FORMATTING:
+Replies here render through Telegram's rich-message format. Headings and quotes you already write
+render natively with no change needed. Two more tools are available - use judgment about when they
+help, not as a default:
+- Collapsible blocks (<details><summary>short summary</summary>full detail</details>): use when a
+  reply's main point is short but there's secondary detail worth keeping (full command output, a
+  long log, a diagnostic dump) - so the summary alone answers, and the detail is there if wanted.
+  Don't collapse something short, or something that IS the answer.
+- Footnotes ([^id] reference plus a [^id]: definition line): use when citing a specific external
+  source worth being able to verify (a particular doc, a particular web_search result) - not for
+  every claim. General or well-known knowledge doesn't need one.`;
 
 function chatId(ctx: Context): string | undefined {
 	return ctx.chat?.id.toString();
@@ -113,21 +134,23 @@ async function sendTelegramReply(
 	let lastId = replyTo;
 	let pendingEditId = statusMessageId;
 	for (const [index, section] of sections.entries()) {
-		// Rich messages (Bot API 10.1) render pipe tables natively instead of the aligned <pre>
-		// fallback below - tried for any section that actually has a table and fits the rich
-		// message char limit, whether it's a fresh send or replacing the in-place "Running
-		// <tool>..." status message (editMessageText also takes a rich_message param - verified
-		// directly against the Bot API docs and a live send/edit round-trip before wiring this
-		// in). Tool-using replies are exactly the ones most likely to produce a table, and they
-		// always go through the status-message edit path (setStatus() above), so excluding it
-		// would have meant real table replies almost never got the rich treatment - confirmed
-		// this was happening live before this fix. No confirmed fallback behavior exists for
-		// clients that predate 10.1 (checked the Bot API docs directly - undocumented), so this
-		// only ever *attempts* the rich path; any failure - old client, malformed markdown,
-		// network error - is logged (never silently swallowed) and falls through to the exact
-		// classic HTML path below, same "never lose the message" contract chunkHtml's caller
-		// already relies on.
-		if (containsPipeTable(section) && section.length <= RICH_MESSAGE_CHAR_LIMIT) {
+		// Rich messages (Bot API 10.1) render the full toolkit (tables, headings, collapsible
+		// blocks, footnotes, block quotes, ...) natively instead of the classic HTML fallback
+		// below - attempted unconditionally for every section that fits the rich message char
+		// limit (issue #194: rich markdown is a strict superset of what classic HTML handles, so
+		// a plain reply renders identically either way - a content-based gate only adds
+		// maintenance, not behavior). Works whether it's a fresh send or replacing the in-place
+		// "Running <tool>..." status message (editMessageText also takes a rich_message param -
+		// verified directly against the Bot API docs and a live send/edit round-trip before wiring
+		// this in). No confirmed fallback behavior exists for clients that predate 10.1 (checked
+		// the Bot API docs directly - undocumented), so this only ever *attempts* the rich path;
+		// any failure - old client, malformed markdown, network error - is logged (never silently
+		// swallowed) and falls through to the exact classic HTML path below, same "never lose the
+		// message" contract chunkHtml's caller already relies on. Sections over the rich limit
+		// skip straight to classic chunking rather than being split across multiple rich messages
+		// (splitting rich markdown itself risks cutting mid-table/mid-list/mid-code-block; classic
+		// chunking already splits safely at tag/newline boundaries).
+		if (section.length <= RICH_MESSAGE_CHAR_LIMIT) {
 			const editId = pendingEditId;
 			const rawApi = bot.api.raw as unknown as RawApiWithRichMessage;
 			try {
@@ -260,7 +283,18 @@ async function sessionFor(
 		// process restarts - that's what silently kept every extension's tools (e.g. procura's
 		// four) off Telegram no matter how the extension or session were refreshed. Leaving it
 		// unset matches the dashboard channel: full SDK default tools plus every extension tool.
-		const { session } = await createAgentSession({ sessionManager, thinkingLevel: "high" });
+		//
+		// A custom resourceLoader (issues #195/#196) appends Telegram-only rich-formatting
+		// guidance - collapsible blocks and footnotes have no existing habit to build on, unlike
+		// headings/quotes, so they need explicit guidance. Channel-scoped deliberately: this cwd
+		// is Telegram-specific, so it never reaches the dashboard or CLI, which don't render rich
+		// messages the same way.
+		const resourceLoader = new DefaultResourceLoader({
+			cwd,
+			agentDir: getAgentDir(),
+			appendSystemPrompt: [TELEGRAM_RICH_FORMATTING_GUIDANCE],
+		});
+		const { session } = await createAgentSession({ sessionManager, thinkingLevel: "high", resourceLoader });
 		// convert_doc isn't in the SDK's default active set. Telegram document uploads are stored
 		// as artifacts (see the `ctx.message.document` branch below) and need convert_doc enabled
 		// to ever be read - added on top of the full default+extension set rather than via
@@ -481,8 +515,19 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			} else if (statusMessageId !== undefined) {
 				await bot.api.deleteMessage(ctx.chat.id, statusMessageId).catch(() => {});
 			}
-			for (const image of generatedImages) {
-				await bot.api.sendPhoto(ctx.chat.id, new InputFile(image));
+			// Issue #198: multiple images collected in one reply (e.g. several generate_image
+			// calls in a turn) go out as one grouped album via sendMediaGroup instead of separate
+			// sendPhoto messages - confirmed this happens repeatedly in real usage and previously
+			// sent as N distinct messages. sendMediaGroup is a plain (non-rich-message) Bot API
+			// call, independent of the rich-message fallback chain above - always used directly
+			// when there's more than one image, regardless of anything else in the reply.
+			if (generatedImages.length > 1) {
+				await bot.api.sendMediaGroup(
+					ctx.chat.id,
+					generatedImages.map((image) => ({ type: "photo" as const, media: new InputFile(image) })),
+				);
+			} else if (generatedImages.length === 1) {
+				await bot.api.sendPhoto(ctx.chat.id, new InputFile(generatedImages[0]));
 			}
 
 			const channelSessionKey = session.sessionManager.getChannelSessionKey();
