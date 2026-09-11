@@ -3,6 +3,7 @@ import { basename, join, resolve } from "node:path";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSession } from "./agent-session.ts";
 import type { AgentSessionRuntimeDiagnostic, AgentSessionServices } from "./agent-session-services.ts";
+import { stripClockAnnotation } from "./clock.ts";
 import type {
 	ProjectTrustContext,
 	ReplacedSessionContext,
@@ -55,13 +56,14 @@ export class SessionImportFileNotFoundError extends Error {
 
 function extractUserMessageText(content: string | Array<{ type: string; text?: string }>): string {
 	if (typeof content === "string") {
-		return content;
+		return stripClockAnnotation(content);
 	}
 
-	return content
+	const text = content
 		.filter((part): part is { type: "text"; text: string } => part.type === "text" && typeof part.text === "string")
 		.map((part) => part.text)
 		.join("");
+	return stripClockAnnotation(text);
 }
 
 /**

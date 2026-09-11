@@ -15,6 +15,7 @@ import {
 	maybeRunConsolidation,
 	type SessionInfo,
 	SessionManager,
+	stripClockAnnotation,
 } from "theoses-coding-agent";
 import { deletePath, FileConflictError, listDirectory, readTextFile, renamePath, writeTextFile } from "./files.ts";
 import { readMemoryGraph } from "./memory-graph.ts";
@@ -142,8 +143,11 @@ function optionalStringField(value: unknown, name: string): string | undefined {
 
 function messageText(message: AgentMessage): string {
 	if (!("content" in message)) return "";
-	if (typeof message.content === "string") return message.content;
-	return message.content.map((part) => (part.type === "text" ? part.text : "[image]")).join("");
+	const text =
+		typeof message.content === "string"
+			? message.content
+			: message.content.map((part) => (part.type === "text" ? part.text : "[image]")).join("");
+	return message.role === "user" ? stripClockAnnotation(text) : text;
 }
 
 type HistorySegment =

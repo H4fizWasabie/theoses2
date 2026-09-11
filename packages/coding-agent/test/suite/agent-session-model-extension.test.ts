@@ -2,6 +2,7 @@ import type { AgentTool, ThinkingLevel } from "theoses-agent-core";
 import { fauxAssistantMessage, fauxToolCall, type Model, type Usage } from "theoses-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
+import { stripClockAnnotation } from "../../src/core/clock.ts";
 import type { BuildSystemPromptOptions, ExtensionAPI } from "../../src/index.ts";
 import { createHarness, getAssistantTexts, type Harness } from "./harness.ts";
 
@@ -381,8 +382,11 @@ describe("AgentSession model and extension characterization", () => {
 		expect(providerUserText).toBe("rewritten");
 		const storedUserMessage = harness.session.messages.find((message) => message.role === "user");
 		expect(storedUserMessage?.role).toBe("user");
-		if (storedUserMessage?.role === "user") {
-			expect(storedUserMessage.content).toEqual([{ type: "text", text: "original" }]);
+		if (storedUserMessage?.role === "user" && Array.isArray(storedUserMessage.content)) {
+			const strippedContent = storedUserMessage.content.map((part) =>
+				part.type === "text" ? { ...part, text: stripClockAnnotation(part.text) } : part,
+			);
+			expect(strippedContent).toEqual([{ type: "text", text: "original" }]);
 		}
 	});
 
@@ -420,7 +424,7 @@ describe("AgentSession model and extension characterization", () => {
 		await transformedHarness.session.prompt("hello");
 		await transformedHarness.session.prompt("ping");
 
-		expect(providerUserText).toBe("transformed:hello");
+		expect(stripClockAnnotation(providerUserText)).toBe("transformed:hello");
 		expect(transformedHarness.session.messages.filter((message) => message.role === "user")).toHaveLength(1);
 		expect(extensionApi).toBeDefined();
 	});

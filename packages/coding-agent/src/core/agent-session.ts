@@ -52,6 +52,7 @@ import { sleep } from "../utils/sleep.ts";
 import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
+import { formatClockAnnotation, stripClockAnnotation } from "./clock.ts";
 import {
 	type CompactionPreparation,
 	type CompactionResult,
@@ -1246,7 +1247,7 @@ export class AgentSession {
 				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 			}
 			const abortNotice = this.sessionManager.getLastOperationOutcome() === "aborted" ? `${ABORT_NOTICE}\n\n` : "";
-			const contextualText = `${abortNotice}${addReplyContext(expandedText, options?.replyContext)}`;
+			const contextualText = `${abortNotice}${addReplyContext(expandedText, options?.replyContext)}${formatClockAnnotation()}`;
 
 			// If streaming, queue via steer() or followUp() based on option
 			if (this.isStreaming) {
@@ -3455,7 +3456,7 @@ export class AgentSession {
 			if (entry.type !== "message") continue;
 			if (entry.message.role !== "user") continue;
 
-			const text = contentText(entry.message.content, "");
+			const text = stripClockAnnotation(contentText(entry.message.content, ""));
 			if (text) {
 				result.push({ entryId: entry.id, text });
 			}

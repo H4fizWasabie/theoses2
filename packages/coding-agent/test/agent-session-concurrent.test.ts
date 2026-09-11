@@ -212,7 +212,7 @@ describe("AgentSession concurrent prompt guard", () => {
 								.join("\n");
 						});
 
-					if (userTexts.includes("Steer from extension")) {
+					if (userTexts.some((text) => text.startsWith("Steer from extension"))) {
 						sawSteeringMessage = true;
 						stream.push({ type: "start", partial: createAssistantMessage("") });
 						stream.push({ type: "done", reason: "stop", message: createAssistantMessage("Steered") });
@@ -281,9 +281,11 @@ describe("AgentSession concurrent prompt guard", () => {
 		await new Promise((resolve) => setTimeout(resolve, 25));
 
 		expect(session.pendingMessageCount).toBe(1);
-		expect(session.getSteeringMessages()).toContain("Steer from extension");
+		expect(session.getSteeringMessages().some((text) => text.startsWith("Steer from extension"))).toBe(true);
 		expect(lastInputSource).toBe("extension");
-		expect(queueEvents.some((event) => event.steering.includes("Steer from extension"))).toBe(true);
+		expect(queueEvents.some((event) => event.steering.some((text) => text.startsWith("Steer from extension")))).toBe(
+			true,
+		);
 
 		await session.abort();
 		await firstPrompt.catch(() => {});

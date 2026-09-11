@@ -63,6 +63,7 @@ import {
 	computeCacheWaste,
 	detectCacheMiss,
 } from "../../core/cache-stats.ts";
+import { stripClockAnnotation } from "../../core/clock.ts";
 import { DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS } from "../../core/defaults.ts";
 import type {
 	AutocompleteProviderFactory,
@@ -3336,7 +3337,7 @@ export class InteractiveMode {
 			typeof message.content === "string"
 				? [{ type: "text", text: message.content }]
 				: message.content.filter((c: { type: string }) => c.type === "text");
-		return textBlocks.map((c) => (c as { text: string }).text).join("");
+		return stripClockAnnotation(textBlocks.map((c) => (c as { text: string }).text).join(""));
 	}
 
 	/** Show a managed-tool status update in the chat. */
