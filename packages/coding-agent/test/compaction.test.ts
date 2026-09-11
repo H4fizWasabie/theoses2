@@ -610,6 +610,46 @@ describe("prepareCompaction task boundary chain reset (#186)", () => {
 		expect(preparation).toBeDefined();
 		expect(preparation!.chainReset).toBeUndefined();
 	});
+
+	it("commits the reset instead of returning undefined when nothing is left to summarize (#204)", () => {
+		const u1 = createMessageEntry(createUserMessage("fix the auth bug".repeat(8)));
+		const a1 = createMessageEntry(createAssistantMessage("fixed it".repeat(8)));
+		const u2 = createMessageEntry(createUserMessage("what's the weather like"));
+		const a2 = createMessageEntry(createAssistantMessage("no tools for that"));
+		// Written async, after u2's reply — anchored back to u2, same as the real detector.
+		const boundary = createTaskBoundaryEntry("asking about the weather", u2.id);
+
+		// Default keepRecentTokens comfortably covers the tiny post-reset span, so the cut point
+		// lands exactly at the reset boundary and there's nothing left to summarize.
+		const pathEntries = [u1, a1, u2, a2, boundary];
+		const preparation = prepareCompaction(pathEntries, DEFAULT_COMPACTION_SETTINGS);
+
+		expect(preparation).toBeDefined();
+		expect(preparation!.chainReset).toBeDefined();
+		expect(preparation!.trivialReset).toBe(true);
+		expect(preparation!.messagesToSummarize).toHaveLength(0);
+		expect(preparation!.turnPrefixMessages).toHaveLength(0);
+		expect(preparation!.firstKeptEntryId).toBe(u2.id);
+	});
+
+	it("compact() commits a trivial reset without calling the summarization model (#204)", async () => {
+		const u1 = createMessageEntry(createUserMessage("fix the auth bug".repeat(8)));
+		const a1 = createMessageEntry(createAssistantMessage("fixed it".repeat(8)));
+		const u2 = createMessageEntry(createUserMessage("what's the weather like"));
+		const a2 = createMessageEntry(createAssistantMessage("no tools for that"));
+		const boundary = createTaskBoundaryEntry("asking about the weather", u2.id);
+
+		const preparation = prepareCompaction([u1, a1, u2, a2, boundary], DEFAULT_COMPACTION_SETTINGS);
+		expect(preparation!.trivialReset).toBe(true);
+
+		// No model/apiKey/streamFn provided — if this ever falls through to the summarization
+		// call path, the test fails on a network/auth error instead of hanging silently.
+		const result = await compact(preparation!, getModel("anthropic", "claude-sonnet-4-5")!, undefined);
+
+		expect(result.firstKeptEntryId).toBe(u2.id);
+		expect(result.summary).toContain("asking about the weather");
+		expect(result.usage).toBeUndefined();
+	});
 });
 
 // ============================================================================
