@@ -17,6 +17,10 @@ import {
 	sessionEntryToContextMessages,
 } from "../session-manager.ts";
 import {
+	TASK_BOUNDARY_CUSTOM_TYPE,
+	type TaskBoundaryData,
+} from "../task-boundary-detector.ts";
+import {
 	computeFileLists,
 	createFileOps,
 	extractFileOpsFromMessage,
@@ -901,6 +905,19 @@ export interface CompactionPreparation {
 	fileOps: FileOperations;
 	/** Compaction settions from settings.jsonl	*/
 	settings: CompactionSettings;
+	/**
+	 * Issue #186, shadow mode: set when a task_boundary marker (written by
+	 * task-boundary-detector.ts) falls within the span this compaction pass is about to chain
+	 * forward. This does NOT change firstKeptEntryId/previousSummary/fileOps yet — it only
+	 * reports what a boundary-aware reset would have done, for validation against real traffic
+	 * before the detector's verdicts are trusted to actually change compaction's behavior.
+	 */
+	shadowChainReset?: {
+		taskSummary: string;
+		/** Index into the pathEntries this preparation was built from, resolved from the
+		 * marker's beforeEntryId. */
+		wouldResetAtIndex: number;
+	};
 }
 
 export function prepareCompaction(
@@ -980,6 +997,26 @@ export function prepareCompaction(
 		}
 	}
 
+	// Issue #186, shadow mode: scan the span this pass is about to chain forward for the most
+	// recent task_boundary marker. Logged only — see CompactionPreparation.shadowChainReset.
+	let shadowChainReset: CompactionPreparation["shadowChainReset"];
+	for (let i = boundaryEnd - 1; i >= boundaryStart; i--) {
+		const entry = pathEntries[i];
+		if (entry.type !== "custom" || entry.customType !== TASK_BOUNDARY_CUSTOM_TYPE) continue;
+		const data = entry.data as TaskBoundaryData | undefined;
+		if (!data) continue;
+		const wouldResetAtIndex = pathEntries.findIndex((e) => e.id === data.beforeEntryId);
+		if (wouldResetAtIndex < 0) continue; // anchor entry pruned/unavailable; skip this marker
+		shadowChainReset = { taskSummary: data.taskSummary, wouldResetAtIndex };
+		if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
+			console.error(
+				`[compaction shadow] task_boundary in span — would reset chain at index ${wouldResetAtIndex} ` +
+					`(current boundaryStart ${boundaryStart}): "${data.taskSummary}"`,
+			);
+		}
+		break;
+	}
+
 	return {
 		firstKeptEntryId,
 		messagesToSummarize,
@@ -990,6 +1027,7 @@ export function prepareCompaction(
 		previousSummary,
 		fileOps,
 		settings,
+		...(shadowChainReset ? { shadowChainReset } : {}),
 	};
 }
 

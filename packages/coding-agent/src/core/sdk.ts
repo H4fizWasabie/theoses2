@@ -129,6 +129,14 @@ export {
 	shouldTriggerConsolidation,
 } from "./memory-consolidation.ts";
 export {
+	findLastUserMessageEntryId,
+	type MaybeDetectTaskBoundaryOptions,
+	maybeDetectTaskBoundary,
+	resolveTaskBoundaryModel,
+	type TaskBoundaryData,
+	type TaskDescriptorData,
+} from "./task-boundary-detector.ts";
+export {
 	EDGE_RELATIONS,
 	type EdgeRelation,
 	FileMemoryStore,

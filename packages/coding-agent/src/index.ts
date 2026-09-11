@@ -236,12 +236,18 @@ export {
 	type EpisodeRecord,
 	EpisodicStore,
 	FileMemoryStore,
+	findLastUserMessageEntryId,
+	type MaybeDetectTaskBoundaryOptions,
 	type MaybeRunConsolidationOptions,
 	type MemoryEdge,
 	type MemoryNode,
+	maybeDetectTaskBoundary,
 	maybeRunConsolidation,
 	type PromptTemplate,
+	resolveTaskBoundaryModel,
 	shouldTriggerConsolidation,
+	type TaskBoundaryData,
+	type TaskDescriptorData,
 } from "./core/sdk.ts";
 export {
 	type ArtifactEntry,

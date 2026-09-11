@@ -19,6 +19,7 @@ import {
 import {
 	buildSessionContext,
 	type CompactionEntry,
+	type CustomEntry,
 	type CustomMessageEntry,
 	type ModelChangeEntry,
 	migrateSessionEntries,
@@ -27,6 +28,7 @@ import {
 	type SessionMessageEntry,
 	type ThinkingLevelChangeEntry,
 } from "../src/core/session-manager.ts";
+import { TASK_BOUNDARY_CUSTOM_TYPE, type TaskBoundaryData } from "../src/core/task-boundary-detector.ts";
 
 // ============================================================================
 // Test fixtures
@@ -104,6 +106,20 @@ function createCompactionEntry(summary: string, firstKeptEntryId: string): Compa
 		summary,
 		firstKeptEntryId,
 		tokensBefore: 10000,
+	};
+	lastId = id;
+	return entry;
+}
+
+function createTaskBoundaryEntry(taskSummary: string, beforeEntryId: string): CustomEntry<TaskBoundaryData> {
+	const id = `test-id-${entryCounter++}`;
+	const entry: CustomEntry<TaskBoundaryData> = {
+		type: "custom",
+		id,
+		parentId: lastId,
+		timestamp: new Date().toISOString(),
+		customType: TASK_BOUNDARY_CUSTOM_TYPE,
+		data: { taskSummary, beforeEntryId },
 	};
 	lastId = id;
 	return entry;
@@ -513,6 +529,67 @@ describe("prepareCompaction with previous compaction", () => {
 		expect(summarizedText).toContain("user msg 3 - kept by compaction1");
 		expect(summarizedText).not.toContain("First summary");
 		expect(preparation!.previousSummary).toBe("First summary");
+	});
+});
+
+describe("prepareCompaction shadow-mode task boundary detection (#186)", () => {
+	it("reports shadowChainReset when a task_boundary marker falls within the summarized span, without changing firstKeptEntryId or previousSummary", () => {
+		const u1 = createMessageEntry(createUserMessage("fix the auth bug".repeat(8)));
+		const a1 = createMessageEntry(createAssistantMessage("fixed it".repeat(8)));
+		// Written async, after u2's reply — anchored back to u2 via beforeEntryId, matching how
+		// the real detector (task-boundary-detector.ts) anchors a marker.
+		const u2 = createMessageEntry(createUserMessage("what's the weather like".repeat(8)));
+		const a2 = createMessageEntry(
+			createAssistantMessage("no tools for that".repeat(8), createMockUsage(5000, 1000)),
+		);
+		const boundary = createTaskBoundaryEntry("asking about the weather", u2.id);
+		const u3 = createMessageEntry(createUserMessage("anything else".repeat(8)));
+		const a3 = createMessageEntry(
+			createAssistantMessage("nope".repeat(8), createMockUsage(8000, 2000)),
+		);
+
+		const settings: CompactionSettings = { ...DEFAULT_COMPACTION_SETTINGS, keepRecentTokens: 10 };
+		const pathEntries = [u1, a1, u2, a2, boundary, u3, a3];
+		const preparation = prepareCompaction(pathEntries, settings);
+
+		expect(preparation).toBeDefined();
+		expect(preparation!.shadowChainReset).toBeDefined();
+		expect(preparation!.shadowChainReset!.taskSummary).toBe("asking about the weather");
+		expect(pathEntries[preparation!.shadowChainReset!.wouldResetAtIndex].id).toBe(u2.id);
+		// Shadow mode (issue #186 Q15): detection is reported, but live behavior is unchanged —
+		// the marker must not have moved the actual cut point or dropped previousSummary.
+		expect(preparation!.previousSummary).toBeUndefined();
+	});
+
+	it("does not report shadowChainReset when no task_boundary marker is present", () => {
+		const u1 = createMessageEntry(createUserMessage("fix the auth bug".repeat(8)));
+		const a1 = createMessageEntry(createAssistantMessage("fixed it".repeat(8)));
+		const u2 = createMessageEntry(createUserMessage("now add a test for it".repeat(8)));
+		const a2 = createMessageEntry(
+			createAssistantMessage("added the test".repeat(8), createMockUsage(5000, 1000)),
+		);
+
+		const settings: CompactionSettings = { ...DEFAULT_COMPACTION_SETTINGS, keepRecentTokens: 10 };
+		const preparation = prepareCompaction([u1, a1, u2, a2], settings);
+
+		expect(preparation).toBeDefined();
+		expect(preparation!.shadowChainReset).toBeUndefined();
+	});
+
+	it("ignores a task_boundary marker whose beforeEntryId cannot be resolved in the current span", () => {
+		const u1 = createMessageEntry(createUserMessage("fix the auth bug".repeat(8)));
+		const a1 = createMessageEntry(createAssistantMessage("fixed it".repeat(8)));
+		const boundary = createTaskBoundaryEntry("orphaned marker", "entry-id-not-in-path");
+		const u2 = createMessageEntry(createUserMessage("now add a test for it".repeat(8)));
+		const a2 = createMessageEntry(
+			createAssistantMessage("added the test".repeat(8), createMockUsage(5000, 1000)),
+		);
+
+		const settings: CompactionSettings = { ...DEFAULT_COMPACTION_SETTINGS, keepRecentTokens: 10 };
+		const preparation = prepareCompaction([u1, a1, boundary, u2, a2], settings);
+
+		expect(preparation).toBeDefined();
+		expect(preparation!.shadowChainReset).toBeUndefined();
 	});
 });
 

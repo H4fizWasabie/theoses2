@@ -4,11 +4,13 @@ import {
 	type AgentSessionEvent,
 	configureHttpDispatcher,
 	createAgentSession,
+	findLastUserMessageEntryId,
+	maybeDetectTaskBoundary,
 	maybeRunConsolidation,
 	type SessionInfo,
 	SessionManager,
 } from "theoses-coding-agent";
-import { chunkHtml, formatTelegramHtml, splitSections } from "./format.ts";
+import { chunkHtml, containsPipeTable, formatTelegramHtml, splitSections } from "./format.ts";
 
 // No settings.json override plumbing here (telegram doesn't load SettingsManager);
 // this applies the shared default idle timeout globally so a stalled/looping
@@ -22,6 +24,24 @@ const TELEGRAM_DOWNLOAD_TIMEOUT_MS = 120_000;
 const TELEGRAM_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024;
 const TELEGRAM_STOP_REQUEST_TTL_MS = 30_000;
 const TYPING_INTERVAL_MS = 4000; // Telegram's typing indicator expires after ~5s, so it must be re-sent.
+// Bot API's own documented ceiling for a rich message's text (headings/bold/tables/etc combined).
+const RICH_MESSAGE_CHAR_LIMIT = 32768;
+
+/**
+ * Bot API 10.1 (June 2026) added sendRichMessage/InputRichMessage, with native pipe-table
+ * rendering via its `markdown` field - the installed grammy (1.38.3) predates this and has no
+ * typed support for it, so the params/response are typed locally and dispatched through
+ * `bot.api.raw`, which forwards unrecognized method names to Telegram's HTTP API unchanged. Swap
+ * this for grammy's own types once a grammy release adds them.
+ */
+interface SendRichMessageParams {
+	chat_id: number;
+	rich_message: { markdown: string };
+	reply_parameters?: { message_id: number };
+}
+interface RawApiWithRichMessage {
+	sendRichMessage(params: SendRichMessageParams): Promise<{ message_id: number }>;
+}
 
 // Mirrors createAgentSession's own default tool set, plus convert_doc: Telegram
 // document uploads are stored as artifacts (see the `ctx.message.document` branch
@@ -104,6 +124,31 @@ async function sendTelegramReply(
 	let lastId = replyTo;
 	let pendingEditId = statusMessageId;
 	for (const [index, section] of sections.entries()) {
+		// Rich messages (Bot API 10.1) render pipe tables natively instead of the aligned <pre>
+		// fallback below - tried only for a section that (a) isn't replacing the in-place status
+		// message (editMessageText's own richMessage support is a separate, unimplemented path -
+		// out of scope here) and (b) actually has a table, so every other reply is completely
+		// unaffected. No confirmed fallback behavior exists for clients that predate 10.1 (checked
+		// the Bot API docs directly - undocumented), so this only ever *attempts* the rich send;
+		// any failure - old client, malformed markdown, method not yet rolled out - falls through
+		// to the exact classic HTML path below, same "never lose the message" contract chunkHtml's
+		// caller already relies on.
+		if (pendingEditId === undefined && containsPipeTable(section) && section.length <= RICH_MESSAGE_CHAR_LIMIT) {
+			const replyParameters = lastId ? { message_id: lastId } : undefined;
+			try {
+				const rawApi = bot.api.raw as unknown as RawApiWithRichMessage;
+				const sent = await rawApi.sendRichMessage({
+					chat_id: chatId,
+					rich_message: { markdown: section },
+					reply_parameters: replyParameters,
+				});
+				lastId = sent.message_id;
+				continue; // this section is fully sent; move to the next one
+			} catch {
+				// Fall through to the classic HTML path for this section.
+			}
+		}
+
 		const names = index === sections.length - 1 ? toolNames : [];
 		const html = formatTelegramHtml(section, names);
 		for (const chunk of chunkHtml(html, TELEGRAM_MESSAGE_LIMIT)) {
@@ -428,6 +473,19 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				mainSessionManager: session.sessionManager,
 				modelRuntime: session.modelRuntime,
 			});
+			// Issue #186, shadow mode: task-closure/topic-shift detection, separate from
+			// consolidation's phrase-trigger above — see task-boundary-detector.ts.
+			const lastUserEntryId = findLastUserMessageEntryId(session.sessionManager.getBranch());
+			if (lastUserEntryId) {
+				maybeDetectTaskBoundary({
+					channel: channelSessionKey.channel,
+					channelSessionId: channelSessionKey.channelSessionId,
+					userMessageText: messageText(ctx),
+					userMessageEntryId: lastUserEntryId,
+					mainSessionManager: session.sessionManager,
+					modelRuntime: session.modelRuntime,
+				});
+			}
 		});
 		queues.set(
 			chat,

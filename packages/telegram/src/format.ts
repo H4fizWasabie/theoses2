@@ -116,6 +116,21 @@ function renderPipeTable(rows: string[]): string {
 	return `<pre>${lines.join("\n")}</pre>`;
 }
 
+/**
+ * Whether `text` contains a pipe-table run (issue: Bot API 10.1 sendRichMessage). Reuses the
+ * same line shape formatPipeTables matches, minus the divider row (a lone "|---|---|" line isn't
+ * itself proof of a table — it always follows a header row that already matched).
+ */
+export function containsPipeTable(text: string): boolean {
+	for (const line of text.split("\n")) {
+		const trimmed = line.trim();
+		if (trimmed.startsWith("|") && trimmed.endsWith("|") && trimmed.length > 1 && !RE_DIVIDER.test(trimmed)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 /** Converts runs of |...| lines into aligned <pre> blocks. */
 function formatPipeTables(text: string): string {
 	const out: string[] = [];
