@@ -74,6 +74,17 @@ export interface CreateAgentSessionOptions {
 	 * (read, bash, edit, write, working_note, note_operations, remember, save_note, convert_doc, web_search,
 	 * generate_image). Extension/custom tools remain enabled unless `noTools` changes that
 	 * default. When provided, only the listed tool names are enabled.
+	 *
+	 * WARNING (issue #189/#190): providing this doesn't just set the *initial* active set — it
+	 * becomes a hard gate (`allowedToolNames` in AgentSession) that filters EVERY tool not
+	 * named here out of the registry entirely, including extension-registered tools, for the
+	 * life of the session. This is what silently kept every extension's tools off Telegram
+	 * (packages/telegram/src/index.ts previously passed a curated `tools:` list meant only to
+	 * add `convert_doc` on top of the defaults) until a real extension (procura) hit the gap.
+	 * If you want to enable one extra tool on top of the defaults without excluding anything
+	 * else — including future extensions — leave `tools` unset and call
+	 * `session.setActiveToolsByName([...session.getActiveToolNames(), "your_tool"])` after
+	 * creation instead.
 	 */
 	tools?: string[];
 	/** Optional denylist of tool names to disable. Applies after `tools` when both are provided. */

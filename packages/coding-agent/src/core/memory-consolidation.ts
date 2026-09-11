@@ -149,7 +149,12 @@ export function resolveConsolidationModel(modelRuntime: ModelRuntime): Model<Api
 				// "Baidu Qianfan" is the pricing page's marketing label; the API's actual provider
 				// slug is just "Baidu" — confirmed via /api/v1/models/.../endpoints, since "Baidu
 				// Qianfan" silently matched zero endpoints and fell through the whole order list.
-				order: ["Baidu", "OpenInference", "DeepInfra", "AkashML"],
+				// Same failure shape found again 2026-09-11 (issue #190): "AkashML" doesn't exist
+				// as an endpoint for this model at all (confirmed live against the same endpoints
+				// API) — silently dead weight in the fallback chain the whole time. Replaced with
+				// StreamLake, a real fp8-capable endpoint for this model, cost-tier-adjacent to the
+				// providers already ahead of it (OpenInference/DeepInfra).
+				order: ["Baidu", "OpenInference", "DeepInfra", "StreamLake"],
 				quantizations: ["fp8"],
 				// Without this, `order` is only a preference — OpenRouter falls back to any other
 				// provider (seen in practice: Nexbit, well outside the chosen cost/uptime tier) if
