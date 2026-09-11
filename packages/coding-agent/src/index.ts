@@ -177,6 +177,7 @@ export {
 export { convertToLlm } from "./core/messages.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
 export {
+	findExactModelReferenceMatch,
 	type ModelScopeDiagnostic,
 	type ResolveCliModelResult,
 	type ResolveModelScopeResult,
