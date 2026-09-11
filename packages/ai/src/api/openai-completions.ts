@@ -1248,12 +1248,23 @@ export function convertMessages(
 
 			const thinkingBlocks = msg.content.filter(isThinkingContentBlock);
 			const toolCalls = msg.content.filter(isToolCallBlock);
-			const signedReasoningDetails = thinkingBlocks
-				.map((block) => parseOpenAIReasoningDetails(block.thinkingSignature))
-				.find((details) => details !== undefined);
-			const legacyReasoningDetails = toolCalls
-				.map((toolCall) => parseLegacyEncryptedReasoningDetail(toolCall.thoughtSignature))
-				.filter((detail): detail is OpenAIEncryptedReasoningDetail => detail !== undefined);
+			// Reasoning signatures (reasoning_details / thought signatures) are opaque replay
+			// data scoped to the exact model that produced them - some backends validate them
+			// strictly and reject a signature minted by a different model (e.g. switching an
+			// OpenRouter session from one model to another mid-conversation). Only replay them
+			// back to the same provider/model that generated the message; otherwise fall through
+			// to plain text content below, which every provider accepts.
+			const sameOrigin = msg.provider === model.provider && msg.model === model.id;
+			const signedReasoningDetails = sameOrigin
+				? thinkingBlocks
+						.map((block) => parseOpenAIReasoningDetails(block.thinkingSignature))
+						.find((details) => details !== undefined)
+				: undefined;
+			const legacyReasoningDetails = sameOrigin
+				? toolCalls
+						.map((toolCall) => parseLegacyEncryptedReasoningDetail(toolCall.thoughtSignature))
+						.filter((detail): detail is OpenAIEncryptedReasoningDetail => detail !== undefined)
+				: [];
 			const preservedReasoningDetails =
 				signedReasoningDetails ?? (legacyReasoningDetails.length > 0 ? legacyReasoningDetails : undefined);
 

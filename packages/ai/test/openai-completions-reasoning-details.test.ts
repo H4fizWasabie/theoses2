@@ -74,6 +74,10 @@ function model(): Model<"openai-completions"> {
 	};
 }
 
+function otherModel(): Model<"openai-completions"> {
+	return { ...model(), id: "other/model-test" };
+}
+
 function chunk(delta: Record<string, unknown>, finishReason: string | null = null): unknown {
 	return {
 		id: "chatcmpl-test",
@@ -95,8 +99,11 @@ function toolCallChunk(): unknown {
 	});
 }
 
-async function runOpenAICompletionsStream(messages: AssistantMessage[] = []): Promise<AssistantMessage> {
-	return await streamOpenAICompletions(model(), { messages, tools: [readTool] }, { apiKey: "test" }).result();
+async function runOpenAICompletionsStream(
+	messages: AssistantMessage[] = [],
+	streamModel: Model<"openai-completions"> = model(),
+): Promise<AssistantMessage> {
+	return await streamOpenAICompletions(streamModel, { messages, tools: [readTool] }, { apiKey: "test" }).result();
 }
 
 function getAssistantPayload(payload: unknown): { reasoning?: unknown; reasoning_details?: unknown } | undefined {
@@ -180,5 +187,23 @@ describe("openai-completions reasoning_details streaming", () => {
 		const payload = getAssistantPayload(mockState.payloads[1]);
 		expect(payload?.reasoning_details).toEqual(expectedReasoningDetails);
 		expect(payload?.reasoning).toBeUndefined();
+	});
+
+	it("drops reasoning_details when replaying a stored message into a different model", async () => {
+		mockState.chunkSets = [
+			[chunk({ reasoning_details: [reasoningDetail] }), toolCallChunk(), chunk({}, "tool_calls")],
+			[chunk({ content: "ok" }), chunk({}, "stop")],
+		];
+
+		const assistantMessage = await runOpenAICompletionsStream();
+		expect(assistantMessage.provider).toBe("openrouter");
+		expect(assistantMessage.model).toBe("google/gemini-test");
+
+		// Replay the same history into a different model (same provider, different id) - the
+		// reasoning signature was minted for google/gemini-test and must not be forwarded as-is.
+		await runOpenAICompletionsStream([assistantMessage], otherModel());
+
+		const payload = getAssistantPayload(mockState.payloads[1]);
+		expect(payload?.reasoning_details).toBeUndefined();
 	});
 });
