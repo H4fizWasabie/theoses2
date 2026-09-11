@@ -39,8 +39,14 @@ interface SendRichMessageParams {
 	rich_message: { markdown: string };
 	reply_parameters?: { message_id: number };
 }
+interface EditMessageTextRichParams {
+	chat_id: number;
+	message_id: number;
+	rich_message: { markdown: string };
+}
 interface RawApiWithRichMessage {
 	sendRichMessage(params: SendRichMessageParams): Promise<{ message_id: number }>;
+	editMessageText(params: EditMessageTextRichParams): Promise<{ message_id: number }>;
 }
 
 function chatId(ctx: Context): string | undefined {
@@ -108,27 +114,48 @@ async function sendTelegramReply(
 	let pendingEditId = statusMessageId;
 	for (const [index, section] of sections.entries()) {
 		// Rich messages (Bot API 10.1) render pipe tables natively instead of the aligned <pre>
-		// fallback below - tried only for a section that (a) isn't replacing the in-place status
-		// message (editMessageText's own richMessage support is a separate, unimplemented path -
-		// out of scope here) and (b) actually has a table, so every other reply is completely
-		// unaffected. No confirmed fallback behavior exists for clients that predate 10.1 (checked
-		// the Bot API docs directly - undocumented), so this only ever *attempts* the rich send;
-		// any failure - old client, malformed markdown, method not yet rolled out - falls through
-		// to the exact classic HTML path below, same "never lose the message" contract chunkHtml's
-		// caller already relies on.
-		if (pendingEditId === undefined && containsPipeTable(section) && section.length <= RICH_MESSAGE_CHAR_LIMIT) {
-			const replyParameters = lastId ? { message_id: lastId } : undefined;
+		// fallback below - tried for any section that actually has a table and fits the rich
+		// message char limit, whether it's a fresh send or replacing the in-place "Running
+		// <tool>..." status message (editMessageText also takes a rich_message param - verified
+		// directly against the Bot API docs and a live send/edit round-trip before wiring this
+		// in). Tool-using replies are exactly the ones most likely to produce a table, and they
+		// always go through the status-message edit path (setStatus() above), so excluding it
+		// would have meant real table replies almost never got the rich treatment - confirmed
+		// this was happening live before this fix. No confirmed fallback behavior exists for
+		// clients that predate 10.1 (checked the Bot API docs directly - undocumented), so this
+		// only ever *attempts* the rich path; any failure - old client, malformed markdown,
+		// network error - is logged (never silently swallowed) and falls through to the exact
+		// classic HTML path below, same "never lose the message" contract chunkHtml's caller
+		// already relies on.
+		if (containsPipeTable(section) && section.length <= RICH_MESSAGE_CHAR_LIMIT) {
+			const editId = pendingEditId;
+			const rawApi = bot.api.raw as unknown as RawApiWithRichMessage;
 			try {
-				const rawApi = bot.api.raw as unknown as RawApiWithRichMessage;
-				const sent = await rawApi.sendRichMessage({
-					chat_id: chatId,
-					rich_message: { markdown: section },
-					reply_parameters: replyParameters,
-				});
-				lastId = sent.message_id;
+				if (editId !== undefined) {
+					const sent = await rawApi.editMessageText({
+						chat_id: chatId,
+						message_id: editId,
+						rich_message: { markdown: section },
+					});
+					lastId = sent.message_id;
+					pendingEditId = undefined;
+				} else {
+					const replyParameters = lastId ? { message_id: lastId } : undefined;
+					const sent = await rawApi.sendRichMessage({
+						chat_id: chatId,
+						rich_message: { markdown: section },
+						reply_parameters: replyParameters,
+					});
+					lastId = sent.message_id;
+				}
 				continue; // this section is fully sent; move to the next one
-			} catch {
-				// Fall through to the classic HTML path for this section.
+			} catch (error) {
+				console.warn(
+					`[rich-message] ${editId !== undefined ? "edit" : "send"} failed, falling back to classic HTML:`,
+					error instanceof Error ? error.message : error,
+				);
+				// Fall through to the classic HTML path for this section - pendingEditId is left
+				// untouched so the classic path's own edit-then-fall-back-to-send logic still runs.
 			}
 		}
 
