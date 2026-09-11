@@ -150,6 +150,10 @@ const PROVIDER_MODEL_PAIRS: ProviderModelPair[] = [
 		model: "glm-5.2",
 		label: "qwen-token-plan-individual-glm-5.2",
 	},
+	// OpenRouter (aggregator) - distinct models/providers behind the same "openrouter" provider
+	// id are exactly where cross-model reasoning-signature replay bugs surface (see #201).
+	{ provider: "openrouter", model: "z-ai/glm-5.3-flash", label: "openrouter-glm-5.3-flash" },
+	{ provider: "openrouter", model: "deepseek/deepseek-v4.1-flash", label: "openrouter-deepseek-v4.1-flash" },
 ];
 
 // Cached context structure
