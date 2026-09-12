@@ -371,8 +371,8 @@ export async function generateBranchSummary(
 	summary = capSummaryLength(summary);
 
 	// Compute file lists and append to summary
-	const { readFiles, modifiedFiles } = computeFileLists(fileOps);
-	summary += formatFileOperations(readFiles, modifiedFiles);
+	const { readFiles, modifiedFiles, droppedReadCount, droppedModifiedCount } = computeFileLists(fileOps);
+	summary += formatFileOperations(readFiles, modifiedFiles, droppedReadCount, droppedModifiedCount);
 
 	return {
 		summary: summary || "No summary generated",
