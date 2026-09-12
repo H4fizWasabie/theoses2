@@ -50,7 +50,6 @@ export {
 	type LsToolOptions,
 } from "./ls.ts";
 export { createMemoryToolDefinitions } from "./memory.ts";
-export { createRecallTurnsToolDefinition } from "./recall-turns.ts";
 export {
 	appendOperationalNote,
 	createOperationalNotesToolDefinition,
@@ -76,6 +75,7 @@ export {
 	type ReadToolInput,
 	type ReadToolOptions,
 } from "./read.ts";
+export { createRecallTurnsToolDefinition } from "./recall-turns.ts";
 export {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -112,10 +112,10 @@ import { createGenerateImageToolDefinition, type GenerateImageOperations } from 
 import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.ts";
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.ts";
 import { createMemoryToolDefinitions } from "./memory.ts";
-import { createRecallTurnsToolDefinition } from "./recall-turns.ts";
 import { createOperationalNotesToolDefinition } from "./operational-notes.ts";
 import { createPowerShellTool, createPowerShellToolDefinition, type PowerShellToolOptions } from "./powershell.ts";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
+import { createRecallTurnsToolDefinition } from "./recall-turns.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import { createWebSearchToolDefinition, type WebSearchOperations } from "./web-search.ts";
 import { createWorkingNoteToolDefinition } from "./working-note.ts";

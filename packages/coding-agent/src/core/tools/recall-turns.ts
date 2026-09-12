@@ -85,7 +85,10 @@ export function createRecallTurnsToolDefinition(): ToolDefinition<typeof recallT
 				.slice(0, MAX_RESULTS);
 
 			if (scored.length === 0) {
-				return { content: [{ type: "text", text: "No matching turns found in this session." }], details: undefined };
+				return {
+					content: [{ type: "text", text: "No matching turns found in this session." }],
+					details: undefined,
+				};
 			}
 
 			const text = scored
