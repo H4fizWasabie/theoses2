@@ -193,6 +193,38 @@ export function formatTelegramHtml(reply: string, toolNames: string[] = []): str
 	return text;
 }
 
+export interface ToolCallEntry {
+	id: string;
+	name: string;
+	args: unknown;
+	done?: boolean;
+	isError?: boolean;
+}
+
+const TOOL_CALL_SUMMARY_LIMIT = 100;
+
+/** One-line preview for a tool call - the command for bash/powershell, a path/query for most other built-ins, else the raw args. */
+function toolCallSummaryLine(name: string, args: unknown): string {
+	const record = (args ?? {}) as Record<string, unknown>;
+	const primary =
+		name === "bash" || name === "powershell" ? record.command : (record.path ?? record.query ?? record.note);
+	const preview = typeof primary === "string" ? primary : JSON.stringify(args ?? {});
+	const oneLine = preview.replace(/\s+/g, " ").trim();
+	return oneLine.length > TOOL_CALL_SUMMARY_LIMIT ? `${oneLine.slice(0, TOOL_CALL_SUMMARY_LIMIT - 3)}...` : oneLine;
+}
+
+/**
+ * Renders one plain line per tool call - name plus a one-line command/arg preview, nothing else
+ * (no args dump, no result/output - those can be huge and this is meant to be skimmed, not read
+ * through). Used both for the live "what's running" status and the final per-turn footer.
+ */
+export function renderToolCallLines(entries: ToolCallEntry[]): string[] {
+	return entries.map((entry) => {
+		const icon = !entry.done ? "◌" : entry.isError ? "✕" : "✓";
+		return `${icon} ${entry.name}: ${toolCallSummaryLine(entry.name, entry.args)}`;
+	});
+}
+
 /** Collapses consecutive repeats of the same tool name, e.g. bash,bash,bash -> "bash ×3". */
 function collapseToolNames(toolNames: string[]): string[] {
 	const collapsed: string[] = [];
