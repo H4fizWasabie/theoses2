@@ -20,8 +20,8 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 mkdir -p /opt/theoses-updater
-cp "${script_dir}/update.sh" "${script_dir}/notify-telegram.sh" /opt/theoses-updater/
-chmod +x /opt/theoses-updater/update.sh /opt/theoses-updater/notify-telegram.sh
+cp "${script_dir}/update.sh" "${script_dir}/rollback.sh" "${script_dir}/notify-telegram.sh" /opt/theoses-updater/
+chmod +x /opt/theoses-updater/update.sh /opt/theoses-updater/rollback.sh /opt/theoses-updater/notify-telegram.sh
 
 mkdir -p /opt/theoses2-releases
 
