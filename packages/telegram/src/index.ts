@@ -1,3 +1,5 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { Bot, type Context, InputFile } from "grammy";
 import {
 	type AgentSession,
@@ -13,7 +15,7 @@ import {
 	type SessionInfo,
 	SessionManager,
 } from "theoses-coding-agent";
-import { chunkHtml, formatTelegramHtml, splitSections } from "./format.ts";
+import { chunkHtml, formatTelegramHtml, renderToolCallLines, splitSections, type ToolCallEntry } from "./format.ts";
 
 // No settings.json override plumbing here (telegram doesn't load SettingsManager);
 // this applies the shared default idle timeout globally so a stalled/looping
@@ -80,6 +82,46 @@ const STOP_COMMANDS = new Set(["stop", "halt", "/stop", "/cancel"]);
 /** Recognizes an explicit "/stop"/"/cancel" command or a bare "stop"/"halt" message, case-insensitively. */
 function isStopCommand(text: string): boolean {
 	return STOP_COMMANDS.has(text.trim().toLowerCase());
+}
+
+const TOOL_CALL_DETAIL_ON = new Set(["/on tool call", "/on tool calls"]);
+const TOOL_CALL_DETAIL_OFF = new Set(["/off tool call", "/off tool calls"]);
+
+/** Toggle command for per-tool-call collapsible detail blocks, or undefined if the message isn't one. */
+function parseToolCallDetailToggle(text: string): boolean | undefined {
+	const normalized = text.trim().toLowerCase();
+	if (TOOL_CALL_DETAIL_ON.has(normalized)) return true;
+	if (TOOL_CALL_DETAIL_OFF.has(normalized)) return false;
+	return undefined;
+}
+
+/**
+ * Whether to render each tool call as its own plain summary line (name + a one-line preview of
+ * its command/path/query) instead of the default flat "Running bash..." status and collapsed
+ * tool-name footer - user wants to see what theo actually ran, not just that a tool ran, but
+ * without full args/output (that can be huge, and this is meant to be skimmed). Off by default -
+ * opt in with "/on tool call", back out with "/off tool call". Persisted to a small file so the
+ * choice survives process restarts (the auto-updater restarts this service routinely; an
+ * in-memory-only toggle would silently reset).
+ */
+function loadToolCallDetailPreference(): boolean {
+	try {
+		const raw = readFileSync(join(getAgentDir(), "telegram-preferences.json"), "utf-8");
+		return (JSON.parse(raw) as { toolCallDetail?: boolean }).toolCallDetail ?? false;
+	} catch {
+		return false;
+	}
+}
+
+function saveToolCallDetailPreference(enabled: boolean): void {
+	try {
+		writeFileSync(
+			join(getAgentDir(), "telegram-preferences.json"),
+			`${JSON.stringify({ toolCallDetail: enabled })}\n`,
+		);
+	} catch (error) {
+		console.error("Failed to save telegram tool-call detail preference:", error);
+	}
 }
 
 /**
@@ -365,6 +407,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 	const stopRequested = new Map<string, { messageId: number; timer: ReturnType<typeof setTimeout> }>();
 	const queuedMessageIds = new Map<string, number[]>();
 	const queueDepth = new Map<string, number>();
+	let toolCallDetailEnabled = loadToolCallDetailPreference();
 	const removeQueuedMessage = (chat: string, messageId: number): void => {
 		const queued = queuedMessageIds.get(chat);
 		if (!queued) return;
@@ -422,6 +465,19 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			}
 			requestStop(chat, queuedMessageId);
 			await bot.api.sendMessage(ctx.chat.id, "Halted the queued message.");
+			return;
+		}
+
+		const toolCallDetailToggle = parseToolCallDetailToggle(text);
+		if (toolCallDetailToggle !== undefined) {
+			toolCallDetailEnabled = toolCallDetailToggle;
+			saveToolCallDetailPreference(toolCallDetailToggle);
+			await bot.api.sendMessage(
+				ctx.chat.id,
+				toolCallDetailToggle
+					? "Tool call detail: on. Each tool call now shows as an expandable block with its command/args and result."
+					: "Tool call detail: off. Back to the compact tool-name footer.",
+			);
 			return;
 		}
 
@@ -544,8 +600,8 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 					}
 				});
 			};
-
 			const toolNames: string[] = [];
+			const toolCallEntries: ToolCallEntry[] = [];
 			const generatedImages: Buffer[] = [];
 			const unsubscribe = session.subscribe((event) => {
 				response = assistantText(event) ?? response;
@@ -557,12 +613,25 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				}
 				if (event.type === "tool_execution_start") {
 					runningTool.set(chat, event.toolName);
-					setStatus(`Running ${event.toolName}...`);
+					if (toolCallDetailEnabled) {
+						toolCallEntries.push({ id: event.toolCallId, name: event.toolName, args: event.args });
+						setStatus(renderToolCallLines(toolCallEntries).join("\n"));
+					} else {
+						setStatus(`Running ${event.toolName}...`);
+					}
 				}
 				if (event.type === "tool_execution_end") {
 					runningTool.delete(chat);
 					toolNames.push(event.toolName);
 					generatedImages.push(...extractGeneratedImages(event.result));
+					if (toolCallDetailEnabled) {
+						const entry = toolCallEntries.find((e) => e.id === event.toolCallId);
+						if (entry) {
+							entry.done = true;
+							entry.isError = event.isError;
+						}
+						setStatus(renderToolCallLines(toolCallEntries).join("\n"));
+					}
 				}
 			});
 			const abortController = new AbortController();
@@ -585,7 +654,14 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				return;
 			}
 			if (response) {
-				await sendTelegramReply(bot, ctx.chat.id, response, toolNames, ctx.message.message_id, statusMessageId);
+				// Plain text, not HTML: formatTelegramHtml escapes the whole reply before rendering,
+				// so this survives both the rich-message path (sent as-is) and the classic-HTML
+				// fallback (escaped like everything else) without needing its own markup handling.
+				const finalText = toolCallDetailEnabled
+					? `${renderToolCallLines(toolCallEntries).join("\n")}\n\n${response}`
+					: response;
+				const footerNames = toolCallDetailEnabled ? [] : toolNames;
+				await sendTelegramReply(bot, ctx.chat.id, finalText, footerNames, ctx.message.message_id, statusMessageId);
 			} else if (lastError) {
 				const errorText = `${lastError.provider}/${lastError.model} failed: ${lastError.message}`;
 				if (statusMessageId !== undefined) {
