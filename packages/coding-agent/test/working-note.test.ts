@@ -117,15 +117,15 @@ describe("Theoses2 Working Note", () => {
 		expect(manager.isWorkingNoteStale()).toBe(false);
 	});
 
-	it("keeps the last five user turns and their responses", () => {
+	it("keeps the last three user turns and their responses", () => {
 		const messages = Array.from({ length: 6 }, (_, index) => [
 			{ role: "user", content: `user-${index}` },
 			{ role: "assistant", content: [{ type: "text", text: `assistant-${index}` }] },
 		]).flat();
 
 		const active = limitActiveContextMessages(messages as never[]);
-		expect(active).toHaveLength(10);
-		expect(active[0]).toMatchObject({ content: "user-1" });
+		expect(active).toHaveLength(6);
+		expect(active[0]).toMatchObject({ content: "user-3" });
 	});
 
 	it("uses the resolved channel key and keeps the documented caps", () => {

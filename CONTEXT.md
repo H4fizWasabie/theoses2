@@ -9,7 +9,7 @@ The persistent conversational state for one channel (Telegram, CLI, dashboard We
 _Avoid_: session (ambiguous with the engine's own session log), conversation
 
 **Active Context Window**:
-The last five turns (ten user/assistant messages) of a Channel Session's history, sent to the model on every turn. Fixed by turn count, not token count.
+The last three turns (six user/assistant messages) of a Channel Session's history, sent to the model on every turn. Fixed by turn count, not token count.
 _Avoid_: active context, recent history
 
 **Working Note**:
