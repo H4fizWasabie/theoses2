@@ -230,6 +230,19 @@ function toolCallSummaryLine(name: string, args: unknown): string {
 	return oneLine.length > TOOL_CALL_SUMMARY_LIMIT ? `${oneLine.slice(0, TOOL_CALL_SUMMARY_LIMIT - 3)}...` : oneLine;
 }
 
+// A long-running turn can rack up dozens of tool calls (a multi-workspace batch has hit 45+) -
+// rendering every one as its own block makes the live status message grow without bound. Only the
+// most recent TOOL_CALL_VISIBLE_LIMIT get a full block; anything older collapses into one tally
+// line so the message stays a fixed, readable size regardless of how long the turn runs.
+const TOOL_CALL_VISIBLE_LIMIT = 12;
+
+/** Tallies tool names into "bash ×26, edit ×8, write" (count omitted when it's 1). */
+function tallyToolNames(names: string[]): string {
+	const counts = new Map<string, number>();
+	for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1);
+	return [...counts.entries()].map(([name, count]) => (count > 1 ? `${name} ×${count}` : name)).join(", ");
+}
+
 /**
  * Renders one collapsible <details> block per tool call - status icon and name collapsed by
  * default, the one-line command/path/query preview revealed on expand - so a turn with many tool
@@ -245,13 +258,19 @@ function toolCallSummaryLine(name: string, args: unknown): string {
  * the same way, so that bug class doesn't reapply.
  */
 export function renderToolCallBlocks(entries: ToolCallEntry[]): string {
-	return entries
+	const overflow = entries.length - TOOL_CALL_VISIBLE_LIMIT;
+	const visible = overflow > 0 ? entries.slice(overflow) : entries;
+	const blocks = visible
 		.map((entry) => {
 			const icon = !entry.done ? "◌" : entry.isError ? "✕" : "✓";
 			const summary = toolCallSummaryLine(entry.name, entry.args);
 			return `<details><summary>${icon} ${entry.name}</summary>${summary}</details>`;
 		})
 		.join("\n\n");
+	if (overflow <= 0) return blocks;
+	const earlier = entries.slice(0, overflow);
+	const tally = `⋯ ${overflow} earlier call${overflow === 1 ? "" : "s"} (${tallyToolNames(earlier.map((e) => e.name))})`;
+	return `${tally}\n\n${blocks}`;
 }
 
 /** Collapses consecutive repeats of the same tool name, e.g. bash,bash,bash -> "bash ×3". */
