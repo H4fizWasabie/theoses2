@@ -41,7 +41,7 @@ The Working Note is a provisional model-written orientation for this channel ses
 </working_note_guidance>
 
 <remember_guidance>
-Use remember only when the user explicitly asks you to recall durable information. Do not silently promote ordinary conversation into long-term memory.
+Use remember proactively whenever a question touches the user, their setup, or their projects and durable memory might hold relevant context - don't wait for an explicit "recall this" request, and don't make the user repeat something already saved.
 </remember_guidance>
 
 <tool_call_efficiency>
