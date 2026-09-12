@@ -18,6 +18,7 @@ import type {
 	ModelCost,
 	OpenAICompletionsCompat,
 	OpenAIResponsesCompat,
+	OpenRouterRouting,
 } from "../src/types.ts";
 import {
 	assertExactModelIds,
@@ -452,6 +453,25 @@ const GITHUB_COPILOT_THINKING_LEVEL_OVERRIDES = {
 	"claude-sonnet-4.6": { minimal: "low", max: "max" },
 } satisfies Record<string, NonNullable<Model<Api>["thinkingLevelMap"]>>;
 
+/**
+ * OpenRouter's default routing load-balances a model across every backend that serves it on
+ * every request, with no stickiness. For a long-lived, low-frequency conversation (theoses's
+ * Telegram sessions) that defeats prompt caching outright: two calls seconds apart can land on
+ * different backends with no shared cache state, and per-backend caching support is inconsistent
+ * anyway (observed live: GMICloud showed occasional cache credits, Morph never did). Pinning to
+ * an ordered allowlist of backends known to actually support caching for a given model — with
+ * `allow_fallbacks: false` so OpenRouter never drifts onto an unlisted, non-caching backend —
+ * gives OpenRouter's own priority-order behavior a de facto sticky "prefer the top of this list"
+ * effect while still tolerating an outage of the top choice. Order and members are lifted from a
+ * known-good production config (mino-oss's providers.json) for the same model, not guessed.
+ */
+const OPENROUTER_ROUTING_OVERRIDES = {
+	"z-ai/glm-5.3-flash": {
+		order: ["DeepInfra", "Z.AI", "Novita", "GMICloud", "Wafer"],
+		allow_fallbacks: false,
+	},
+} satisfies Record<string, OpenRouterRouting>;
+
 function mergeThinkingLevelMap(model: Model<any>, map: NonNullable<Model<any>["thinkingLevelMap"]>): void {
 	model.thinkingLevelMap = { ...model.thinkingLevelMap, ...map };
 }
@@ -681,7 +701,7 @@ function detectOpenAICompletionsCompat(model: Model<"openai-completions">): Open
 						: isOpenRouter
 							? "openrouter"
 							: "openai",
-		openRouterRouting: {},
+		openRouterRouting: (isOpenRouter && OPENROUTER_ROUTING_OVERRIDES[model.id as keyof typeof OPENROUTER_ROUTING_OVERRIDES]) || {},
 		vercelGatewayRouting: {},
 		chatTemplateKwargs: {},
 		chatTemplateArgs: {},
