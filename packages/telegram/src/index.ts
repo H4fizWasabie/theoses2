@@ -115,6 +115,18 @@ function assistantText(event: AgentSessionEvent): string | undefined {
 	return text || undefined;
 }
 
+/**
+ * A turn that ends with stopReason "error" produces no text for assistantText() to find - without
+ * this, the bot went completely silent on provider failures (issue #211; the deepseek/Novita
+ * incident that motivated #214 looked like a hang because of exactly this gap). Tracks the last
+ * message_end error per turn so it can be shown to the user when no other reply text exists.
+ */
+function assistantError(event: AgentSessionEvent): { message: string; provider: string; model: string } | undefined {
+	if (event.type !== "message_end" || event.message.role !== "assistant") return undefined;
+	if (event.message.stopReason !== "error" || !event.message.errorMessage) return undefined;
+	return { message: event.message.errorMessage, provider: event.message.provider, model: event.message.model };
+}
+
 /** Pulls image attachments (e.g. from generate_image) out of a raw tool result for delivery as Telegram photos. */
 function extractGeneratedImages(result: unknown): Buffer[] {
 	const content = (result as { content?: unknown } | undefined)?.content;
@@ -309,11 +321,16 @@ async function sessionFor(
 			appendSystemPrompt: [TELEGRAM_RICH_FORMATTING_GUIDANCE],
 		});
 		const { session } = await createAgentSession({ sessionManager, thinkingLevel: "high", resourceLoader });
-		// convert_doc isn't in the SDK's default active set. Telegram document uploads are stored
-		// as artifacts (see the `ctx.message.document` branch below) and need convert_doc enabled
-		// to ever be read - added on top of the full default+extension set rather than via
-		// `tools:`, which would reintroduce the gating problem above.
-		session.setActiveToolsByName([...session.getActiveToolNames(), "convert_doc"]);
+		// Telegram document uploads are stored as artifacts (see the `ctx.message.document` branch
+		// below) and need convert_doc enabled to ever be read. Guard against it already being in
+		// the default active set (it is, as of the SDK's current defaults) - blindly appending it
+		// produced a duplicate `convert_doc` entry in the tools array sent on every request, which
+		// OpenRouter's Novita backend rejects outright as an invalid request (400) and DeepInfra
+		// silently declines to serve (404, filtered out at the routing layer) - see issue #211.
+		const activeToolNames = session.getActiveToolNames();
+		if (!activeToolNames.includes("convert_doc")) {
+			session.setActiveToolsByName([...activeToolNames, "convert_doc"]);
+		}
 		return session;
 	})();
 	sessions.set(chat, created);
@@ -508,6 +525,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			}
 
 			let response: string | undefined;
+			let lastError: { message: string; provider: string; model: string } | undefined;
 			let statusMessageId: number | undefined;
 			let statusPending: Promise<unknown> = Promise.resolve();
 			const setStatus = (text: string) => {
@@ -531,6 +549,12 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			const generatedImages: Buffer[] = [];
 			const unsubscribe = session.subscribe((event) => {
 				response = assistantText(event) ?? response;
+				if (event.type === "message_end" && event.message.role === "assistant") {
+					// Track only the most recent attempt's outcome - a later retry that succeeds
+					// (message_end with a real stopReason) must clear an earlier attempt's error,
+					// same as `response` naturally reflects only the latest text.
+					lastError = assistantError(event);
+				}
 				if (event.type === "tool_execution_start") {
 					runningTool.set(chat, event.toolName);
 					setStatus(`Running ${event.toolName}...`);
@@ -562,6 +586,15 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			}
 			if (response) {
 				await sendTelegramReply(bot, ctx.chat.id, response, toolNames, ctx.message.message_id, statusMessageId);
+			} else if (lastError) {
+				const errorText = `${lastError.provider}/${lastError.model} failed: ${lastError.message}`;
+				if (statusMessageId !== undefined) {
+					await bot.api.editMessageText(ctx.chat.id, statusMessageId, errorText).catch(() => {});
+				} else {
+					await bot.api
+						.sendMessage(ctx.chat.id, errorText, { reply_parameters: { message_id: ctx.message.message_id } })
+						.catch(() => {});
+				}
 			} else if (statusMessageId !== undefined) {
 				await bot.api.deleteMessage(ctx.chat.id, statusMessageId).catch(() => {});
 			}
@@ -607,6 +640,14 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			chat,
 			next.catch(() => {}),
 		);
+		// Deliberately not awaited (issue #209): grammY's default bot.start() dispatches updates
+		// strictly sequentially, so awaiting the full turn here - which can run for many minutes
+		// on a long tool call - blocked the handler from returning, which blocked grammY from ever
+		// invoking the handler again for the NEXT incoming update. That made a "/stop"/"stop"/
+		// "halt" message (and anything else) undeliverable for the entire duration of an in-flight
+		// turn, including the one command specifically meant to interrupt it. The turn itself is
+		// still correctly ordered per chat via the `queues` chain above; this only lets grammY's
+		// own dispatch loop move on to the next update instead of waiting on it.
 		void next
 			.finally(() => {
 				const depth = (queueDepth.get(chat) ?? 1) - 1;
@@ -614,7 +655,6 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				else queueDepth.delete(chat);
 			})
 			.catch(() => {});
-		await next;
 	});
 
 	return bot;

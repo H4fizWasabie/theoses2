@@ -1897,6 +1897,24 @@ export class AgentSession {
 	// Compaction
 	// =========================================================================
 
+	/**
+	 * Model used for compaction, branch summaries, and task-boundary detection. Prefers the
+	 * dedicated `summarizationProvider`/`summarizationModel` settings (issue #212) so switching
+	 * the active chat model never silently breaks a session's own maintenance calls; falls back
+	 * to the active chat model when no override is configured or the override has no usable auth.
+	 */
+	private _summarizationModel(): Model<any> | undefined {
+		const provider = this.settingsManager.getSummarizationProvider();
+		const modelId = this.settingsManager.getSummarizationModel();
+		if (provider && modelId) {
+			const override = this._modelRuntime.getModel(provider, modelId);
+			if (override && this._modelRuntime.hasConfiguredAuth(provider)) {
+				return override;
+			}
+		}
+		return this.model;
+	}
+
 	/** Generate Theoses's built-in compaction summary for manual and automatic compaction. */
 	private async _runDefaultCompaction(
 		preparation: CompactionPreparation,
@@ -1986,7 +2004,12 @@ export class AgentSession {
 				throw new Error(formatNoModelSelectedMessage());
 			}
 
-			const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(this.model);
+			const {
+				model: requestModel,
+				apiKey,
+				headers,
+				env,
+			} = await this._getSummarizationRequestAuth(this._summarizationModel() ?? this.model);
 
 			const pathEntries = this.sessionManager.getBranch();
 			const settings = this.settingsManager.getCompactionSettings();
@@ -2299,7 +2322,12 @@ export class AgentSession {
 				return false;
 			}
 
-			const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(this.model);
+			const {
+				model: requestModel,
+				apiKey,
+				headers,
+				env,
+			} = await this._getSummarizationRequestAuth(this._summarizationModel() ?? this.model);
 
 			const pathEntries = this.sessionManager.getBranch();
 
@@ -3342,7 +3370,7 @@ export class AgentSession {
 			let summaryDetails: unknown;
 			let summaryUsage: Usage | undefined;
 			if (options.summarize && entriesToSummarize.length > 0 && !extensionSummary) {
-				const model = this.model!;
+				const model = this._summarizationModel() ?? this.model!;
 				const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(model);
 				const branchSummarySettings = this.settingsManager.getBranchSummarySettings();
 				const result = await generateBranchSummary(entriesToSummarize, {

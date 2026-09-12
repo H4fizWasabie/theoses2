@@ -9,8 +9,12 @@ vi.mock("theoses-coding-agent", () => ({
 	},
 	createAgentSession: vi.fn(),
 	maybeRunConsolidation: vi.fn(),
+	maybeDetectTaskBoundary: vi.fn(),
+	findLastUserMessageEntryId: vi.fn(),
 	configureHttpDispatcher: vi.fn(),
 	findExactModelReferenceMatch: vi.fn(),
+	getAgentDir: vi.fn(() => "/tmp/telegram-test-agent-dir"),
+	DefaultResourceLoader: vi.fn(),
 }));
 
 import { createAgentSession, SessionManager } from "theoses-coding-agent";
@@ -52,6 +56,8 @@ describe("Telegram stop queueing", () => {
 				releasePrompt?.();
 			}),
 			subscribe: vi.fn(() => () => {}),
+			getActiveToolNames: vi.fn(() => []),
+			setActiveToolsByName: vi.fn(),
 			sessionManager,
 			modelRuntime: {},
 		};
@@ -85,6 +91,62 @@ describe("Telegram stop queueing", () => {
 		expect(session.prompt).toHaveBeenCalledTimes(1);
 		expect(session.abort).toHaveBeenCalledTimes(1);
 		expect(sendMessage).toHaveBeenCalledWith(1, expect.stringContaining("Also skipped your next queued message."));
+	});
+});
+
+describe("Telegram update dispatch", () => {
+	it("returns from the update handler without waiting for a long-running turn to finish (issue #209)", async () => {
+		let releasePrompt: (() => void) | undefined;
+		let promptResolved = false;
+		const sessionManager = {
+			getChannelSessionKey: () => ({ channel: "telegram", channelSessionId: "1" }),
+			getCwd: () => "/tmp/telegram-test",
+		};
+		const session = {
+			isStreaming: false,
+			prompt: vi.fn(async () => {
+				await new Promise<void>((resolve) => {
+					releasePrompt = resolve;
+				});
+				promptResolved = true;
+			}),
+			abort: vi.fn(async () => {}),
+			subscribe: vi.fn(() => () => {}),
+			getActiveToolNames: vi.fn(() => []),
+			setActiveToolsByName: vi.fn(),
+			sessionManager,
+			modelRuntime: {},
+		};
+
+		vi.mocked(SessionManager.list).mockResolvedValue([]);
+		vi.mocked(SessionManager.create).mockReturnValue(sessionManager as never);
+		vi.mocked(createAgentSession).mockResolvedValue({ session } as never);
+
+		const bot = createTelegramBot({ token: "test-token", ownerChatId: "1", cwd: "/tmp/telegram-test" });
+		bot.botInfo = {
+			id: 99,
+			is_bot: true,
+			first_name: "Test",
+			username: "test_bot",
+			can_join_groups: false,
+			can_read_all_group_messages: false,
+			supports_inline_queries: false,
+			can_connect_to_business: false,
+			has_main_web_app: false,
+		};
+		vi.spyOn(bot.api, "sendMessage").mockResolvedValue({ message_id: 100 } as never);
+
+		await bot.handleUpdate(messageUpdate(1, 1, "a long-running message"));
+
+		// The handler must resolve before the turn itself finishes - grammY's default bot.start()
+		// dispatches updates strictly sequentially, so a handler that blocks on the full turn
+		// (which can run for minutes on a long tool call) makes every subsequent update, including
+		// a "/stop", undeliverable until the turn ends on its own.
+		expect(session.prompt).toHaveBeenCalledTimes(1);
+		expect(promptResolved).toBe(false);
+
+		releasePrompt?.();
+		await vi.waitFor(() => expect(promptResolved).toBe(true));
 	});
 });
 
