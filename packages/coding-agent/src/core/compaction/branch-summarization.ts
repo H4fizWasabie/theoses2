@@ -18,6 +18,7 @@ import {
 import type { ReadonlySessionManager, SessionEntry } from "../session-manager.ts";
 import { completeSummarization, estimateTokens } from "./compaction.ts";
 import {
+	capSummaryLength,
 	computeFileLists,
 	createFileOps,
 	extractFileOpsFromMessage,
@@ -365,6 +366,9 @@ export async function generateBranchSummary(
 
 	// Prepend preamble to provide context about the branch summary
 	summary = BRANCH_SUMMARY_PREAMBLE + summary;
+
+	// Backstop against unbounded growth (#230), same as compaction.ts.
+	summary = capSummaryLength(summary);
 
 	// Compute file lists and append to summary
 	const { readFiles, modifiedFiles } = computeFileLists(fileOps);
