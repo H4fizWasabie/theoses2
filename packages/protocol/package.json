@@ -1,6 +1,6 @@
 {
 	"name": "theoses-protocol",
-	"version": "1.0.38",
+	"version": "1.0.39",
 	"description": "Transport-neutral CBOR protocol for remote pi sessions",
 	"type": "module",
 	"main": "./dist/index.js",
