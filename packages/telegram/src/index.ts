@@ -96,12 +96,13 @@ function parseToolCallDetailToggle(text: string): boolean | undefined {
 }
 
 /**
- * Whether to render each tool call as its own collapsed <details> block (name + one-line preview
- * of its command/path/query, collapsed by default so nothing forces a scroll; full args and result
- * only show if actually tapped open) instead of the default flat "Running bash..." status and
- * collapsed tool-name footer. Off by default - opt in with "/on tool call", back out with
- * "/off tool call". Persisted to a small file so the choice survives process restarts (the
- * auto-updater restarts this service routinely; an in-memory-only toggle would silently reset).
+ * Whether to render each tool call as its own one-line status entry (icon + name + one-line
+ * preview of its command/path/query, nothing more) instead of the default flat "Running bash..."
+ * status and collapsed tool-name footer. Deliberately never shows the raw args or tool result -
+ * see the comment on renderToolCallBlocks for why. Off by default - opt in with "/on tool call",
+ * back out with "/off tool call". Persisted to a small file so the choice survives process
+ * restarts (the auto-updater restarts this service routinely; an in-memory-only toggle would
+ * silently reset).
  */
 function loadToolCallDetailPreference(): boolean {
 	try {
@@ -166,22 +167,6 @@ function assistantError(event: AgentSessionEvent): { message: string; provider: 
 	if (event.type !== "message_end" || event.message.role !== "assistant") return undefined;
 	if (event.message.stopReason !== "error" || !event.message.errorMessage) return undefined;
 	return { message: event.message.errorMessage, provider: event.message.provider, model: event.message.model };
-}
-
-/** Flattens a tool result's content into plain text for the collapsible tool-call block's body. */
-function toolResultToText(result: unknown): string {
-	if (typeof result === "string") return result;
-	const content = (result as { content?: unknown } | undefined)?.content;
-	if (Array.isArray(content)) {
-		return content
-			.map((part) =>
-				(part as { type?: string; text?: string })?.type === "text"
-					? ((part as { text?: string }).text ?? "")
-					: "[image]",
-			)
-			.join("");
-	}
-	return JSON.stringify(result);
 }
 
 /** Pulls image attachments (e.g. from generate_image) out of a raw tool result for delivery as Telegram photos. */
@@ -490,7 +475,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			await bot.api.sendMessage(
 				ctx.chat.id,
 				toolCallDetailToggle
-					? "Tool call detail: on. Each tool call now shows as an expandable block with its command/args and result."
+					? "Tool call detail: on. Each tool call now shows as its own one-line status entry (name + command preview, no raw output)."
 					: "Tool call detail: off. Back to the compact tool-name footer.",
 			);
 			return;
@@ -616,8 +601,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				});
 			};
 			// Tool-call-detail variant: same in-place-edit shape, but through the rich-message path
-			// so accumulated <details> blocks actually render as real collapsible elements while the
-			// turn is still running, not as literal tag text (classic HTML has no <details> support).
+			// for consistency with the rest of this turn's replies.
 			const setRichStatus = (markdown: string) => {
 				statusPending = statusPending.then(async () => {
 					try {
@@ -670,7 +654,6 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 						if (entry) {
 							entry.done = true;
 							entry.isError = event.isError;
-							entry.result = toolResultToText(event.result);
 						}
 						setRichStatus(renderToolCallBlocks(toolCallEntries));
 					}
@@ -696,10 +679,6 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				return;
 			}
 			if (response) {
-				// The <details> blocks only render as real collapsibles through the rich-message
-				// path sendTelegramReply attempts first; on its classic-HTML fallback they'd show
-				// as literal tag text - the same accepted degradation the model's own optional
-				// collapsible blocks already have (see TELEGRAM_RICH_FORMATTING_GUIDANCE).
 				const finalText = toolCallDetailEnabled
 					? `${renderToolCallBlocks(toolCallEntries)}\n\n${response}`
 					: response;

@@ -199,7 +199,6 @@ export interface ToolCallEntry {
 	args: unknown;
 	done?: boolean;
 	isError?: boolean;
-	result?: string;
 }
 
 const TOOL_CALL_SUMMARY_LIMIT = 140;
@@ -231,33 +230,24 @@ function toolCallSummaryLine(name: string, args: unknown): string {
 	return oneLine.length > TOOL_CALL_SUMMARY_LIMIT ? `${oneLine.slice(0, TOOL_CALL_SUMMARY_LIMIT - 3)}...` : oneLine;
 }
 
-const TOOL_CALL_BODY_LIMIT = 2000;
-
-function truncateForToolCallBody(text: string): string {
-	return text.length > TOOL_CALL_BODY_LIMIT ? `${text.slice(0, TOOL_CALL_BODY_LIMIT)}\n... (truncated)` : text;
-}
-
 /**
- * Renders one collapsed <details> block per tool call (Bot API 10.1 rich-message markdown - see
- * TELEGRAM_RICH_FORMATTING_GUIDANCE in index.ts, which already documents this exact syntax for the
- * model's own replies; this reuses it for the tool-call log). Collapsed by default - just the
- * status icon, name, and one-line preview - so nothing forces a scroll; the full command and
- * result only show if the block is actually tapped open. Caller must send this through the
- * rich-message path - <details> has no classic-HTML equivalent and renders as literal text there.
+ * Renders one plain summary line per tool call - status icon, name, and a one-line preview of its
+ * command/path/query. Deliberately never includes the raw args or tool result: those are arbitrary
+ * file/command output (a Python source file, a Markdown doc, ...) that can itself contain triple
+ * backticks or other markdown-sensitive sequences. An earlier version wrapped that raw content in
+ * a <details> block with a nested ``` fence, which broke Telegram's rich-message parser whenever
+ * the tool result contained its own backticks - the fence terminated early, the <details> tag fell
+ * out of any parsed block, and the whole thing showed as literal tag text plus a full raw dump
+ * instead of collapsing. Keeping this to fixed, pre-truncated summary text sidesteps that class of
+ * bug entirely rather than trying to escape arbitrary tool output.
  */
 export function renderToolCallBlocks(entries: ToolCallEntry[]): string {
 	return entries
 		.map((entry) => {
 			const icon = !entry.done ? "◌" : entry.isError ? "✕" : "✓";
-			const summary = `${icon} ${entry.name}: ${toolCallSummaryLine(entry.name, entry.args)}`;
-			const argsText = truncateForToolCallBody(JSON.stringify(entry.args ?? {}, null, 2));
-			const resultText =
-				entry.result === undefined
-					? "_running…_"
-					: `**Result:**\n\`\`\`\n${truncateForToolCallBody(entry.result)}\n\`\`\``;
-			return `<details><summary>${summary}</summary>\n\n\`\`\`\n${argsText}\n\`\`\`\n\n${resultText}\n\n</details>`;
+			return `${icon} ${entry.name}: ${toolCallSummaryLine(entry.name, entry.args)}`;
 		})
-		.join("\n\n");
+		.join("\n");
 }
 
 /** Collapses consecutive repeats of the same tool name, e.g. bash,bash,bash -> "bash ×3". */
