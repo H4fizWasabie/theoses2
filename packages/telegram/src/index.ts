@@ -678,23 +678,25 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 					await bot.api.deleteMessage(ctx.chat.id, statusMessageId).catch(() => {});
 				return;
 			}
+			// Tool-call-detail mode: the status message is the tool-call block, already fully
+			// rendered by the last setRichStatus() call above - it stays as its own chat entry
+			// rather than being overwritten with the answer, so the answer always lands as a
+			// separate message instead of being glued onto (or replacing) the tool-call block.
+			const editTarget = toolCallDetailEnabled ? undefined : statusMessageId;
 			if (response) {
-				const finalText = toolCallDetailEnabled
-					? `${renderToolCallBlocks(toolCallEntries)}\n\n${response}`
-					: response;
 				const footerNames = toolCallDetailEnabled ? [] : toolNames;
-				await sendTelegramReply(bot, ctx.chat.id, finalText, footerNames, ctx.message.message_id, statusMessageId);
+				await sendTelegramReply(bot, ctx.chat.id, response, footerNames, ctx.message.message_id, editTarget);
 			} else if (lastError) {
 				const errorText = `${lastError.provider}/${lastError.model} failed: ${lastError.message}`;
-				if (statusMessageId !== undefined) {
-					await bot.api.editMessageText(ctx.chat.id, statusMessageId, errorText).catch(() => {});
+				if (editTarget !== undefined) {
+					await bot.api.editMessageText(ctx.chat.id, editTarget, errorText).catch(() => {});
 				} else {
 					await bot.api
 						.sendMessage(ctx.chat.id, errorText, { reply_parameters: { message_id: ctx.message.message_id } })
 						.catch(() => {});
 				}
-			} else if (statusMessageId !== undefined) {
-				await bot.api.deleteMessage(ctx.chat.id, statusMessageId).catch(() => {});
+			} else if (editTarget !== undefined) {
+				await bot.api.deleteMessage(ctx.chat.id, editTarget).catch(() => {});
 			}
 			// Issue #198: multiple images collected in one reply (e.g. several generate_image
 			// calls in a turn) go out as one grouped album via sendMediaGroup instead of separate
