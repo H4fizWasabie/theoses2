@@ -17,8 +17,9 @@ export function createMemoryToolDefinitions(store: MemoryStore, onMemorySaved?: 
 		{
 			name: "remember",
 			label: "remember",
-			description: "Retrieve durable memory only when the user explicitly asks you to recall something.",
-			promptSnippet: "Retrieve explicitly requested durable memory",
+			description:
+				"Retrieve durable memory proactively whenever a question might depend on previously saved context about the user, their setup, or their projects - don't wait for them to explicitly ask you to recall something, and don't make them repeat context that's already saved.",
+			promptSnippet: "Retrieve relevant durable memory proactively",
 			parameters: rememberSchema,
 			execute: async (_id, { query }: RememberInput) => {
 				const records = store.remember(query);
