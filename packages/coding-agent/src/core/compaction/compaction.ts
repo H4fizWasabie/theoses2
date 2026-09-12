@@ -1124,11 +1124,12 @@ export async function compact(
 	// LLM call. Calling generateSummaryWithUsage here would serialize an empty conversation
 	// and no previous summary, producing a nonsense summarization request at real cost.
 	if (trivialReset) {
+		const capped = fileOps ? computeFileLists(fileOps) : undefined;
 		return {
 			summary: `Prior session context dropped after a topic shift ("${chainReset?.taskSummary}"). No earlier summary carried forward.`,
 			firstKeptEntryId,
 			tokensBefore,
-			details: fileOps ? computeFileLists(fileOps) : undefined,
+			details: capped ? { readFiles: capped.readFiles, modifiedFiles: capped.modifiedFiles } : undefined,
 		};
 	}
 
@@ -1199,8 +1200,8 @@ export async function compact(
 	}
 
 	// Compute file lists and append to summary
-	const { readFiles, modifiedFiles } = computeFileLists(fileOps);
-	summary += formatFileOperations(readFiles, modifiedFiles);
+	const { readFiles, modifiedFiles, droppedReadCount, droppedModifiedCount } = computeFileLists(fileOps);
+	summary += formatFileOperations(readFiles, modifiedFiles, droppedReadCount, droppedModifiedCount);
 
 	if (!firstKeptEntryId) {
 		throw new Error("First kept entry has no UUID - session may need migration");

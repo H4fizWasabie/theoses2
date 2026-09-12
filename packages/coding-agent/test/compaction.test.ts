@@ -8,10 +8,13 @@ import {
 	type CompactionSettings,
 	calculateContextTokens,
 	compact,
+	computeFileLists,
 	countUserTurnsSince,
+	createFileOps,
 	DEFAULT_COMPACTION_SETTINGS,
 	estimateContextTokens,
 	findCutPoint,
+	formatFileOperations,
 	getLastAssistantUsage,
 	prepareCompaction,
 	shouldCompact,
@@ -740,4 +743,56 @@ describe.skipIf(!process.env.ANTHROPIC_OAUTH_TOKEN)("LLM summarization", () => {
 		console.log("Original messages:", loaded.messages.length);
 		console.log("After compaction:", reloaded.messages.length);
 	}, 60000);
+});
+
+describe("computeFileLists cap (#228)", () => {
+	it("keeps all paths untouched when under the cap", () => {
+		const fileOps = createFileOps();
+		for (let i = 0; i < 10; i++) fileOps.read.add(`file-${i}.ts`);
+		const { readFiles, droppedReadCount } = computeFileLists(fileOps);
+		expect(readFiles).toHaveLength(10);
+		expect(droppedReadCount).toBe(0);
+	});
+
+	it("caps read files to the most recently touched 40 and reports the dropped count", () => {
+		const fileOps = createFileOps();
+		for (let i = 0; i < 60; i++) fileOps.read.add(`file-${i}.ts`);
+		const { readFiles, droppedReadCount } = computeFileLists(fileOps);
+		expect(readFiles).toHaveLength(40);
+		expect(droppedReadCount).toBe(20);
+		// The oldest-touched paths (added first) are the ones dropped, not the newest.
+		expect(readFiles).not.toContain("file-0.ts");
+		expect(readFiles).toContain("file-59.ts");
+	});
+
+	it("caps modified files independently of read files", () => {
+		const fileOps = createFileOps();
+		for (let i = 0; i < 50; i++) fileOps.edited.add(`edited-${i}.ts`);
+		const { modifiedFiles, droppedModifiedCount } = computeFileLists(fileOps);
+		expect(modifiedFiles).toHaveLength(40);
+		expect(droppedModifiedCount).toBe(10);
+	});
+
+	it("formatFileOperations notes how many older files were omitted", () => {
+		const fileOps = createFileOps();
+		for (let i = 0; i < 50; i++) fileOps.read.add(`file-${i}.ts`);
+		const { readFiles, modifiedFiles, droppedReadCount, droppedModifiedCount } = computeFileLists(fileOps);
+		const formatted = formatFileOperations(readFiles, modifiedFiles, droppedReadCount, droppedModifiedCount);
+		expect(formatted).toContain("+10 older read files omitted");
+	});
+
+	it("a capped compaction's persisted details stay within the cap, so the bound holds across repeated compactions", () => {
+		const fileOps = createFileOps();
+		for (let i = 0; i < 100; i++) fileOps.read.add(`file-${i}.ts`);
+		const first = computeFileLists(fileOps);
+		expect(first.readFiles).toHaveLength(40);
+
+		// Simulate the next compaction seeding from the previous (capped) details, the same way
+		// extractFileOperations in compaction.ts does, then touching more files on top.
+		const nextFileOps = createFileOps();
+		for (const f of first.readFiles) nextFileOps.read.add(f);
+		for (let i = 100; i < 110; i++) nextFileOps.read.add(`file-${i}.ts`);
+		const second = computeFileLists(nextFileOps);
+		expect(second.readFiles.length).toBeLessThanOrEqual(40);
+	});
 });

@@ -56,26 +56,62 @@ export function extractFileOpsFromMessage(message: AgentMessage, fileOps: FileOp
 }
 
 /**
- * Compute final file lists from file operations.
- * Returns readFiles (files only read, not modified) and modifiedFiles.
+ * Each compaction seeds its file-op tracking from the previous compaction's own tracked lists
+ * (see extractFileOperations in compaction.ts), so without a cap these lists grow for the entire
+ * life of a session - every path ever read or touched, still reprinted on every future turn, long
+ * after it stopped being relevant (issue #228). This bounds each list to the most recently
+ * touched paths; anything older is dropped rather than carried forward indefinitely.
  */
-export function computeFileLists(fileOps: FileOperations): { readFiles: string[]; modifiedFiles: string[] } {
-	const modified = new Set([...fileOps.edited, ...fileOps.written]);
-	const readOnly = [...fileOps.read].filter((f) => !modified.has(f)).sort();
-	const modifiedFiles = [...modified].sort();
-	return { readFiles: readOnly, modifiedFiles };
+const MAX_TRACKED_FILES = 40;
+
+/** Treats a Set's insertion order as recency and keeps only the most recent MAX_TRACKED_FILES. */
+function capToRecent(paths: Set<string>): { kept: string[]; droppedCount: number } {
+	const all = [...paths];
+	if (all.length <= MAX_TRACKED_FILES) return { kept: all, droppedCount: 0 };
+	return { kept: all.slice(-MAX_TRACKED_FILES), droppedCount: all.length - MAX_TRACKED_FILES };
+}
+
+/**
+ * Compute final file lists from file operations.
+ * Returns readFiles (files only read, not modified) and modifiedFiles, each capped to the most
+ * recently touched MAX_TRACKED_FILES with a count of how many older paths were dropped - the
+ * capped lists are also what gets persisted for the next compaction to seed from, so the bound
+ * holds across the whole session rather than resetting once and re-growing unbounded again.
+ */
+export function computeFileLists(fileOps: FileOperations): {
+	readFiles: string[];
+	modifiedFiles: string[];
+	droppedReadCount: number;
+	droppedModifiedCount: number;
+} {
+	const modifiedSet = new Set([...fileOps.edited, ...fileOps.written]);
+	const { kept: modifiedKept, droppedCount: droppedModifiedCount } = capToRecent(modifiedSet);
+	const modifiedFiles = modifiedKept.sort();
+
+	const readOnlySet = new Set([...fileOps.read].filter((f) => !modifiedSet.has(f)));
+	const { kept: readKept, droppedCount: droppedReadCount } = capToRecent(readOnlySet);
+	const readFiles = readKept.sort();
+
+	return { readFiles, modifiedFiles, droppedReadCount, droppedModifiedCount };
 }
 
 /**
  * Format file operations as XML tags for summary.
  */
-export function formatFileOperations(readFiles: string[], modifiedFiles: string[]): string {
+export function formatFileOperations(
+	readFiles: string[],
+	modifiedFiles: string[],
+	droppedReadCount = 0,
+	droppedModifiedCount = 0,
+): string {
 	const sections: string[] = [];
 	if (readFiles.length > 0) {
-		sections.push(`<read-files>\n${readFiles.join("\n")}\n</read-files>`);
+		const note = droppedReadCount > 0 ? `\n(+${droppedReadCount} older read files omitted)` : "";
+		sections.push(`<read-files>\n${readFiles.join("\n")}${note}\n</read-files>`);
 	}
 	if (modifiedFiles.length > 0) {
-		sections.push(`<modified-files>\n${modifiedFiles.join("\n")}\n</modified-files>`);
+		const note = droppedModifiedCount > 0 ? `\n(+${droppedModifiedCount} older modified files omitted)` : "";
+		sections.push(`<modified-files>\n${modifiedFiles.join("\n")}${note}\n</modified-files>`);
 	}
 	if (sections.length === 0) return "";
 	return `\n\n${sections.join("\n\n")}`;
