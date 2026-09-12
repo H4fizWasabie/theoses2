@@ -135,6 +135,26 @@ function truncateForSummary(text: string, maxChars: number): string {
 }
 
 /**
+ * Hard ceiling on a compaction summary's own prose (issue #230). UPDATE_SUMMARIZATION_INSTRUCTIONS
+ * tells the model to "preserve all existing information from the previous summary" on every update
+ * pass - a genuine topic shift already drops the whole summary via chainReset (#186), but a single
+ * long-running task that never crosses a topic boundary has no other pruning trigger, so the prose
+ * can otherwise grow for as long as the task keeps going. This is a backstop, not the primary
+ * mechanism: deliberately generous, since unlike a single tool result this text is what the next
+ * turn relies on to keep working correctly. Keeps the beginning - the summary's own template puts
+ * the durable framing (## Goal, ## Constraints & Preferences) first and the more situational
+ * ## Critical Context last, so a truncation cuts the part most likely to already be stale before
+ * it cuts the part still needed for continuity.
+ */
+export const MAX_SUMMARY_CHARS = 12_000;
+
+export function capSummaryLength(summary: string): string {
+	if (summary.length <= MAX_SUMMARY_CHARS) return summary;
+	const truncatedChars = summary.length - MAX_SUMMARY_CHARS;
+	return `${summary.slice(0, MAX_SUMMARY_CHARS)}\n\n[... ${truncatedChars} more characters of this summary truncated - it exceeded its length budget]`;
+}
+
+/**
  * Serialize LLM messages to text for summarization.
  * This prevents the model from treating it as a conversation to continue.
  * Call convertToLlm() first to handle custom message types.

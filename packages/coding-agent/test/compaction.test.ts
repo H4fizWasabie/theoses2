@@ -5,6 +5,7 @@ import type { AssistantMessage, Usage } from "theoses-ai/compat";
 import { getModel } from "theoses-ai/compat";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+	capSummaryLength,
 	type CompactionSettings,
 	calculateContextTokens,
 	compact,
@@ -16,6 +17,7 @@ import {
 	findCutPoint,
 	formatFileOperations,
 	getLastAssistantUsage,
+	MAX_SUMMARY_CHARS,
 	prepareCompaction,
 	shouldCompact,
 } from "../src/core/compaction/index.ts";
@@ -743,6 +745,21 @@ describe.skipIf(!process.env.ANTHROPIC_OAUTH_TOKEN)("LLM summarization", () => {
 		console.log("Original messages:", loaded.messages.length);
 		console.log("After compaction:", reloaded.messages.length);
 	}, 60000);
+});
+
+describe("capSummaryLength (#230)", () => {
+	it("leaves a summary under the budget untouched", () => {
+		const summary = "## Goal\nShort summary.";
+		expect(capSummaryLength(summary)).toBe(summary);
+	});
+
+	it("truncates a summary over the budget, keeping the beginning", () => {
+		const summary = `## Goal\n${"x".repeat(MAX_SUMMARY_CHARS * 2)}`;
+		const capped = capSummaryLength(summary);
+		expect(capped.length).toBeLessThan(summary.length);
+		expect(capped.startsWith("## Goal")).toBe(true);
+		expect(capped).toContain("truncated - it exceeded its length budget");
+	});
 });
 
 describe("computeFileLists cap (#228)", () => {

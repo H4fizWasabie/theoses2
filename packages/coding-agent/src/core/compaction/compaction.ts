@@ -18,6 +18,7 @@ import {
 } from "../session-manager.ts";
 import { TASK_BOUNDARY_CUSTOM_TYPE, type TaskBoundaryData } from "../task-boundary-detector.ts";
 import {
+	capSummaryLength,
 	computeFileLists,
 	createFileOps,
 	extractFileOpsFromMessage,
@@ -1198,6 +1199,10 @@ export async function compact(
 		summary = result.text;
 		summaryUsage = result.usage;
 	}
+
+	// Backstop against unbounded growth across repeated update passes (#230) - applied to the
+	// prose only, before the file-operations block, so the file lists never get truncated by it.
+	summary = capSummaryLength(summary);
 
 	// Compute file lists and append to summary
 	const { readFiles, modifiedFiles, droppedReadCount, droppedModifiedCount } = computeFileLists(fileOps);
