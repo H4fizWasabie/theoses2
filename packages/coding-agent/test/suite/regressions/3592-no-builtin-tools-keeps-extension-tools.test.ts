@@ -90,6 +90,7 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 			"note_operations",
 			"powershell",
 			"read",
+			"recall_turns",
 			"remember",
 			"save_note",
 			"tool_call",

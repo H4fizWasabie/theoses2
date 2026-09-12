@@ -224,7 +224,7 @@ export interface AgentSessionConfig {
 	externalTools?: RegisteredTool[];
 	/** Canonical model/auth runtime used by coding-agent internals. */
 	modelRuntime: ModelRuntime;
-	/** Initial active built-in tool names. Default: [read, bash, edit, write, working_note, remember, save_note, convert_doc, web_search, generate_image] */
+	/** Initial active built-in tool names. Default: [read, bash, edit, write, working_note, note_operations, remember, save_note, recall_turns, convert_doc, web_search, generate_image] */
 	initialActiveToolNames?: string[];
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
 	allowedToolNames?: string[];
@@ -2962,6 +2962,7 @@ export class AgentSession {
 					"note_operations",
 					"remember",
 					"save_note",
+					"recall_turns",
 					"convert_doc",
 					"web_search",
 					"generate_image",

@@ -112,6 +112,46 @@ function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+export interface TermMatcher {
+	/** Significant terms extracted from the query, after stopword filtering. */
+	terms: string[];
+	/** Distinct-term-overlap score for a haystack: how many terms match, not how many times. */
+	score(haystack: string): number;
+}
+
+/**
+ * Builds a bounded keyword matcher from a free-text query, shared by `remember` (durable memory,
+ * `MemoryNode` subject+body) and the session-turn lookback tool (`recall_turns.ts`, current
+ * session's own conversational text) - same term-overlap approach, two different corpora. Kept
+ * here rather than duplicated so both stay in sync as the matching heuristic evolves.
+ *
+ * Drops very short tokens ("i", "am") before matching: as bare substrings they match almost any
+ * text (e.g. "i" inside "prefers"), which drowns out genuinely relevant hits once ranked by
+ * term-overlap score. Falls back to all terms (not just significant ones) when a query is mostly
+ * stopwords ("who am I", "what do you know about my preferences") - the natural-language question
+ * this is meant to answer would otherwise match nothing.
+ */
+export function buildTermMatcher(query: string): TermMatcher {
+	const allTerms = query
+		.toLowerCase()
+		.split(/[^a-z0-9]+/)
+		.filter((term) => term.length >= 3);
+	const significantTerms = allTerms.filter((term) => !QUERY_STOPWORDS.has(term));
+	const terms = significantTerms.length > 0 ? significantTerms : allTerms;
+	// Word-boundary matches so a term like "user" doesn't also count as a hit inside unrelated words.
+	const termPatterns = terms.map((term) => new RegExp(`\\b${escapeRegExp(term)}\\b`));
+	return {
+		terms,
+		score(haystack: string): number {
+			if (termPatterns.length === 0) return 0;
+			const lower = haystack.toLowerCase();
+			let score = 0;
+			for (const pattern of termPatterns) if (pattern.test(lower)) score++;
+			return score;
+		},
+	};
+}
+
 function slugify(subject: string): string {
 	const base = subject
 		.toLowerCase()
@@ -262,31 +302,9 @@ export class FileMemoryStore implements MemoryStore {
 			nodes.flatMap((n) => n.edges.filter((e) => e.rel === "supersedes").map((e) => e.target)),
 		);
 
-		// Drop very short tokens ("i", "am") before matching: as bare substrings they match almost any
-		// text (e.g. "i" inside "prefers"), which drowns out genuinely relevant hits once ranked by
-		// term-overlap score below.
-		const allTerms = query
-			.toLowerCase()
-			.split(/[^a-z0-9]+/)
-			.filter((term) => term.length >= 3);
-		const significantTerms = allTerms.filter((term) => !QUERY_STOPWORDS.has(term));
-		// Free-text queries ("who am I", "what do you know about my preferences") are mostly stopwords
-		// and connective words that won't appear verbatim in a stored fact's subject/body, so requiring
-		// every term to match (as opposed to any significant term) made `remember` return nothing for
-		// exactly the kind of natural-language question it's meant to answer.
-		const terms = significantTerms.length > 0 ? significantTerms : allTerms;
-		if (terms.length === 0) return [];
-
-		// Word-boundary matches so a term like "user" doesn't also count as a hit inside unrelated words,
-		// and scores by distinct-term overlap so a note matching several query terms outranks one that
-		// only incidentally contains a single common term.
-		const termPattern = new Map(terms.map((term) => [term, new RegExp(`\\b${escapeRegExp(term)}\\b`)]));
-		const scoreOf = (n: MemoryNode): number => {
-			const haystack = `${n.subject} ${n.body ?? ""}`.toLowerCase();
-			let score = 0;
-			for (const pattern of termPattern.values()) if (pattern.test(haystack)) score++;
-			return score;
-		};
+		const matcher = buildTermMatcher(query);
+		if (matcher.terms.length === 0) return [];
+		const scoreOf = (n: MemoryNode): number => matcher.score(`${n.subject} ${n.body ?? ""}`);
 
 		const scores = new Map(nodes.map((n) => [n.id, scoreOf(n)]));
 		const entryIds = nodes.filter((n) => (scores.get(n.id) ?? 0) > 0).map((n) => n.id);

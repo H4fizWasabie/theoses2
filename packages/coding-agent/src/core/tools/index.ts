@@ -75,6 +75,7 @@ export {
 	type ReadToolInput,
 	type ReadToolOptions,
 } from "./read.ts";
+export { createRecallTurnsToolDefinition } from "./recall-turns.ts";
 export {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -114,6 +115,7 @@ import { createMemoryToolDefinitions } from "./memory.ts";
 import { createOperationalNotesToolDefinition } from "./operational-notes.ts";
 import { createPowerShellTool, createPowerShellToolDefinition, type PowerShellToolOptions } from "./powershell.ts";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
+import { createRecallTurnsToolDefinition } from "./recall-turns.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import { createWebSearchToolDefinition, type WebSearchOperations } from "./web-search.ts";
 import { createWorkingNoteToolDefinition } from "./working-note.ts";
@@ -134,6 +136,7 @@ export type ToolName =
 	| "note_operations"
 	| "remember"
 	| "save_note"
+	| "recall_turns"
 	| "convert_doc"
 	| "web_search"
 	| "generate_image";
@@ -150,6 +153,7 @@ export const allToolNames: Set<ToolName> = new Set([
 	"note_operations",
 	"remember",
 	"save_note",
+	"recall_turns",
 	"convert_doc",
 	"web_search",
 	"generate_image",
@@ -204,6 +208,8 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			const definitions = createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore());
 			return definitions.find((definition) => definition.name === toolName)!;
 		}
+		case "recall_turns":
+			return createRecallTurnsToolDefinition();
 		case "convert_doc":
 			return createConvertDocToolDefinition(cwd, options?.convertDoc);
 		case "web_search":
@@ -247,6 +253,8 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			const definitions = createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore());
 			return wrapToolDefinition(definitions.find((definition) => definition.name === toolName)!);
 		}
+		case "recall_turns":
+			return wrapToolDefinition(createRecallTurnsToolDefinition());
 		case "convert_doc":
 			return wrapToolDefinition(createConvertDocToolDefinition(cwd, options?.convertDoc));
 		case "web_search":
@@ -295,6 +303,7 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		note_operations: createOperationalNotesToolDefinition(options?.operationalNotes),
 		remember: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore(), options?.onMemorySaved)[0]!,
 		save_note: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore(), options?.onMemorySaved)[1]!,
+		recall_turns: createRecallTurnsToolDefinition(),
 		convert_doc: createConvertDocToolDefinition(cwd, options?.convertDoc),
 		web_search: createWebSearchToolDefinition(options?.webSearch),
 		generate_image: createGenerateImageToolDefinition(options?.generateImage),
@@ -337,6 +346,7 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		note_operations: wrapToolDefinition(createOperationalNotesToolDefinition(options?.operationalNotes)),
 		remember: wrapToolDefinition(createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[0]!),
 		save_note: wrapToolDefinition(createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[1]!),
+		recall_turns: wrapToolDefinition(createRecallTurnsToolDefinition()),
 		convert_doc: wrapToolDefinition(createConvertDocToolDefinition(cwd, options?.convertDoc)),
 		web_search: wrapToolDefinition(createWebSearchToolDefinition(options?.webSearch)),
 		generate_image: wrapToolDefinition(createGenerateImageToolDefinition(options?.generateImage)),
