@@ -15,7 +15,7 @@ import {
 	type SessionInfo,
 	SessionManager,
 } from "theoses-coding-agent";
-import { chunkHtml, formatTelegramHtml, renderToolCallLines, splitSections, type ToolCallEntry } from "./format.ts";
+import { chunkHtml, formatTelegramHtml, renderToolCallBlocks, splitSections, type ToolCallEntry } from "./format.ts";
 
 // No settings.json override plumbing here (telegram doesn't load SettingsManager);
 // this applies the shared default idle timeout globally so a stalled/looping
@@ -96,13 +96,12 @@ function parseToolCallDetailToggle(text: string): boolean | undefined {
 }
 
 /**
- * Whether to render each tool call as its own plain summary line (name + a one-line preview of
- * its command/path/query) instead of the default flat "Running bash..." status and collapsed
- * tool-name footer - user wants to see what theo actually ran, not just that a tool ran, but
- * without full args/output (that can be huge, and this is meant to be skimmed). Off by default -
- * opt in with "/on tool call", back out with "/off tool call". Persisted to a small file so the
- * choice survives process restarts (the auto-updater restarts this service routinely; an
- * in-memory-only toggle would silently reset).
+ * Whether to render each tool call as its own collapsed <details> block (name + one-line preview
+ * of its command/path/query, collapsed by default so nothing forces a scroll; full args and result
+ * only show if actually tapped open) instead of the default flat "Running bash..." status and
+ * collapsed tool-name footer. Off by default - opt in with "/on tool call", back out with
+ * "/off tool call". Persisted to a small file so the choice survives process restarts (the
+ * auto-updater restarts this service routinely; an in-memory-only toggle would silently reset).
  */
 function loadToolCallDetailPreference(): boolean {
 	try {
@@ -167,6 +166,22 @@ function assistantError(event: AgentSessionEvent): { message: string; provider: 
 	if (event.type !== "message_end" || event.message.role !== "assistant") return undefined;
 	if (event.message.stopReason !== "error" || !event.message.errorMessage) return undefined;
 	return { message: event.message.errorMessage, provider: event.message.provider, model: event.message.model };
+}
+
+/** Flattens a tool result's content into plain text for the collapsible tool-call block's body. */
+function toolResultToText(result: unknown): string {
+	if (typeof result === "string") return result;
+	const content = (result as { content?: unknown } | undefined)?.content;
+	if (Array.isArray(content)) {
+		return content
+			.map((part) =>
+				(part as { type?: string; text?: string })?.type === "text"
+					? ((part as { text?: string }).text ?? "")
+					: "[image]",
+			)
+			.join("");
+	}
+	return JSON.stringify(result);
 }
 
 /** Pulls image attachments (e.g. from generate_image) out of a raw tool result for delivery as Telegram photos. */
@@ -600,6 +615,32 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 					}
 				});
 			};
+			// Tool-call-detail variant: same in-place-edit shape, but through the rich-message path
+			// so accumulated <details> blocks actually render as real collapsible elements while the
+			// turn is still running, not as literal tag text (classic HTML has no <details> support).
+			const setRichStatus = (markdown: string) => {
+				statusPending = statusPending.then(async () => {
+					try {
+						const rawApi = bot.api.raw as unknown as RawApiWithRichMessage;
+						if (statusMessageId === undefined) {
+							const sent = await rawApi.sendRichMessage({
+								chat_id: ctx.chat.id,
+								rich_message: { markdown },
+								reply_parameters: { message_id: ctx.message.message_id },
+							});
+							statusMessageId = sent.message_id;
+						} else {
+							await rawApi.editMessageText({
+								chat_id: ctx.chat.id,
+								message_id: statusMessageId,
+								rich_message: { markdown },
+							});
+						}
+					} catch {
+						// Ignore transient status failures (e.g. "message not modified", rate limits).
+					}
+				});
+			};
 			const toolNames: string[] = [];
 			const toolCallEntries: ToolCallEntry[] = [];
 			const generatedImages: Buffer[] = [];
@@ -615,7 +656,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 					runningTool.set(chat, event.toolName);
 					if (toolCallDetailEnabled) {
 						toolCallEntries.push({ id: event.toolCallId, name: event.toolName, args: event.args });
-						setStatus(renderToolCallLines(toolCallEntries).join("\n"));
+						setRichStatus(renderToolCallBlocks(toolCallEntries));
 					} else {
 						setStatus(`Running ${event.toolName}...`);
 					}
@@ -629,8 +670,9 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 						if (entry) {
 							entry.done = true;
 							entry.isError = event.isError;
+							entry.result = toolResultToText(event.result);
 						}
-						setStatus(renderToolCallLines(toolCallEntries).join("\n"));
+						setRichStatus(renderToolCallBlocks(toolCallEntries));
 					}
 				}
 			});
@@ -654,11 +696,12 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				return;
 			}
 			if (response) {
-				// Plain text, not HTML: formatTelegramHtml escapes the whole reply before rendering,
-				// so this survives both the rich-message path (sent as-is) and the classic-HTML
-				// fallback (escaped like everything else) without needing its own markup handling.
+				// The <details> blocks only render as real collapsibles through the rich-message
+				// path sendTelegramReply attempts first; on its classic-HTML fallback they'd show
+				// as literal tag text - the same accepted degradation the model's own optional
+				// collapsible blocks already have (see TELEGRAM_RICH_FORMATTING_GUIDANCE).
 				const finalText = toolCallDetailEnabled
-					? `${renderToolCallLines(toolCallEntries).join("\n")}\n\n${response}`
+					? `${renderToolCallBlocks(toolCallEntries)}\n\n${response}`
 					: response;
 				const footerNames = toolCallDetailEnabled ? [] : toolNames;
 				await sendTelegramReply(bot, ctx.chat.id, finalText, footerNames, ctx.message.message_id, statusMessageId);
