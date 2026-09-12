@@ -86,6 +86,12 @@ export interface Settings {
 	lastChangelogVersion?: string;
 	defaultProvider?: string;
 	defaultModel?: string;
+	// Compaction/summarization/task-boundary detection use this model instead of the session's
+	// active chat model when set (issue #212) - decouples internal maintenance calls from
+	// whatever the user happens to be chatting with, so switching models never risks silently
+	// breaking a session's own compaction pipeline. Falls back to the active chat model if unset.
+	summarizationProvider?: string;
+	summarizationModel?: string;
 	defaultThinkingLevel?: ThinkingLevel;
 	modelThinkingLevels?: Record<string, ThinkingLevel>; // per-model default thinking level overrides keyed by "provider/modelId"
 	transport?: TransportSetting; // default: "auto"
@@ -728,6 +734,22 @@ export class SettingsManager {
 		this.globalSettings.defaultModel = modelId;
 		this.markModified("defaultProvider");
 		this.markModified("defaultModel");
+		this.save();
+	}
+
+	getSummarizationProvider(): string | undefined {
+		return this.settings.summarizationProvider;
+	}
+
+	getSummarizationModel(): string | undefined {
+		return this.settings.summarizationModel;
+	}
+
+	setSummarizationModelAndProvider(provider: string, modelId: string): void {
+		this.globalSettings.summarizationProvider = provider;
+		this.globalSettings.summarizationModel = modelId;
+		this.markModified("summarizationProvider");
+		this.markModified("summarizationModel");
 		this.save();
 	}
 
