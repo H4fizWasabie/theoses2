@@ -1,6 +1,6 @@
 {
 	"name": "theoses-dashboard",
-	"version": "1.0.41",
+	"version": "1.0.42",
 	"description": "Private browser dashboard for Theoses",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -21,7 +21,7 @@
 		"test": "node --experimental-strip-types --test test/*.test.ts"
 	},
 	"dependencies": {
-		"theoses-coding-agent": "^1.0.41"
+		"theoses-coding-agent": "^1.0.42"
 	},
 	"devDependencies": {
 		"shx": "0.4.0"

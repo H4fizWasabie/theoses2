@@ -5,9 +5,9 @@ import type { AssistantMessage, Usage } from "theoses-ai/compat";
 import { getModel } from "theoses-ai/compat";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-	capSummaryLength,
 	type CompactionSettings,
 	calculateContextTokens,
+	capSummaryLength,
 	compact,
 	computeFileLists,
 	countUserTurnsSince,
