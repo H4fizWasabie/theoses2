@@ -199,30 +199,65 @@ export interface ToolCallEntry {
 	args: unknown;
 	done?: boolean;
 	isError?: boolean;
+	result?: string;
 }
 
-const TOOL_CALL_SUMMARY_LIMIT = 100;
+const TOOL_CALL_SUMMARY_LIMIT = 140;
+const RE_VAR_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+/**
+ * Shell scripts commonly lead with one or more `VAR="long/path"` assignments before the actual
+ * action - naively truncating from the start just shows the boilerplate path and cuts off before
+ * ever reaching the real command (e.g. `pdfinfo`, `chown`, `cp`). Picks the last segment (split on
+ * `;`, `&&`, and newlines) that isn't itself a bare assignment, falling back to the whole command
+ * when every segment looks like one (rare, but possible).
+ */
+function meaningfulCommandSegment(command: string): string {
+	const segments = command
+		.split(/\n|;|&&/)
+		.map((segment) => segment.trim())
+		.filter(Boolean);
+	const meaningful = [...segments].reverse().find((segment) => !RE_VAR_ASSIGNMENT.test(segment));
+	return meaningful ?? command;
+}
 
 /** One-line preview for a tool call - the command for bash/powershell, a path/query for most other built-ins, else the raw args. */
 function toolCallSummaryLine(name: string, args: unknown): string {
 	const record = (args ?? {}) as Record<string, unknown>;
 	const primary =
 		name === "bash" || name === "powershell" ? record.command : (record.path ?? record.query ?? record.note);
-	const preview = typeof primary === "string" ? primary : JSON.stringify(args ?? {});
+	const preview = typeof primary === "string" ? meaningfulCommandSegment(primary) : JSON.stringify(args ?? {});
 	const oneLine = preview.replace(/\s+/g, " ").trim();
 	return oneLine.length > TOOL_CALL_SUMMARY_LIMIT ? `${oneLine.slice(0, TOOL_CALL_SUMMARY_LIMIT - 3)}...` : oneLine;
 }
 
+const TOOL_CALL_BODY_LIMIT = 2000;
+
+function truncateForToolCallBody(text: string): string {
+	return text.length > TOOL_CALL_BODY_LIMIT ? `${text.slice(0, TOOL_CALL_BODY_LIMIT)}\n... (truncated)` : text;
+}
+
 /**
- * Renders one plain line per tool call - name plus a one-line command/arg preview, nothing else
- * (no args dump, no result/output - those can be huge and this is meant to be skimmed, not read
- * through). Used both for the live "what's running" status and the final per-turn footer.
+ * Renders one collapsed <details> block per tool call (Bot API 10.1 rich-message markdown - see
+ * TELEGRAM_RICH_FORMATTING_GUIDANCE in index.ts, which already documents this exact syntax for the
+ * model's own replies; this reuses it for the tool-call log). Collapsed by default - just the
+ * status icon, name, and one-line preview - so nothing forces a scroll; the full command and
+ * result only show if the block is actually tapped open. Caller must send this through the
+ * rich-message path - <details> has no classic-HTML equivalent and renders as literal text there.
  */
-export function renderToolCallLines(entries: ToolCallEntry[]): string[] {
-	return entries.map((entry) => {
-		const icon = !entry.done ? "◌" : entry.isError ? "✕" : "✓";
-		return `${icon} ${entry.name}: ${toolCallSummaryLine(entry.name, entry.args)}`;
-	});
+export function renderToolCallBlocks(entries: ToolCallEntry[]): string {
+	return entries
+		.map((entry) => {
+			const icon = !entry.done ? "◌" : entry.isError ? "✕" : "✓";
+			const summary = `${icon} ${entry.name}: ${toolCallSummaryLine(entry.name, entry.args)}`;
+			const argsText = truncateForToolCallBody(JSON.stringify(entry.args ?? {}, null, 2));
+			const resultText =
+				entry.result === undefined
+					? "_running…_"
+					: `**Result:**\n\`\`\`\n${truncateForToolCallBody(entry.result)}\n\`\`\``;
+			return `<details><summary>${summary}</summary>\n\n\`\`\`\n${argsText}\n\`\`\`\n\n${resultText}\n\n</details>`;
+		})
+		.join("\n\n");
 }
 
 /** Collapses consecutive repeats of the same tool name, e.g. bash,bash,bash -> "bash ×3". */
