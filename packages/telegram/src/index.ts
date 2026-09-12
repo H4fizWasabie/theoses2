@@ -640,6 +640,14 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			chat,
 			next.catch(() => {}),
 		);
+		// Deliberately not awaited (issue #209): grammY's default bot.start() dispatches updates
+		// strictly sequentially, so awaiting the full turn here - which can run for many minutes
+		// on a long tool call - blocked the handler from returning, which blocked grammY from ever
+		// invoking the handler again for the NEXT incoming update. That made a "/stop"/"stop"/
+		// "halt" message (and anything else) undeliverable for the entire duration of an in-flight
+		// turn, including the one command specifically meant to interrupt it. The turn itself is
+		// still correctly ordered per chat via the `queues` chain above; this only lets grammY's
+		// own dispatch loop move on to the next update instead of waiting on it.
 		void next
 			.finally(() => {
 				const depth = (queueDepth.get(chat) ?? 1) - 1;
@@ -647,7 +655,6 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				else queueDepth.delete(chat);
 			})
 			.catch(() => {});
-		await next;
 	});
 
 	return bot;
