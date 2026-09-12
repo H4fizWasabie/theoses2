@@ -466,7 +466,7 @@ export function sessionEntryToContextMessages(entry: SessionEntry): AgentMessage
 }
 
 /** Keep the last five user turns while retaining their assistant/tool messages. */
-export function limitActiveContextMessages(messages: AgentMessage[], maxTurns = 5): AgentMessage[] {
+export function limitActiveContextMessages(messages: AgentMessage[], maxTurns = 3): AgentMessage[] {
 	if (maxTurns <= 0) return [];
 	let userMessages = 0;
 	let start = 0;

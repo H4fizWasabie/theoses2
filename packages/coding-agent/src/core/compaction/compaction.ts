@@ -135,7 +135,7 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 	enabled: true,
 	reserveTokens: 16384,
 	keepRecentTokens: 20000,
-	maxHistoryTurns: 5,
+	maxHistoryTurns: 3,
 };
 
 /** Count user turns in `pathEntries[startIndex..]`. Mirrors the counting logic in
