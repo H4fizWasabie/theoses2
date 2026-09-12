@@ -201,14 +201,31 @@ export interface ToolCallEntry {
 	isError?: boolean;
 }
 
-const TOOL_CALL_SUMMARY_LIMIT = 100;
+const TOOL_CALL_SUMMARY_LIMIT = 140;
+const RE_VAR_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+/**
+ * Shell scripts commonly lead with one or more `VAR="long/path"` assignments before the actual
+ * action - naively truncating from the start just shows the boilerplate path and cuts off before
+ * ever reaching the real command (e.g. `pdfinfo`, `chown`, `cp`). Picks the last segment (split on
+ * `;`, `&&`, and newlines) that isn't itself a bare assignment, falling back to the whole command
+ * when every segment looks like one (rare, but possible).
+ */
+function meaningfulCommandSegment(command: string): string {
+	const segments = command
+		.split(/\n|;|&&/)
+		.map((segment) => segment.trim())
+		.filter(Boolean);
+	const meaningful = [...segments].reverse().find((segment) => !RE_VAR_ASSIGNMENT.test(segment));
+	return meaningful ?? command;
+}
 
 /** One-line preview for a tool call - the command for bash/powershell, a path/query for most other built-ins, else the raw args. */
 function toolCallSummaryLine(name: string, args: unknown): string {
 	const record = (args ?? {}) as Record<string, unknown>;
 	const primary =
 		name === "bash" || name === "powershell" ? record.command : (record.path ?? record.query ?? record.note);
-	const preview = typeof primary === "string" ? primary : JSON.stringify(args ?? {});
+	const preview = typeof primary === "string" ? meaningfulCommandSegment(primary) : JSON.stringify(args ?? {});
 	const oneLine = preview.replace(/\s+/g, " ").trim();
 	return oneLine.length > TOOL_CALL_SUMMARY_LIMIT ? `${oneLine.slice(0, TOOL_CALL_SUMMARY_LIMIT - 3)}...` : oneLine;
 }
