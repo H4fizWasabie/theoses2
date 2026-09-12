@@ -309,11 +309,16 @@ async function sessionFor(
 			appendSystemPrompt: [TELEGRAM_RICH_FORMATTING_GUIDANCE],
 		});
 		const { session } = await createAgentSession({ sessionManager, thinkingLevel: "high", resourceLoader });
-		// convert_doc isn't in the SDK's default active set. Telegram document uploads are stored
-		// as artifacts (see the `ctx.message.document` branch below) and need convert_doc enabled
-		// to ever be read - added on top of the full default+extension set rather than via
-		// `tools:`, which would reintroduce the gating problem above.
-		session.setActiveToolsByName([...session.getActiveToolNames(), "convert_doc"]);
+		// Telegram document uploads are stored as artifacts (see the `ctx.message.document` branch
+		// below) and need convert_doc enabled to ever be read. Guard against it already being in
+		// the default active set (it is, as of the SDK's current defaults) - blindly appending it
+		// produced a duplicate `convert_doc` entry in the tools array sent on every request, which
+		// OpenRouter's Novita backend rejects outright as an invalid request (400) and DeepInfra
+		// silently declines to serve (404, filtered out at the routing layer) - see issue #211.
+		const activeToolNames = session.getActiveToolNames();
+		if (!activeToolNames.includes("convert_doc")) {
+			session.setActiveToolsByName([...activeToolNames, "convert_doc"]);
+		}
 		return session;
 	})();
 	sessions.set(chat, created);
