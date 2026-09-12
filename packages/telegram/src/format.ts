@@ -231,23 +231,27 @@ function toolCallSummaryLine(name: string, args: unknown): string {
 }
 
 /**
- * Renders one plain summary line per tool call - status icon, name, and a one-line preview of its
- * command/path/query. Deliberately never includes the raw args or tool result: those are arbitrary
- * file/command output (a Python source file, a Markdown doc, ...) that can itself contain triple
- * backticks or other markdown-sensitive sequences. An earlier version wrapped that raw content in
- * a <details> block with a nested ``` fence, which broke Telegram's rich-message parser whenever
- * the tool result contained its own backticks - the fence terminated early, the <details> tag fell
- * out of any parsed block, and the whole thing showed as literal tag text plus a full raw dump
- * instead of collapsing. Keeping this to fixed, pre-truncated summary text sidesteps that class of
- * bug entirely rather than trying to escape arbitrary tool output.
+ * Renders one collapsible <details> block per tool call - status icon and name collapsed by
+ * default, the one-line command/path/query preview revealed on expand - so a turn with many tool
+ * calls reads as a stack of small, individually-collapsed entries (Bot API 10.1 rich-message
+ * markdown, per TELEGRAM_RICH_FORMATTING_GUIDANCE) instead of one growing wall of text. Deliberately
+ * never includes the raw args or tool result: those are arbitrary file/command output (a Python
+ * source file, a Markdown doc, ...) that can itself contain triple backticks or other
+ * markdown-sensitive sequences. An earlier version wrapped that raw content in a <details> block
+ * with a nested ``` fence, which broke Telegram's rich-message parser whenever the tool result
+ * contained its own backticks - the fence terminated early, the <details> tag fell out of any
+ * parsed block, and the whole thing showed as literal tag text plus a full raw dump instead of
+ * collapsing. Both the summary and the revealed detail here stay fixed, pre-truncated text derived
+ * the same way, so that bug class doesn't reapply.
  */
 export function renderToolCallBlocks(entries: ToolCallEntry[]): string {
 	return entries
 		.map((entry) => {
 			const icon = !entry.done ? "◌" : entry.isError ? "✕" : "✓";
-			return `${icon} ${entry.name}: ${toolCallSummaryLine(entry.name, entry.args)}`;
+			const summary = toolCallSummaryLine(entry.name, entry.args);
+			return `<details><summary>${icon} ${entry.name}</summary>${summary}</details>`;
 		})
-		.join("\n");
+		.join("\n\n");
 }
 
 /** Collapses consecutive repeats of the same tool name, e.g. bash,bash,bash -> "bash ×3". */
