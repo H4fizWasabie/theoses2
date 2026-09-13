@@ -808,6 +808,12 @@ function buildParams(
 		params.temperature = options.temperature;
 	}
 
+	// Issue #250: opt-in structured output (JSON-object mode). Not every backend supports the
+	// parameter, so it is only emitted when the caller explicitly asked for it (see StreamOptions).
+	if (options?.responseFormat?.type === "json_object") {
+		(params as { response_format?: { type: string } }).response_format = { type: "json_object" };
+	}
+
 	const deferredToolNames =
 		compat.deferredToolsMode === "kimi" ? getDeferredToolNames(context.messages) : new Set<string>();
 	const activeTools = context.tools?.filter((tool) => !deferredToolNames.has(tool.name));

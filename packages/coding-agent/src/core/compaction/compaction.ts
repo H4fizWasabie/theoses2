@@ -16,6 +16,7 @@ import {
 	type SessionEntry,
 	sessionEntryToContextMessages,
 } from "../session-manager.ts";
+import { parseStructuredJson } from "../structured-output.ts";
 import { TASK_BOUNDARY_CUSTOM_TYPE, type TaskBoundaryData } from "../task-boundary-detector.ts";
 import {
 	capSummaryLength,
@@ -847,11 +848,7 @@ export async function distillMemory(
 	);
 	if (response.stopReason === "error" || response.stopReason === "aborted") return { facts: [] };
 	try {
-		const parsed: unknown = JSON.parse(
-			contentText(response.content)
-				.trim()
-				.replace(/^```json\s*|\s*```$/g, ""),
-		);
+		const parsed: unknown = parseStructuredJson(contentText(response.content), "Memory distillation");
 		const values = Array.isArray(parsed)
 			? parsed
 			: typeof parsed === "object" && parsed !== null && Array.isArray((parsed as { facts?: unknown }).facts)
@@ -876,6 +873,9 @@ export async function distillMemory(
 				: undefined;
 		return { facts, ...(episode ? { episode } : {}) };
 	} catch {
+		// parseStructuredJson already logged position + raw-text snippet (issue #250). Distillation
+		// is best-effort — dropping this pass loses one window's memory candidates, so we only skip
+		// after the repair layers had their chance.
 		console.warn("Memory distillation returned invalid JSON; skipping this pass.");
 		return { facts: [] };
 	}

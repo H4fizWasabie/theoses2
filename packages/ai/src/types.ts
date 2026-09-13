@@ -220,6 +220,15 @@ export interface StreamOptions extends ProviderRequestOptions<Model<Api>> {
 	 * For example, Anthropic uses `user_id` for abuse tracking and rate limiting.
 	 */
 	metadata?: Record<string, unknown>;
+	/**
+	 * Request structured JSON output from the provider (OpenAI-compatible
+	 * `response_format: { "type": "json_object" }`). Currently only applied by the
+	 * openai-completions adapter; other adapters ignore it. Opt-in per call because
+	 * some OpenAI-compatible backends reject the parameter or don't honor it —
+	 * notably DeepSeek models support JSON-object mode *without schema enforcement*
+	 * (their docs' own wording), so this nudges sampling rather than guaranteeing it.
+	 */
+	responseFormat?: { type: "json_object" };
 }
 
 export type ProviderStreamOptions = StreamOptions & Record<string, unknown>;
