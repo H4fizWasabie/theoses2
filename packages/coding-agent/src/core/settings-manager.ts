@@ -859,7 +859,7 @@ export class SettingsManager {
 	}
 
 	getCompactionMaxHistoryTurns(): number {
-		return this.settings.compaction?.maxHistoryTurns ?? 5;
+		return this.settings.compaction?.maxHistoryTurns ?? 3;
 	}
 
 	getCompactionSettings(): {
