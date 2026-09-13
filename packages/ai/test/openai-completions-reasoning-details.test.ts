@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { stream as streamOpenAICompletions } from "../src/api/openai-completions.ts";
-import type { AssistantMessage, Model, Tool } from "../src/types.ts";
+import type { AssistantMessage, Message, Model, Tool } from "../src/types.ts";
 
 const mockState = vi.hoisted(() => ({
 	chunkSets: [] as unknown[][],
@@ -100,7 +100,7 @@ function toolCallChunk(): unknown {
 }
 
 async function runOpenAICompletionsStream(
-	messages: AssistantMessage[] = [],
+	messages: Message[] = [],
 	streamModel: Model<"openai-completions"> = model(),
 ): Promise<AssistantMessage> {
 	return await streamOpenAICompletions(streamModel, { messages, tools: [readTool] }, { apiKey: "test" }).result();
@@ -187,6 +187,25 @@ describe("openai-completions reasoning_details streaming", () => {
 		const payload = getAssistantPayload(mockState.payloads[1]);
 		expect(payload?.reasoning_details).toEqual(expectedReasoningDetails);
 		expect(payload?.reasoning).toBeUndefined();
+	});
+
+	it("drops reasoning_details once a newer user message makes the turn historical (issue #235)", async () => {
+		mockState.chunkSets = [
+			[chunk({ reasoning_details: [reasoningDetail] }), toolCallChunk(), chunk({}, "tool_calls")],
+			[chunk({ content: "ok" }), chunk({}, "stop")],
+		];
+
+		const assistantMessage = await runOpenAICompletionsStream();
+
+		// A later user message means the tool-use loop that produced assistantMessage already
+		// resolved - the model no longer needs its reasoning_details blob to continue from it.
+		await runOpenAICompletionsStream([
+			assistantMessage,
+			{ role: "user", content: "thanks, now do something else", timestamp: Date.now() },
+		]);
+
+		const payload = getAssistantPayload(mockState.payloads[1]);
+		expect(payload?.reasoning_details).toBeUndefined();
 	});
 
 	it("drops reasoning_details when replaying a stored message into a different model", async () => {
