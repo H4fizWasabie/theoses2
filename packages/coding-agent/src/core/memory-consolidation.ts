@@ -14,6 +14,7 @@ import { EpisodicStore } from "./episodic-store.ts";
 import { EDGE_RELATIONS, type EdgeRelation, FileMemoryStore } from "./memory-store.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { SessionManager, type SessionMessageEntry } from "./session-manager.ts";
+import { parseStructuredJson } from "./structured-output.ts";
 
 /**
  * Issue #180: single-attempt, single-turn retry policy for the one structured-output call a
@@ -248,14 +249,13 @@ function isEdgeRelation(value: unknown): value is EdgeRelation {
 }
 
 /**
- * Tolerant JSON parsing for the model's structured-output response — same precedent as
- * compaction.ts's DISTILLATION_PROMPT/distillMemory path for the same model family: strip
- * markdown code fences if present, then validate shape field-by-field rather than trusting the
- * whole payload, since nothing here is schema-enforced at the API level.
+ * Structured-output parsing (fence stripping, near-miss repair, failure diagnostics) lives in
+ * structured-output.ts, shared with the distillation path. Shape is validated field-by-field
+ * rather than trusting the whole payload, since json_object mode is a nudge, not schema
+ * enforcement (see issue #250).
  */
 function parseConsolidationResponse(text: string): ParsedConsolidation {
-	const cleaned = text.trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
-	const parsed: unknown = JSON.parse(cleaned);
+	const parsed: unknown = parseStructuredJson(text, "Memory consolidation");
 	if (typeof parsed !== "object" || parsed === null) {
 		throw new Error("Consolidation response was not a JSON object");
 	}
@@ -499,6 +499,12 @@ async function runConsolidationPass(params: {
 	const streamOptions: SimpleStreamOptions = {
 		maxTokens: model.maxTokens,
 		toolChoice: "none",
+		// Issue #250: enforce JSON-object mode at the API level. Consolidation's output is a
+		// single JSON object; leaving it to sampling is what produced the intermittent
+		// "Expected ',' or '}' after property value" production failures (checkpoint stalls,
+		// whole-window re-runs). DeepSeek supports json_object mode without schema enforcement —
+		// a nudge, not a guarantee — hence the tolerant parse + diagnostics in parseConsolidationResponse.
+		responseFormat: { type: "json_object" },
 		sessionId: consolidationSessionAffinityId(channel, channelSessionId),
 	};
 
