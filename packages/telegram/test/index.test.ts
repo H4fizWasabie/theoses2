@@ -14,7 +14,9 @@ vi.mock("theoses-coding-agent", () => ({
 	configureHttpDispatcher: vi.fn(),
 	findExactModelReferenceMatch: vi.fn(),
 	getAgentDir: vi.fn(() => "/tmp/telegram-test-agent-dir"),
-	DefaultResourceLoader: vi.fn(),
+	DefaultResourceLoader: vi.fn(function DefaultResourceLoader() {
+		return { reload: vi.fn() };
+	}),
 }));
 
 import { createAgentSession, SessionManager } from "theoses-coding-agent";
