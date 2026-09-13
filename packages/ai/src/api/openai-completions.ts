@@ -1180,6 +1180,20 @@ export function convertMessages(
 
 	const transformedMessages = transformMessages(context.messages, model, (id) => normalizeToolCallId(id));
 
+	// reasoning_details (OpenRouter's serialized replay log of raw reasoning events - see
+	// parseOpenAIReasoningDetails below) is only needed to let the model continue reasoning
+	// mid tool-use loop. Once a newer user message starts, that loop is done and the detail
+	// blob is dead weight: it's routinely 10-20x the size of the reasoning text it duplicates,
+	// so replaying it on every subsequent request compounds into most of the request body on
+	// long sessions (see issue #235). Only the turn since the last user message keeps it.
+	let lastUserMessageIndex = -1;
+	for (let i = transformedMessages.length - 1; i >= 0; i--) {
+		if (transformedMessages[i].role === "user") {
+			lastUserMessageIndex = i;
+			break;
+		}
+	}
+
 	if (context.systemPrompt) {
 		const useDeveloperRole = model.reasoning && compat.supportsDeveloperRole;
 		const role = useDeveloperRole ? "developer" : "system";
@@ -1254,7 +1268,7 @@ export function convertMessages(
 			// OpenRouter session from one model to another mid-conversation). Only replay them
 			// back to the same provider/model that generated the message; otherwise fall through
 			// to plain text content below, which every provider accepts.
-			const sameOrigin = msg.provider === model.provider && msg.model === model.id;
+			const sameOrigin = msg.provider === model.provider && msg.model === model.id && i >= lastUserMessageIndex;
 			const signedReasoningDetails = sameOrigin
 				? thinkingBlocks
 						.map((block) => parseOpenAIReasoningDetails(block.thinkingSignature))
