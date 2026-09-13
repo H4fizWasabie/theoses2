@@ -385,6 +385,7 @@ describe("deferred tools", () => {
 			deferredToolsMode: "kimi",
 			sessionAffinityFormat: "openai",
 			supportsLongCacheRetention: false,
+			requestParallelToolCalls: false,
 		});
 
 		expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "tool", "tool", "system", "user"]);

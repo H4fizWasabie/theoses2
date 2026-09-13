@@ -1373,6 +1373,7 @@ describe("openai-completions tool_choice", () => {
 				sendSessionAffinityHeaders: false,
 				sessionAffinityFormat: "openai",
 				supportsLongCacheRetention: true,
+				requestParallelToolCalls: false,
 			},
 		);
 
