@@ -113,7 +113,7 @@ import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.ts";
 import { createMemoryToolDefinitions } from "./memory.ts";
 import { createOperationalNotesToolDefinition } from "./operational-notes.ts";
-import { createPowerShellTool, createPowerShellToolDefinition, type PowerShellToolOptions } from "./powershell.ts";
+import { createPowerShellToolDefinition, type PowerShellToolOptions } from "./powershell.ts";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
 import { createRecallTurnsToolDefinition } from "./recall-turns.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -178,114 +178,6 @@ export interface ToolsOptions {
 	generateImage?: { operations?: GenerateImageOperations };
 }
 
-export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
-	switch (toolName) {
-		case "read":
-			return createReadToolDefinition(cwd, options?.read);
-		case "bash":
-			return createBashToolDefinition(cwd, options?.bash);
-		case "powershell":
-			return createPowerShellToolDefinition(cwd, options?.powershell);
-		case "edit":
-			return createEditToolDefinition(cwd, options?.edit);
-		case "write":
-			return createWriteToolDefinition(cwd, options?.write);
-		case "grep":
-			return createGrepToolDefinition(cwd, options?.grep);
-		case "find":
-			return createFindToolDefinition(cwd, options?.find);
-		case "ls":
-			return createLsToolDefinition(cwd, options?.ls);
-		case "working_note":
-			return createWorkingNoteToolDefinition(
-				options?.workingNote ?? (() => {}),
-				options?.workingNoteClear ?? (() => {}),
-			);
-		case "note_operations":
-			return createOperationalNotesToolDefinition(options?.operationalNotes);
-		case "remember":
-		case "save_note": {
-			const definitions = createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore());
-			return definitions.find((definition) => definition.name === toolName)!;
-		}
-		case "recall_turns":
-			return createRecallTurnsToolDefinition();
-		case "convert_doc":
-			return createConvertDocToolDefinition(cwd, options?.convertDoc);
-		case "web_search":
-			return createWebSearchToolDefinition(options?.webSearch);
-		case "generate_image":
-			return createGenerateImageToolDefinition(options?.generateImage);
-		default:
-			throw new Error(`Unknown tool name: ${toolName}`);
-	}
-}
-
-export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptions): Tool {
-	switch (toolName) {
-		case "read":
-			return createReadTool(cwd, options?.read);
-		case "bash":
-			return createBashTool(cwd, options?.bash);
-		case "powershell":
-			return createPowerShellTool(cwd, options?.powershell);
-		case "edit":
-			return createEditTool(cwd, options?.edit);
-		case "write":
-			return createWriteTool(cwd, options?.write);
-		case "grep":
-			return createGrepTool(cwd, options?.grep);
-		case "find":
-			return createFindTool(cwd, options?.find);
-		case "ls":
-			return createLsTool(cwd, options?.ls);
-		case "working_note":
-			return wrapToolDefinition(
-				createWorkingNoteToolDefinition(
-					options?.workingNote ?? (() => {}),
-					options?.workingNoteClear ?? (() => {}),
-				),
-			);
-		case "note_operations":
-			return wrapToolDefinition(createOperationalNotesToolDefinition(options?.operationalNotes));
-		case "remember":
-		case "save_note": {
-			const definitions = createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore());
-			return wrapToolDefinition(definitions.find((definition) => definition.name === toolName)!);
-		}
-		case "recall_turns":
-			return wrapToolDefinition(createRecallTurnsToolDefinition());
-		case "convert_doc":
-			return wrapToolDefinition(createConvertDocToolDefinition(cwd, options?.convertDoc));
-		case "web_search":
-			return wrapToolDefinition(createWebSearchToolDefinition(options?.webSearch));
-		case "generate_image":
-			return wrapToolDefinition(createGenerateImageToolDefinition(options?.generateImage));
-		default:
-			throw new Error(`Unknown tool name: ${toolName}`);
-	}
-}
-
-export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
-	return [
-		createReadToolDefinition(cwd, options?.read),
-		createBashToolDefinition(cwd, options?.bash),
-		createEditToolDefinition(cwd, options?.edit),
-		createWriteToolDefinition(cwd, options?.write),
-		createConvertDocToolDefinition(cwd, options?.convertDoc),
-	];
-}
-
-export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
-	return [
-		createReadToolDefinition(cwd, options?.read),
-		createGrepToolDefinition(cwd, options?.grep),
-		createFindToolDefinition(cwd, options?.find),
-		createLsToolDefinition(cwd, options?.ls),
-		createConvertDocToolDefinition(cwd, options?.convertDoc),
-	];
-}
-
 export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): Record<ToolName, ToolDef> {
 	return {
 		read: createReadToolDefinition(cwd, options?.read),
@@ -328,27 +220,4 @@ export function createReadOnlyTools(cwd: string, options?: ToolsOptions): Tool[]
 		createLsTool(cwd, options?.ls),
 		wrapToolDefinition(createConvertDocToolDefinition(cwd, options?.convertDoc)),
 	];
-}
-
-export function createAllTools(cwd: string, options?: ToolsOptions): Record<ToolName, Tool> {
-	return {
-		read: createReadTool(cwd, options?.read),
-		bash: createBashTool(cwd, options?.bash),
-		powershell: createPowerShellTool(cwd, options?.powershell),
-		edit: createEditTool(cwd, options?.edit),
-		write: createWriteTool(cwd, options?.write),
-		grep: createGrepTool(cwd, options?.grep),
-		find: createFindTool(cwd, options?.find),
-		ls: createLsTool(cwd, options?.ls),
-		working_note: wrapToolDefinition(
-			createWorkingNoteToolDefinition(options?.workingNote ?? (() => {}), options?.workingNoteClear ?? (() => {})),
-		),
-		note_operations: wrapToolDefinition(createOperationalNotesToolDefinition(options?.operationalNotes)),
-		remember: wrapToolDefinition(createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[0]!),
-		save_note: wrapToolDefinition(createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore())[1]!),
-		recall_turns: wrapToolDefinition(createRecallTurnsToolDefinition()),
-		convert_doc: wrapToolDefinition(createConvertDocToolDefinition(cwd, options?.convertDoc)),
-		web_search: wrapToolDefinition(createWebSearchToolDefinition(options?.webSearch)),
-		generate_image: wrapToolDefinition(createGenerateImageToolDefinition(options?.generateImage)),
-	};
 }
