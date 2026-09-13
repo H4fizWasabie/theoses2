@@ -233,8 +233,10 @@ function toolCallSummaryLine(name: string, args: unknown): string {
 // A long-running turn can rack up dozens of tool calls (a multi-workspace batch has hit 45+) -
 // rendering every one as its own block makes the live status message grow without bound. Only the
 // most recent TOOL_CALL_VISIBLE_LIMIT get a full block; anything older collapses into one tally
-// line so the message stays a fixed, readable size regardless of how long the turn runs.
-const TOOL_CALL_VISIBLE_LIMIT = 12;
+// line so the message stays a fixed, readable size regardless of how long the turn runs. Kept low
+// (rather than e.g. 12) so Telegram's own message folds after a couple of rows instead of a wall
+// of a dozen collapsed-but-still-stacked tool call blocks.
+const TOOL_CALL_VISIBLE_LIMIT = 3;
 
 /** Tallies tool names into "bash ×26, edit ×8, write" (count omitted when it's 1). */
 function tallyToolNames(names: string[]): string {
