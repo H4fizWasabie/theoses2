@@ -25,9 +25,7 @@
 			"theoses-server/*": ["./packages/server/src/*"],
 			"typebox": ["./node_modules/typebox"],
 			"theoses-tui": ["./packages/tui/src/index.ts"],
-			"theoses-tui/*": ["./packages/tui/src/*"],
-			"theoses-agent-old": ["./packages/agent-old/src/index.ts"],
-			"theoses-agent-old/*": ["./packages/agent-old/src/*"]
+			"theoses-tui/*": ["./packages/tui/src/*"]
 		}
 	},
 	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/coding-agent/examples/**/*"],
