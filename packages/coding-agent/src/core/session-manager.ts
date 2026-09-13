@@ -1379,7 +1379,38 @@ export class SessionManager {
 			fromHook,
 		};
 		this._appendEntry(entry);
+		this._pruneHistoricalThinkingSignatures(firstKeptEntryId);
 		return entry.id;
+	}
+
+	/**
+	 * Once compaction moves an assistant message's turn behind the kept-context boundary, it will
+	 * never be replayed again (transformMessages already excludes historical thinkingSignature from
+	 * requests - see issue #235), so the same opaque replay blob sitting on disk is pure storage
+	 * bloat: it has been observed as 10-20x the size of the reasoning text it duplicates. Strip it
+	 * from the persisted file at the same cadence compaction already runs at, rather than letting it
+	 * accumulate for the life of the session.
+	 */
+	private _pruneHistoricalThinkingSignatures(beforeEntryId: string): void {
+		if (!this.persist) return;
+		const boundaryIndex = this.fileEntries.findIndex((e) => e.id === beforeEntryId);
+		if (boundaryIndex <= 0) return;
+		let changed = false;
+		for (let i = 0; i < boundaryIndex; i++) {
+			const entry = this.fileEntries[i];
+			if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+			const content = entry.message.content;
+			if (!Array.isArray(content)) continue;
+			for (const block of content) {
+				if (block.type === "thinking" && block.thinkingSignature) {
+					block.thinkingSignature = undefined;
+					changed = true;
+				}
+			}
+		}
+		if (changed) {
+			this._rewriteFile();
+		}
 	}
 
 	/** Append a custom entry (for extensions) as child of current leaf, then advance leaf. Returns entry id. */
