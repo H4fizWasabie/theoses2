@@ -816,6 +816,9 @@ function buildParams(
 		if (compat.zaiToolStream) {
 			(params as any).tool_stream = true;
 		}
+		if (compat.requestParallelToolCalls) {
+			params.parallel_tool_calls = true;
+		}
 	} else if (hasToolHistory(context.messages)) {
 		// Anthropic (via LiteLLM/proxy) requires tools param when conversation has tool_calls/tool_results
 		params.tools = [];
@@ -1676,6 +1679,12 @@ function detectCompat(model: Model<"openai-completions">): ResolvedOpenAIComplet
 			isNvidia ||
 			isAntLing
 		),
+		// The system prompt asks the model to batch independent tool calls into one turn, but
+		// that requires the backend to actually be willing to return more than one tool_calls
+		// entry per response. Chat Completions defaults this to true when omitted, but OpenRouter
+		// fans requests out across many differently-tuned upstream backends, some of which may
+		// default to emitting a single tool call per turn unless asked otherwise.
+		requestParallelToolCalls: isOpenRouter,
 	};
 }
 
@@ -1716,5 +1725,6 @@ function getCompat(model: Model<"openai-completions">): ResolvedOpenAICompletion
 		deferredToolsMode: model.compat.deferredToolsMode ?? detected.deferredToolsMode,
 		sessionAffinityFormat: model.compat.sessionAffinityFormat ?? detected.sessionAffinityFormat,
 		supportsLongCacheRetention: model.compat.supportsLongCacheRetention ?? detected.supportsLongCacheRetention,
+		requestParallelToolCalls: model.compat.requestParallelToolCalls ?? detected.requestParallelToolCalls,
 	};
 }
