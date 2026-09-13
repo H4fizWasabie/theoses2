@@ -362,6 +362,11 @@ async function sessionFor(
 			agentDir: getAgentDir(),
 			appendSystemPrompt: [TELEGRAM_RICH_FORMATTING_GUIDANCE],
 		});
+		// createAgentSession() only calls reload() on a DefaultResourceLoader it builds itself;
+		// since we pass our own instance in, we must reload it or extensionsResult never leaves
+		// its empty constructor default - every extension (skills, prompts, themes too) silently
+		// never loads for Telegram sessions with no error, since discovery never runs at all.
+		await resourceLoader.reload();
 		const { session } = await createAgentSession({ sessionManager, thinkingLevel: "high", resourceLoader });
 		// Telegram document uploads are stored as artifacts (see the `ctx.message.document` branch
 		// below) and need convert_doc enabled to ever be read. Guard against it already being in
