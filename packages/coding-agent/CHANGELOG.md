@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.0.46] - 2026-09-14
+
+- fix(memory): enforce JSON-object mode + tolerant structured-JSON parsing for memory consolidation and compaction distillation (#251, fixes #250). Added `StreamOptions.responseFormat` to theoses-ai (opt-in, openai-completions emits `response_format: json_object`); new shared `core/structured-output.ts` with fence-strip → trailing-comma/control-char repair → position+snippet diagnostics. Also regenerated the stale coding-agent npm-shrinkwrap so `check:shrinkwrap` passes on main.
+
 ## [1.0.45] - 2026-09-13
 
 ## [1.0.44] - 2026-09-13
