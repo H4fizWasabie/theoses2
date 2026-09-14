@@ -97,11 +97,20 @@ export function resetExplorerConcurrencyForTests(): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Resolves the explorer model from the live-hydrated OpenRouter catalog. Same cost-tier choice
- * as memory consolidation (see memory-consolidation.ts for the full provider-routing rationale:
- * fp8 quantization, ordered fallbacks, fail-strict `allow_fallbacks: false` — the "Baidu"/
- * "AkashML" slug lessons from issues #180/#190 all apply to this same model id). Kept as a
- * separate resolver rather than reusing `resolveConsolidationModel` so consolidation's
+ * Resolves the explorer model from the live-hydrated OpenRouter catalog. Same model id and
+ * fp8/fail-strict shape as memory consolidation (see memory-consolidation.ts), but a *different*
+ * provider chain: #254 pins OpenInference first specifically for its per-provider KV-cache hit
+ * rate, then Baseten (US) and GMI Cloud as fallbacks — do not copy consolidation's Baidu-first
+ * order here, the two were decided independently.
+ *
+ * Provider slugs verified against the live OpenRouter endpoints listing (same method as the
+ * "Baidu"/"AkashML" slug lessons from issues #180/#190: marketing labels on the pricing page
+ * don't always match the API's `provider_name`): "OpenInference", "BaseTen", "GMICloud" (no
+ * space). Note the endpoints listing exposes two identical "BaseTen" entries with no
+ * region-distinguishing field, so a "US"-specific slug can't be confirmed from the public API —
+ * pinning plain "BaseTen" covers both until OpenRouter exposes a region tag to disambiguate.
+ *
+ * Kept as a separate resolver rather than reusing `resolveConsolidationModel` so consolidation's
  * maxTokens/output-shape tuning (single JSON object) stays independent from the explorer's
  * agentic multi-turn shape.
  */
@@ -123,7 +132,7 @@ export function resolveExplorerModel(modelRuntime: ModelRuntime): Model<Api> {
 			...(model as Model<"openai-completions">).compat,
 			openRouterRouting: {
 				...(model as Model<"openai-completions">).compat?.openRouterRouting,
-				order: ["Baidu", "OpenInference", "DeepInfra", "StreamLake"],
+				order: ["OpenInference", "BaseTen", "GMICloud"],
 				quantizations: ["fp8"],
 				allow_fallbacks: false,
 			},
@@ -185,7 +194,8 @@ function enforceAnswerCap(answer: string, tier: ExplorerTier): string {
 
 function ensureBudgetFooter(answer: string, tier: ExplorerTier, turns: number, inputTokens: number): string {
 	// The explorer was told to emit its own footer; append the authoritative one only when it forgot.
-	if (answer.includes("turns]")) return answer;
+	// Footer shape is `~<K> in, <turns>/<max> turns` (no brackets) — match that, not a literal "turns]".
+	if (/~\d+K in, \d+\/\d+ turns\s*$/.test(answer.trimEnd())) return answer;
 	const kIn = Math.round(inputTokens / 1000);
 	return `${answer}\n~${kIn}K in, ${turns}/${TIER_CAPS[tier].maxTurns} turns`;
 }
