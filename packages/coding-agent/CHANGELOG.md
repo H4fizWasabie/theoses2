@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.49] - 2026-09-15
 
 - fix(explorer): pin OpenInference > BaseTen > GMICloud provider routing per #254's spec instead of consolidation's Baidu-first chain, and fix the budget-footer dedup check so complete answers don't get a duplicate footer line appended (#256, #257).
