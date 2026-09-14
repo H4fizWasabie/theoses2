@@ -32,6 +32,7 @@ Start with this file, choose the smallest route that matches the task, then open
 | Exact path coverage or audit evidence | [14 Coverage ledger](14-coverage-ledger.md) | [14 File inventory](14-file-inventory.md), [13 Source index](13-source-index.md) |
 | Risks, uncertainty, or unresolved design questions | [11 Risk register](11-risk-register.md) | [15 Open questions](15-open-questions.md), cited source paths |
 | Operations, release, CI, or deployment seams | [09 Operations](09-operations.md) | [10 Testing](10-testing.md), [16 Configuration index](16-configuration-index.md) |
+| TypeScript-to-Go rewrite planning or feature parity | [20 Go rewrite parity plan](20-go-rewrite-parity-plan.md) | [03 Architecture](03-architecture.md), [06 Data model](06-data-model.md), [07 Interfaces](07-interfaces.md), [17 Test and fixture index](17-test-index.md) |
 | How to continue or refresh this documentation | [18 Continuation note](18-continuation.md) | [14 Coverage ledger](14-coverage-ledger.md), changed source paths |
 
 ## Contents
@@ -55,6 +56,7 @@ Start with this file, choose the smallest route that matches the task, then open
 17. [Test and fixture index](17-test-index.md)
 18. [Continuation note](18-continuation.md)
 19. [AI and provider architecture](19-ai-provider-architecture.md)
+20. [TypeScript-to-Go rewrite parity plan](20-go-rewrite-parity-plan.md)
 
 ## Refresh provenance
 
