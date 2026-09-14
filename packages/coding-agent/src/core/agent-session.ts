@@ -68,6 +68,7 @@ import {
 	shouldCompactByTurns,
 } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS } from "./defaults.ts";
+import { createExploreToolDefinition } from "./explorer.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
@@ -2927,6 +2928,16 @@ export class AgentSession {
 					},
 				});
 
+		// Explorer sub-agent tool (issue #254). Merged into the base definitions here rather than
+		// exported through core/tools/index.ts: tools/index.ts already sits in an import cycle
+		// with core/extensions/types.ts, and explorer.ts needs both — re-exporting through the
+		// barrel made explorer.ts the third node of that cycle, and tsgo resolved the cyclic
+		// re-export to "name not found" at use sites. The direct merge keeps the cycle out.
+		(baseToolDefinitions as Record<string, ToolDefinition<any>>).explore = createExploreToolDefinition({
+			cwd: this._cwd,
+			modelRuntime: this._modelRuntime,
+		});
+
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
@@ -2966,6 +2977,7 @@ export class AgentSession {
 					"convert_doc",
 					"web_search",
 					"generate_image",
+					"explore",
 				];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({

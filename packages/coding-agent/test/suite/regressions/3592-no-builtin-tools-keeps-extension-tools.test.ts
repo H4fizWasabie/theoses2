@@ -83,6 +83,7 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 			"convert_doc",
 			"dynamic_tool",
 			"edit",
+			"explore",
 			"find",
 			"generate_image",
 			"grep",
