@@ -114,7 +114,7 @@ describe("explorer (issue #254)", () => {
 		expect(result.turnsUsed).toBe(2);
 		expect(result.answer).toContain("retry.ts:42");
 		// The explorer emitted its own footer; no duplicate appended.
-		expect(result.answer).toContain("~1K in, 2/8 turns");
+		expect(result.answer.match(/~\d+K in, \d+\/\d+ turns/g)).toHaveLength(1);
 		// Status updates streamed for the tool activity.
 		expect(statuses.some((status) => status.includes("ls"))).toBe(true);
 	});
