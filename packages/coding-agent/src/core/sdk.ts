@@ -33,7 +33,6 @@ import {
 	createReadOnlyTools,
 	createReadTool,
 	createWriteTool,
-	type ToolName,
 	withFileMutationQueue,
 } from "./tools/index.ts";
 
@@ -63,7 +62,7 @@ export interface CreateAgentSessionOptions {
 	 *
 	 * - "all": start with no tools enabled
 	 * - "builtin": disable the default built-in tools (read, bash, edit, write, working_note, note_operations, remember, save_note,
-	 *   convert_doc, web_search, generate_image) but keep extension/custom tools enabled
+	 *   convert_doc, web_search, generate_image, explore) but keep extension/custom tools enabled
 	 */
 	noTools?: "all" | "builtin";
 	/**
@@ -72,7 +71,7 @@ export interface CreateAgentSessionOptions {
 	 * When omitted, Theoses uses the `defaultTools` setting for the initial built-in
 	 * selection when configured. Otherwise it enables the default built-in tools
 	 * (read, bash, edit, write, working_note, note_operations, remember, save_note, convert_doc, web_search,
-	 * generate_image). Extension/custom tools remain enabled unless `noTools` changes that
+	 * generate_image, explore). Extension/custom tools remain enabled unless `noTools` changes that
 	 * default. When provided, only the listed tool names are enabled.
 	 *
 	 * WARNING (issue #189/#190): providing this doesn't just set the *initial* active set — it
@@ -322,7 +321,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
 	}
 
-	const defaultActiveToolNames: ToolName[] = [
+	// string[], not ToolName[]: `explore` is created in agent-session.ts (it needs ModelRuntime
+	// and would drag tools/index.ts into the extensions/types.ts import cycle), so it can't be
+	// in createAllToolDefinitions / the ToolName union — but it IS part of the default active
+	// set (#259). Before #259 this list omitted it, so every SDK-created session (Telegram
+	// channel, CLI one-shot/print mode, SDK consumers) started without the explorer.
+	const defaultActiveToolNames: string[] = [
 		"read",
 		"bash",
 		"edit",
@@ -335,6 +339,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		"convert_doc",
 		"web_search",
 		"generate_image",
+		// #259: matches agent-session.ts's internal default list. Without it, every SDK-created
+		// session (Telegram channel, CLI one-shot/print mode, SDK consumers) starts without the
+		// explorer sub-agent even though it is registered — the model sees no `explore` tool.
+		"explore",
 	];
 	const configuredDefaultToolNames = settingsManager.getDefaultTools();
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
