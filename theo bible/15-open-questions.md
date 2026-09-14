@@ -1,0 +1,29 @@
+# Open questions
+
+These are unresolved because the current source pass did not provide enough evidence. They are not implied implementation requirements.
+
+1. **Remote ownership:** Will `packages/server` receive a first-party service adapter for the coding-agent runtime, or is the server intentionally a library-only seam? The server README currently says applications supply `TheosesServerService` ([packages/server/README.md](../packages/server/README.md), “This package does not provide a standalone CLI or coding-agent service”).
+2. **Protocol compatibility:** What compatibility policy, if any, should replace the current experimental/no-guarantee position for protocol/client/server consumers? ([packages/protocol/README.md](../packages/protocol/README.md); [packages/server/README.md](../packages/server/README.md)).
+3. **Runtime matrix:** Is `node:sqlite` a hard Node-only requirement for episodic memory, and what is the supported behavior under Bun or older Node? ([packages/coding-agent/src/core/episodic-store.ts](../packages/coding-agent/src/core/episodic-store.ts), lines 60-83).
+4. **Memory semantics:** Are lexical semantic-memory matches plus one/two-hop graph traversal sufficient for intended recall, or is a richer index planned? Current implementation is deliberately deterministic ([packages/coding-agent/src/core/memory-store.ts](../packages/coding-agent/src/core/memory-store.ts), lines 122-152 and 291-339).
+5. **Consolidation boundary:** What operational guarantee should memory consolidation have across CLI, dashboard, and Telegram, given that callers schedule background work and the implementation uses checkpoints/cooldowns? The tracked caller set is source-indexed, but production scheduling policy remains a product/operations decision ([packages/dashboard/src/index.ts](../packages/dashboard/src/index.ts), lines 334-404; [packages/telegram/src/index.ts](../packages/telegram/src/index.ts), lines 721-742).
+6. **Provider contract:** Which provider/auth/catalog behaviors are guaranteed by `theoses-ai`, and which are compatibility-specific or experimental? Adapter source and focused deterministic provider tests are now read; guarantees still need reconciliation against deployment usage and credential-gated live cases.
+7. **Frontend contract:** Which dashboard behaviors are intended to be browser-only presentation versus server-owned behavior, and what browser compatibility matrix should be supported? The static asset source is indexed; live browser certification was not performed.
+8. **TUI contract:** What is the minimal supported terminal matrix for the implemented rendering/input invariants, especially native image addons, alternate-screen selection, mouse protocols, and Unicode width? The source and tests are indexed; live terminal certification was not performed.
+9. **Release procedure:** Which release path should become authoritative once workspace packages are registered on npm? The root release/build/publish scripts are source-indexed, but the header records that the public-package tag-push publication path is currently untested end to end ([scripts/release.mjs](../scripts/release.mjs), lines 1-24).
+10. **Coverage maintenance:** How should future generated/vendor/binary artifacts be classified when the tracked inventory changes? The current 62 exclusions are explicit and complete for revision `e66120ddf`; future revisions must recompute the ledger rather than inherit the old denominator.
+
+## AI/provider frontier
+
+- Which provider adapters are active in each deployed Theoses2 surface, and which are only package exports or compatibility support? Registration and adapter source are verified, but provider-specific callers and deployment configuration remain open ([packages/ai/src/providers/all.ts](../packages/ai/src/providers/all.ts), `builtinProviders`, lines 88-131; [19-ai-provider-architecture.md](19-ai-provider-architecture.md)).
+- Does production rely on the legacy `theoses-ai/compat` registry anywhere outside the coding-agent migration path? The compatibility module is reachable and marked deprecated in source, but repository-wide consumers have not yet been reconciled ([packages/ai/src/compat.ts](../packages/ai/src/compat.ts), lines 1-29 and 62-69).
+- Which dynamic providers publish model catalogs at runtime, what freshness policy do they use, and what cached catalog is safe to operate from while offline? The generic refresh transaction and provider source are verified; each provider's catalog policy, tests, and production usage are not ([packages/ai/src/models.ts](../packages/ai/src/models.ts), `refresh`, lines 386-446).
+- Does the Radius gateway remain the only deployed dynamic catalog source, and is its legacy OAuth-embedded catalog still needed? Its current source supports persisted and legacy restoration plus `/v1/config`, but deployment usage is not established ([packages/ai/src/providers/radius.ts](../packages/ai/src/providers/radius.ts), `refreshModels`, lines 34-77).
+
+## Coding-agent model boundary
+
+- The coding-agent composition path is now source-traced through `ModelRuntime`, `provider-composer`, and `RuntimeCredentials`; focused provider-specific tests and live deployment usage remain open ([packages/coding-agent/src/core/model-runtime.ts](../packages/coding-agent/src/core/model-runtime.ts), lines 111-778).
+
+## Task-boundary detection
+
+- The task-boundary detector writes descriptors and unrelated-task markers, but the current compaction implementation only logs the prospective reset. What evidence and acceptance threshold should authorize enabling the live reset behavior? ([packages/coding-agent/src/core/task-boundary-detector.ts](../packages/coding-agent/src/core/task-boundary-detector.ts), lines 1-29 and 204-238; [packages/coding-agent/src/core/compaction/compaction.ts](../packages/coding-agent/src/core/compaction/compaction.ts), task-boundary handling.)
