@@ -203,4 +203,30 @@ describe("defaultTools setting", () => {
 		expect(session.getActiveToolNames()).toEqual(["ls", "tool_search", "tool_call"]);
 		session.dispose();
 	});
+
+	// Issue #259: with no defaultTools configured, the SDK's built-in default active set must
+	// include `explore`, matching agent-session.ts's internal default list. Before this, every
+	// SDK-created session (Telegram channel, CLI one-shot/print mode) started without the
+	// explorer even though the tool was registered — the model simply never saw it.
+	it("includes explore in the built-in default active set when no defaultTools is configured", async () => {
+		const settingsManager = SettingsManager.inMemory({});
+		const resourceLoader = new DefaultResourceLoader({
+			cwd: tempDir,
+			agentDir,
+			settingsManager,
+		});
+		await resourceLoader.reload();
+
+		const { session } = await createAgentSession({
+			cwd: tempDir,
+			agentDir,
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			settingsManager,
+			sessionManager: SessionManager.inMemory(tempDir),
+			resourceLoader,
+		});
+
+		expect(session.getActiveToolNames()).toContain("explore");
+		session.dispose();
+	});
 });
