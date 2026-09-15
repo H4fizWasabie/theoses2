@@ -19,7 +19,7 @@
  */
 
 import { Agent, type AgentEvent, type AgentMessage } from "theoses-agent-core";
-import type { Api, Model } from "theoses-ai";
+import type { Api, Model, ModelsRequestTransforms, SimpleStreamOptions } from "theoses-ai";
 import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -208,6 +208,14 @@ export interface RunExplorerOptions {
 	signal?: AbortSignal;
 	/** Streaming status text (current activity), surfaced by the explore tool's onUpdate. */
 	onStatus?: (status: string) => void;
+	// Issue #260: provider hooks, same wiring the main session gives its Agent (sdk.ts).
+	// Without these the explorer's sub-agent traffic never emits before_provider_request /
+	// after_provider_response / before_provider_headers, so cost-watch can't see or route it.
+	onPayload?: SimpleStreamOptions["onPayload"];
+	onResponse?: SimpleStreamOptions["onResponse"];
+	// transformHeaders lives on ModelsSimpleStreamOptions (SimpleStreamOptions &
+	// ModelsRequestTransforms), not SimpleStreamOptions — streamSimple is the Models-level API.
+	transformHeaders?: ModelsRequestTransforms["transformHeaders"];
 }
 
 export async function runExplorer(options: RunExplorerOptions): Promise<ExplorerResult> {
@@ -249,7 +257,16 @@ async function runExplorerWithSlot(
 			tools: readOnlyToolDefinitions.map((definition) => wrapToolDefinition(definition)),
 		},
 		streamFn: (streamModel, context, streamOptions) =>
-			options.modelRuntime.streamSimple(streamModel, context, streamOptions),
+			options.modelRuntime.streamSimple(streamModel, context, {
+				...streamOptions,
+				// AgentLoopConfig doesn't carry transformHeaders (the loop spreads it into
+				// streamFn options via `...config`), so inject it here like sdk.ts's wrapper does.
+				transformHeaders: options.transformHeaders
+					? (headers) => options.transformHeaders?.(headers ?? {}) ?? headers ?? {}
+					: (streamOptions as ModelsRequestTransforms | undefined)?.transformHeaders,
+			}),
+		onPayload: options.onPayload,
+		onResponse: options.onResponse,
 		shouldStopAfterTurn: () => {
 			turns++;
 			if (turns >= caps.maxTurns || inputTokens >= caps.maxInputTokens) {
@@ -335,6 +352,11 @@ type ExploreInput = Static<typeof exploreSchema>;
 export interface ExploreToolDeps {
 	modelRuntime: ModelRuntime;
 	cwd: string;
+	// Issue #260: optional provider hooks wired by agent-session.ts to the extension runner
+	// (same events the main session emits), so cost-watch sees explorer traffic.
+	onPayload?: SimpleStreamOptions["onPayload"];
+	onResponse?: SimpleStreamOptions["onResponse"];
+	transformHeaders?: ModelsRequestTransforms["transformHeaders"];
 }
 
 export function createExploreToolDefinition(deps: ExploreToolDeps): ToolDefinition<typeof exploreSchema> {
@@ -359,6 +381,9 @@ export function createExploreToolDefinition(deps: ExploreToolDeps): ToolDefiniti
 				cwd: deps.cwd,
 				modelRuntime: deps.modelRuntime,
 				signal,
+				onPayload: deps.onPayload,
+				onResponse: deps.onResponse,
+				transformHeaders: deps.transformHeaders,
 				onStatus: (status) => onUpdate?.({ content: [{ type: "text", text: status }], details: undefined }),
 			});
 			const header = result.complete ? "" : "INCOMPLETE (explorer hit its budget) — consider a narrower re-spawn.\n";
