@@ -223,4 +223,73 @@ describe("explorer (issue #254)", () => {
 		expect(result.content[0]).toMatchObject({ type: "text" });
 		expect((result.content[0] as { text: string }).text).toContain("answer");
 	});
+
+	// Issue #260: the explorer's sub-agent previously bypassed the extension provider hooks
+	// (before_provider_request / after_provider_response / before_provider_headers), so cost-watch
+	// never saw explorer traffic. These tests pin the plumbing: hooks passed to runExplorer (or
+	// createExploreToolDefinition) must reach the streamSimple options the AI adapters read.
+	describe("provider hooks reach the sub-agent's stream calls (issue #260)", () => {
+		type CapturedOptions = Parameters<ModelRuntime["streamSimple"]>[2];
+
+		function createCapturingRuntime(script: ScriptStep): { runtime: ModelRuntime; captured: CapturedOptions[] } {
+			let turn = 0;
+			const captured: CapturedOptions[] = [];
+			const runtime = {
+				getModel: () => getModel("anthropic", "claude-sonnet-4-5")!,
+				streamSimple: (_model: unknown, _context: unknown, options: CapturedOptions) => {
+					turn++;
+					captured.push(options);
+					const message = script(turn);
+					const stream = new MockAssistantStream();
+					queueMicrotask(() => {
+						stream.push({ type: "start", partial: message });
+						stream.push({ type: "done", reason: message.stopReason, message });
+					});
+					return stream;
+				},
+			} as unknown as ModelRuntime;
+			return { runtime, captured };
+		}
+
+		it("forwards onPayload and onResponse to streamSimple options", async () => {
+			const { runtime, captured } = createCapturingRuntime(() => createAssistantMessage("done. ~1K in, 1/8 turns"));
+			const onPayload = (payload: unknown) => payload;
+			const onResponse = () => {};
+
+			await runExplorer({ question: "q", cwd: tempDir, modelRuntime: runtime, onPayload, onResponse });
+
+			expect(captured.length).toBeGreaterThan(0);
+			for (const options of captured) {
+				expect(options?.onPayload).toBe(onPayload);
+				expect(options?.onResponse).toBe(onResponse);
+			}
+		});
+
+		it("injects transformHeaders into streamSimple options, preserving fallback when absent", async () => {
+			const { runtime, captured } = createCapturingRuntime(() => createAssistantMessage("done. ~1K in, 1/8 turns"));
+			const transformHeaders = (headers: Record<string, string | null>) => ({ ...headers, "x-probe": "1" });
+
+			await runExplorer({ question: "q", cwd: tempDir, modelRuntime: runtime, transformHeaders });
+
+			expect(captured.length).toBeGreaterThan(0);
+			for (const options of captured) {
+				// The wrapper applies the hook and never returns undefined.
+				const applied = await options?.transformHeaders?.({});
+				expect(applied).toEqual({ "x-probe": "1" });
+			}
+		});
+
+		it("createExploreToolDefinition passes its deps hooks through to runExplorer", async () => {
+			const { runtime, captured } = createCapturingRuntime(() =>
+				createAssistantMessage("answer. ~1K in, 1/8 turns"),
+			);
+			const onPayload = (payload: unknown) => payload;
+			const definition = createExploreToolDefinition({ cwd: tempDir, modelRuntime: runtime, onPayload });
+
+			await definition.execute("id-260", { question: "where is X?" }, undefined, undefined, {} as never);
+
+			expect(captured.length).toBeGreaterThan(0);
+			expect(captured.every((options) => options?.onPayload === onPayload)).toBe(true);
+		});
+	});
 });

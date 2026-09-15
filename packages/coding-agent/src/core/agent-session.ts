@@ -2936,6 +2936,31 @@ export class AgentSession {
 		(baseToolDefinitions as Record<string, ToolDefinition<any>>).explore = createExploreToolDefinition({
 			cwd: this._cwd,
 			modelRuntime: this._modelRuntime,
+			// Issue #260: route the explorer's provider traffic through the same extension events the
+			// main session emits (sdk.ts's streamFn/onPayload/onResponse) so cost-watch can see and
+			// route explorer requests. The runner is read lazily inside each hook because this tool is
+			// built before the ExtensionRunner below is (re)created, and the runner is rebuilt on
+			// runtime rebuilds.
+			onPayload: async (payload) => {
+				const runner = this._extensionRunner;
+				return runner?.hasHandlers("before_provider_request") ? runner.emitBeforeProviderRequest(payload) : payload;
+			},
+			onResponse: async (response) => {
+				const runner = this._extensionRunner;
+				if (runner?.hasHandlers("after_provider_response")) {
+					await runner.emit({
+						type: "after_provider_response",
+						status: response.status,
+						headers: response.headers,
+					});
+				}
+			},
+			transformHeaders: async (requestHeaders) => {
+				const runner = this._extensionRunner;
+				return runner?.hasHandlers("before_provider_headers")
+					? runner.emitBeforeProviderHeaders(requestHeaders ?? {})
+					: (requestHeaders ?? {});
+			},
 		});
 
 		this._baseToolDefinitions = new Map(
