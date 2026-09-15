@@ -279,6 +279,33 @@ describe("explorer (issue #254)", () => {
 			}
 		});
 
+		// Issue #263: agent-session.ts's onPayload/onResponse/transformHeaders read their `model`
+		// argument to override ctx.model on the ExtensionRunner (see extensions-runner.test.ts), so
+		// the explorer's wrapper here must actually pass its resolved model through, not just the
+		// headers. Before this fix transformHeaders was only ever called with one argument.
+		it("passes the explorer's resolved model as transformHeaders' second argument", async () => {
+			const { runtime, captured } = createCapturingRuntime(() => createAssistantMessage("done. ~1K in, 1/8 turns"));
+			const seenModels: unknown[] = [];
+			const transformHeaders = (headers: Record<string, string | null>, model?: unknown) => {
+				seenModels.push(model);
+				return headers;
+			};
+
+			await runExplorer({ question: "q", cwd: tempDir, modelRuntime: runtime, transformHeaders });
+
+			expect(captured.length).toBeGreaterThan(0);
+			for (const options of captured) {
+				await options?.transformHeaders?.({});
+			}
+			// This fixture's getModel ignores the requested provider/id and always returns the
+			// same fake model (see createCapturingRuntime above) — the point here isn't which
+			// model it is, only that runExplorer's resolved model reaches transformHeaders at all.
+			expect(seenModels.length).toBeGreaterThan(0);
+			for (const model of seenModels) {
+				expect((model as { id?: string } | undefined)?.id).toBe("claude-sonnet-4-5");
+			}
+		});
+
 		it("createExploreToolDefinition passes its deps hooks through to runExplorer", async () => {
 			const { runtime, captured } = createCapturingRuntime(() =>
 				createAssistantMessage("answer. ~1K in, 1/8 turns"),

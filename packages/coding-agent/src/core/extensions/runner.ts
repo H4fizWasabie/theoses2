@@ -13,6 +13,7 @@ import type { ScopedModel } from "../model-resolver.ts";
 import type { SessionManager } from "../session-manager.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
 import type {
+	AfterProviderResponseEvent,
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
 	BeforeProviderHeadersEvent,
@@ -669,8 +670,14 @@ export class ExtensionRunner {
 	/**
 	 * Create an ExtensionContext for use in event handlers and tool execution.
 	 * Context values are resolved at call time, so changes via bindCore/bindUI are reflected.
+	 *
+	 * `modelOverride`: `ctx.model` normally reports the session's own model (via `getModel`),
+	 * which is wrong for provider-hook events raised on behalf of a sub-agent running a
+	 * different model (e.g. the explorer, issue #263) — the adapter that invokes onPayload/
+	 * onResponse always knows the actual request's model, so provider-hook emitters pass it
+	 * here to shadow the getter for that one dispatch.
 	 */
-	createContext(): ExtensionContext {
+	createContext(modelOverride?: Model<any>): ExtensionContext {
 		const runner = this;
 		const getModel = this.getModel;
 		const getScopedModels = this.getScopedModels;
@@ -701,7 +708,7 @@ export class ExtensionRunner {
 			},
 			get model() {
 				runner.assertActive();
-				return getModel();
+				return modelOverride ?? getModel();
 			},
 			get scopedModels() {
 				runner.assertActive();
@@ -1013,8 +1020,8 @@ export class ExtensionRunner {
 		return currentMessages;
 	}
 
-	async emitBeforeProviderRequest(payload: unknown): Promise<unknown> {
-		const ctx = this.createContext();
+	async emitBeforeProviderRequest(payload: unknown, model?: Model<any>): Promise<unknown> {
+		const ctx = this.createContext(model);
 		let currentPayload = payload;
 
 		for (const ext of this.extensions) {
@@ -1047,8 +1054,8 @@ export class ExtensionRunner {
 		return currentPayload;
 	}
 
-	async emitBeforeProviderHeaders(headers: ProviderHeaders): Promise<ProviderHeaders> {
-		const ctx = this.createContext();
+	async emitBeforeProviderHeaders(headers: ProviderHeaders, model?: Model<any>): Promise<ProviderHeaders> {
+		const ctx = this.createContext(model);
 
 		for (const ext of this.extensions) {
 			const handlers = ext.handlers.get("before_provider_headers");
@@ -1076,6 +1083,43 @@ export class ExtensionRunner {
 		}
 
 		return headers;
+	}
+
+	/**
+	 * Dedicated emitter (rather than the generic `emit`) so callers on behalf of a sub-agent
+	 * running a different model (issue #263) can pass it through to `createContext` — the
+	 * generic `emit` has no way to override `ctx.model` for a single dispatch.
+	 */
+	async emitAfterProviderResponse(
+		response: { status: number; headers: Record<string, string> },
+		model?: Model<any>,
+	): Promise<void> {
+		const ctx = this.createContext(model);
+
+		for (const ext of this.extensions) {
+			const handlers = ext.handlers.get("after_provider_response");
+			if (!handlers || handlers.length === 0) continue;
+
+			for (const handler of handlers) {
+				try {
+					const event: AfterProviderResponseEvent = {
+						type: "after_provider_response",
+						status: response.status,
+						headers: response.headers,
+					};
+					await handler(event, ctx);
+				} catch (err) {
+					const message = err instanceof Error ? err.message : String(err);
+					const stack = err instanceof Error ? err.stack : undefined;
+					this.emitError({
+						extensionPath: ext.path,
+						event: "after_provider_response",
+						error: message,
+						stack,
+					});
+				}
+			}
+		}
 	}
 
 	async emitBeforeAgentStart(

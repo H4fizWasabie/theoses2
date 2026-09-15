@@ -1035,4 +1035,63 @@ describe("ExtensionRunner", () => {
 			expect(errors[0].error).toContain("header handler boom");
 		});
 	});
+
+	// Issue #263: ctx.model previously always came from the session-level getModel(), even for
+	// provider-hook events raised on behalf of a sub-agent running a different model (e.g. the
+	// explorer). Extensions that branch on ctx.model (cost-watch's provider-order lookup) would
+	// silently see the wrong model and never observe the sub-agent's real traffic. These tests
+	// pin that emitBeforeProviderRequest/emitBeforeProviderHeaders let a caller override ctx.model
+	// for one dispatch, without disturbing the default (session model) behavior other callers rely on.
+	describe("provider hook model override (issue #263)", () => {
+		it("emitBeforeProviderRequest exposes the passed-in model on ctx, not the session model", async () => {
+			const extCode = `
+				export default function(pi) {
+					pi.on("before_provider_request", (event, ctx) => {
+						return { ...event.payload, observedModelId: ctx.model?.id };
+					});
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "model-override.ts"), extCode);
+
+			const result = await discoverAndLoadExtensions([], tempDir, tempDir);
+			const runner = new ExtensionRunner(result.extensions, result.runtime, tempDir, sessionManager, modelRegistry);
+			runner.bindCore(extensionActions, {
+				...extensionContextActions,
+				getModel: () => ({ id: "session-model", provider: "anthropic" }) as never,
+			});
+
+			const explorerModel = { id: "deepseek/deepseek-v4-flash-0731", provider: "openrouter" } as never;
+			const result1 = (await runner.emitBeforeProviderRequest({}, explorerModel)) as { observedModelId: string };
+			expect(result1.observedModelId).toBe("deepseek/deepseek-v4-flash-0731");
+
+			// No override passed: falls back to the session model, as every other caller expects.
+			const result2 = (await runner.emitBeforeProviderRequest({})) as { observedModelId: string };
+			expect(result2.observedModelId).toBe("session-model");
+		});
+
+		it("emitBeforeProviderHeaders exposes the passed-in model on ctx, not the session model", async () => {
+			const extCode = `
+				export default function(pi) {
+					pi.on("before_provider_headers", (event, ctx) => {
+						event.headers["X-Model-Seen"] = ctx.model?.id ?? "none";
+					});
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "headers-model-override.ts"), extCode);
+
+			const result = await discoverAndLoadExtensions([], tempDir, tempDir);
+			const runner = new ExtensionRunner(result.extensions, result.runtime, tempDir, sessionManager, modelRegistry);
+			runner.bindCore(extensionActions, {
+				...extensionContextActions,
+				getModel: () => ({ id: "session-model", provider: "anthropic" }) as never,
+			});
+
+			const explorerModel = { id: "deepseek/deepseek-v4-flash-0731", provider: "openrouter" } as never;
+			const headers = await runner.emitBeforeProviderHeaders({}, explorerModel);
+			expect(headers["X-Model-Seen"]).toBe("deepseek/deepseek-v4-flash-0731");
+
+			const headersNoOverride = await runner.emitBeforeProviderHeaders({});
+			expect(headersNoOverride["X-Model-Seen"]).toBe("session-model");
+		});
+	});
 });

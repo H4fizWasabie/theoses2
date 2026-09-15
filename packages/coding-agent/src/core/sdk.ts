@@ -417,30 +417,31 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				websocketConnectTimeoutMs,
 				maxRetries: options?.maxRetries ?? providerRetrySettings.maxRetries,
 				maxRetryDelayMs: options?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
+				// Issue #263: pass `model` (this streamFn's own closure param) through so `ctx.model`
+				// reflects the request actually in flight rather than ExtensionRunner's session-level
+				// getModel(). Harmless no-op today since this Agent only ever runs the session's one
+				// model, but leaving it as session-level here while agent-session.ts's explorer hooks
+				// (which DO need this) pass the real model would be an inconsistent, easy-to-miss trap.
 				transformHeaders: async (requestHeaders) => {
 					return headerRunner?.hasHandlers("before_provider_headers")
-						? headerRunner.emitBeforeProviderHeaders(requestHeaders ?? {})
+						? headerRunner.emitBeforeProviderHeaders(requestHeaders ?? {}, model)
 						: (requestHeaders ?? {});
 				},
 			});
 		},
-		onPayload: async (payload, _model) => {
+		onPayload: async (payload, model) => {
 			const runner = extensionRunnerRef.current;
 			if (!runner?.hasHandlers("before_provider_request")) {
 				return payload;
 			}
-			return runner.emitBeforeProviderRequest(payload);
+			return runner.emitBeforeProviderRequest(payload, model);
 		},
-		onResponse: async (response, _model) => {
+		onResponse: async (response, model) => {
 			const runner = extensionRunnerRef.current;
 			if (!runner?.hasHandlers("after_provider_response")) {
 				return;
 			}
-			await runner.emit({
-				type: "after_provider_response",
-				status: response.status,
-				headers: response.headers,
-			});
+			await runner.emitAfterProviderResponse({ status: response.status, headers: response.headers }, model);
 		},
 		sessionId: sessionManager.getSessionId(),
 		transformContext: async (messages) => {

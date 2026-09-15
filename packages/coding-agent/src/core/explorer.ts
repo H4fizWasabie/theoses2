@@ -19,7 +19,7 @@
  */
 
 import { Agent, type AgentEvent, type AgentMessage } from "theoses-agent-core";
-import type { Api, Model, ModelsRequestTransforms, SimpleStreamOptions } from "theoses-ai";
+import type { Api, Model, ModelsRequestTransforms, ProviderHeaders, SimpleStreamOptions } from "theoses-ai";
 import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -215,7 +215,13 @@ export interface RunExplorerOptions {
 	onResponse?: SimpleStreamOptions["onResponse"];
 	// transformHeaders lives on ModelsSimpleStreamOptions (SimpleStreamOptions &
 	// ModelsRequestTransforms), not SimpleStreamOptions — streamSimple is the Models-level API.
-	transformHeaders?: ModelsRequestTransforms["transformHeaders"];
+	// Issue #263: unlike onPayload/onResponse, theoses-ai's own transformHeaders type carries no
+	// `model` parameter (the adapter never had a reason to pass one). Since the explorer's
+	// resolved model is known here regardless, this field uses a locally-widened signature (not
+	// ModelsRequestTransforms["transformHeaders"]) so callers can still get it — runExplorerWithSlot
+	// passes it explicitly when invoking this callback, then satisfies the library's 1-arg type
+	// itself when handing the wrapped function to streamSimple.
+	transformHeaders?: (headers: ProviderHeaders, model?: Model<Api>) => ProviderHeaders | Promise<ProviderHeaders>;
 }
 
 export async function runExplorer(options: RunExplorerOptions): Promise<ExplorerResult> {
@@ -261,8 +267,10 @@ async function runExplorerWithSlot(
 				...streamOptions,
 				// AgentLoopConfig doesn't carry transformHeaders (the loop spreads it into
 				// streamFn options via `...config`), so inject it here like sdk.ts's wrapper does.
+				// `model` (this function's own closure variable, the explorer's resolved model) is
+				// passed through — see the field's doc comment on RunExplorerOptions.
 				transformHeaders: options.transformHeaders
-					? (headers) => options.transformHeaders?.(headers ?? {}) ?? headers ?? {}
+					? (headers) => options.transformHeaders?.(headers ?? {}, model) ?? headers ?? {}
 					: (streamOptions as ModelsRequestTransforms | undefined)?.transformHeaders,
 			}),
 		onPayload: options.onPayload,
@@ -356,7 +364,8 @@ export interface ExploreToolDeps {
 	// (same events the main session emits), so cost-watch sees explorer traffic.
 	onPayload?: SimpleStreamOptions["onPayload"];
 	onResponse?: SimpleStreamOptions["onResponse"];
-	transformHeaders?: ModelsRequestTransforms["transformHeaders"];
+	// Issue #263: see RunExplorerOptions.transformHeaders — locally-widened to carry `model`.
+	transformHeaders?: (headers: ProviderHeaders, model?: Model<Api>) => ProviderHeaders | Promise<ProviderHeaders>;
 }
 
 export function createExploreToolDefinition(deps: ExploreToolDeps): ToolDefinition<typeof exploreSchema> {

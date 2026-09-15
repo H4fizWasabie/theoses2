@@ -2941,24 +2941,29 @@ export class AgentSession {
 			// route explorer requests. The runner is read lazily inside each hook because this tool is
 			// built before the ExtensionRunner below is (re)created, and the runner is rebuilt on
 			// runtime rebuilds.
-			onPayload: async (payload) => {
+			//
+			// Issue #263: pass the sub-agent's actual `model` (the adapter always knows it — see
+			// openai-completions.ts's `onPayload?.(params, model)`) into the emitters so `ctx.model`
+			// reflects the explorer's real model instead of `ExtensionRunner`'s session-level
+			// `getModel()`. Before this, cost-watch's handler fired but always saw the *main*
+			// session's model — the explorer's traffic was silently attributed to the wrong model,
+			// never visible under its own id and never getting its own provider-order lookup.
+			onPayload: async (payload, model) => {
 				const runner = this._extensionRunner;
-				return runner?.hasHandlers("before_provider_request") ? runner.emitBeforeProviderRequest(payload) : payload;
+				return runner?.hasHandlers("before_provider_request")
+					? runner.emitBeforeProviderRequest(payload, model)
+					: payload;
 			},
-			onResponse: async (response) => {
+			onResponse: async (response, model) => {
 				const runner = this._extensionRunner;
 				if (runner?.hasHandlers("after_provider_response")) {
-					await runner.emit({
-						type: "after_provider_response",
-						status: response.status,
-						headers: response.headers,
-					});
+					await runner.emitAfterProviderResponse({ status: response.status, headers: response.headers }, model);
 				}
 			},
-			transformHeaders: async (requestHeaders) => {
+			transformHeaders: async (requestHeaders, model) => {
 				const runner = this._extensionRunner;
 				return runner?.hasHandlers("before_provider_headers")
-					? runner.emitBeforeProviderHeaders(requestHeaders ?? {})
+					? runner.emitBeforeProviderHeaders(requestHeaders ?? {}, model)
 					: (requestHeaders ?? {});
 			},
 		});
