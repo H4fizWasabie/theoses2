@@ -1,6 +1,9 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.50] - 2026-09-15
+
+- fix(sdk): include `explore` in the SDK default active tool set so SDK-built sessions get the explorer sub-agent by default (#259).
+- fix(explorer): route the sub-agent's provider calls through the extension hooks (`before_provider_request` / `after_provider_response` / `before_provider_headers`) so cost-watch sees explorer traffic and its routing applies to it (#260).
 
 ## [1.0.49] - 2026-09-15
 
