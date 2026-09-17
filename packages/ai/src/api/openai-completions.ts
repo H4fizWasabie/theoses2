@@ -38,6 +38,20 @@ import type {
 } from "../types.ts";
 import { formatProviderError, normalizeProviderError } from "../utils/error-body.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
+
+// Env override lets a long-running headless process (e.g. the Telegram bot, which has no
+// UI to notice or cancel a hang) raise the cap itself by editing its own env file and
+// restarting, without a code change. See StreamOptions.maxStreamDurationMs for why this
+// exists: undici's idle timeout never fires against a stream that keeps trickling bytes
+// without ever finishing (e.g. a provider stuck in a degenerate generation loop).
+const MIN_STREAM_DURATION_MS = 10_000;
+const MAX_STREAM_DURATION_MS = 300_000;
+const DEFAULT_STREAM_DURATION_MS = (() => {
+	const raw = Number(process.env.THEOSES_MAX_STREAM_DURATION_MS);
+	if (!Number.isFinite(raw) || raw <= 0) return 60_000;
+	return Math.min(Math.max(raw, MIN_STREAM_DURATION_MS), MAX_STREAM_DURATION_MS);
+})();
+
 import { shortHash } from "../utils/hash.ts";
 import { headersToRecord } from "../utils/headers.ts";
 import { parseCompleteJson, parseStreamingJson } from "../utils/json-parse.ts";
@@ -304,6 +318,9 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 			timestamp: Date.now(),
 		};
 
+		const maxStreamDurationMs = options?.maxStreamDurationMs ?? DEFAULT_STREAM_DURATION_MS;
+		const streamDurationSignal = AbortSignal.timeout(maxStreamDurationMs);
+
 		try {
 			const apiKey = getClientApiKey(model.provider, options?.apiKey, options?.headers);
 			const compat = getCompat(model);
@@ -319,8 +336,11 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 			if (nextParams !== undefined) {
 				params = nextParams as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
 			}
+			const combinedSignal = options?.signal
+				? AbortSignal.any([options.signal, streamDurationSignal])
+				: streamDurationSignal;
 			const requestOptions = {
-				...(options?.signal ? { signal: options.signal } : {}),
+				signal: combinedSignal,
 				...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
 				maxRetries: 0,
 			};
@@ -679,14 +699,21 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 				delete (block as { streamIndex?: number }).streamIndex;
 			}
 			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = formatProviderError(normalizeProviderError(error));
-			// Some providers via OpenRouter give additional information in this field.
-			// normalizeProviderError already stringifies the parsed body (error.error)
-			// into errorMessage, so only append the raw metadata when it is not already
-			// present to avoid double-printing it.
-			const rawMetadata = (error as any)?.error?.metadata?.raw;
-			if (rawMetadata && !output.errorMessage.includes(String(rawMetadata))) {
-				output.errorMessage += `\n${rawMetadata}`;
+			if (!options?.signal?.aborted && streamDurationSignal.aborted) {
+				output.errorMessage =
+					`Stream exceeded the ${maxStreamDurationMs / 1000}s max duration (provider kept sending data without ` +
+					`finishing the response). Retry, or raise THEOSES_MAX_STREAM_DURATION_MS ` +
+					`(up to ${MAX_STREAM_DURATION_MS / 1000}s) if this source is just slow.`;
+			} else {
+				output.errorMessage = formatProviderError(normalizeProviderError(error));
+				// Some providers via OpenRouter give additional information in this field.
+				// normalizeProviderError already stringifies the parsed body (error.error)
+				// into errorMessage, so only append the raw metadata when it is not already
+				// present to avoid double-printing it.
+				const rawMetadata = (error as any)?.error?.metadata?.raw;
+				if (rawMetadata && !output.errorMessage.includes(String(rawMetadata))) {
+					output.errorMessage += `\n${rawMetadata}`;
+				}
 			}
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 			stream.end();

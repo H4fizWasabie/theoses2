@@ -2,8 +2,21 @@ import type { TextContent } from "theoses-ai";
 import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";
 
+const DEFAULT_TIMEOUT_SECONDS = 60;
+const MIN_TIMEOUT_SECONDS = 10;
+const MAX_TIMEOUT_SECONDS = 300;
+
 const webSearchSchema = Type.Object({
 	query: Type.String({ description: "The web search query" }),
+	timeout_seconds: Type.Optional(
+		Type.Number({
+			description:
+				`Abort the search if it hasn't responded within this many seconds (default ${DEFAULT_TIMEOUT_SECONDS}, ` +
+				`min ${MIN_TIMEOUT_SECONDS}, max ${MAX_TIMEOUT_SECONDS}). Raise it if a previous call timed out on a slow source.`,
+			minimum: MIN_TIMEOUT_SECONDS,
+			maximum: MAX_TIMEOUT_SECONDS,
+		}),
+	),
 });
 
 export type WebSearchToolInput = Static<typeof webSearchSchema>;
@@ -81,13 +94,27 @@ export function createWebSearchToolDefinition(options?: {
 		parameters: webSearchSchema,
 		execute: async (
 			_id,
-			{ query }: WebSearchToolInput,
+			{ query, timeout_seconds }: WebSearchToolInput,
 			signal,
 		): Promise<{ content: TextContent[]; details: undefined }> => {
 			if (apiKeys.length === 0) {
 				throw new Error("web_search requires TAVILY_API_KEY (and optionally TAVILY_API_KEY_2) to be set");
 			}
-			const response = await operations.search(query, signal);
+			const timeoutMs = (timeout_seconds ?? DEFAULT_TIMEOUT_SECONDS) * 1000;
+			const timeoutSignal = AbortSignal.timeout(timeoutMs);
+			const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+			let response: TavilyResponse;
+			try {
+				response = await operations.search(query, combinedSignal);
+			} catch (error) {
+				if (timeoutSignal.aborted) {
+					throw new Error(
+						`web_search timed out after ${timeout_seconds ?? DEFAULT_TIMEOUT_SECONDS}s. ` +
+							`Retry with a higher timeout_seconds (up to ${MAX_TIMEOUT_SECONDS}) if the source is just slow.`,
+					);
+				}
+				throw error;
+			}
 			return { content: [{ type: "text", text: formatResults(response) }], details: undefined };
 		},
 	};
