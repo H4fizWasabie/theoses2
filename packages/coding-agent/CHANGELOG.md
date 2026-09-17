@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.52] - 2026-09-17
 
 - fix(tools): add a `timeout_seconds` parameter to `web_search` (default 60s, min 10s, max 300s) — it previously had no timeout at all, so a stuck Tavily request could hang the turn indefinitely. #265
