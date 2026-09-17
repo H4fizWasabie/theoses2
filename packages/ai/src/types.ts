@@ -215,6 +215,15 @@ export interface StreamOptions extends ProviderRequestOptions<Model<Api>> {
 	 */
 	websocketConnectTimeoutMs?: number;
 	/**
+	 * Maximum wall-clock time in milliseconds to spend reading a streaming response body,
+	 * regardless of activity. This is distinct from an idle timeout: a provider that keeps
+	 * trickling bytes without ever completing (e.g. stuck in a generation loop) never goes
+	 * idle, so an idle-only timeout never fires. Providers that support this should abort the
+	 * stream once this many milliseconds have elapsed since the request started, even if bytes
+	 * are still arriving. Only honored by adapters that document support for it.
+	 */
+	maxStreamDurationMs?: number;
+	/**
 	 * Optional metadata to include in API requests.
 	 * Providers extract the fields they understand and ignore the rest.
 	 * For example, Anthropic uses `user_id` for abuse tracking and rate limiting.
