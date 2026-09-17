@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix(tools): add a `timeout_seconds` parameter to `web_search` (default 60s, min 10s, max 300s) — it previously had no timeout at all, so a stuck Tavily request could hang the turn indefinitely. #265
+
 ## [1.0.51] - 2026-09-15
 
 - fix(extensions): thread the sub-agent's actual model through the provider hooks (`before_provider_request` / `before_provider_headers`, new `emitAfterProviderResponse`) so `ctx.model` reflects the in-flight request instead of always reporting the session's own model. #262's explorer wiring fired correctly but was silently attributed to the wrong model — cost-watch never observed explorer traffic under its own model id (#263).

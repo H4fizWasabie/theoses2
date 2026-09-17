@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix(ai): cap max stream duration in the openai-completions streaming loop so a provider that keeps trickling bytes without ever finishing gets aborted instead of hanging indefinitely. The existing HTTP idle timeout only fires on inactivity and never trips against a stream that stays "active" but never completes. Configurable via `THEOSES_MAX_STREAM_DURATION_MS` (default 60s, min 10s, max 300s). #265
+
 ## [1.0.51] - 2026-09-15
 
 ## [1.0.49] - 2026-09-15
