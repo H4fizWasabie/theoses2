@@ -35,7 +35,7 @@
 
 import { type Api, contentText, type Model, retryAssistantCall } from "theoses-ai";
 import type { Context, SimpleStreamOptions } from "theoses-ai/compat";
-import { askJevNoul } from "./jev-client.ts";
+import { askJevNouls } from "./jev-client.ts";
 import { resolveConsolidationModel } from "./memory-consolidation.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { CustomEntry, SessionEntry, SessionManager } from "./session-manager.ts";
@@ -94,16 +94,55 @@ const JEV_RELATED_THRESHOLD = 0.6;
  */
 const JEV_AMBIGUOUS_BAND = 0.1;
 
+/** Independent Noul probabilities Jev returns for one message; combined in code, never by Jev. */
+export interface JevRelatedSignals {
+	/** The message continues, extends, or asks about the work in the rolling task descriptor. */
+	continuesTask: number;
+	/** The message reacts to the assistant's last reply (only asked when there is a reply). */
+	reactsToReply?: number;
+	/** The message explicitly moves to a different subject ("lets discuss something else"). */
+	topicSwitch: number;
+}
+
+/** An explicit topic-switch signal at/above this vetoes "related", whatever the other signals say. */
+export const JEV_TOPIC_SWITCH_VETO = 0.6;
+
 /**
- * Asks Jev whether `newUserMessage` still relates to `currentDescriptor`. Returns the raw noul
- * probability (0 = unrelated, 1 = related), or undefined on any failure — same "write nothing,
- * retried naturally next turn" contract the rest of this module already uses.
+ * Folds the atomic signals into one related-probability so the existing threshold, escalation band
+ * and logs keep their meaning. TypeSafe's guidance is to ask narrow questions and let code decide
+ * how to weigh them: a message is "related" if it either continues the task or reacts to the last
+ * reply (a terse "Omg, so youre claude?" only satisfies the latter), unless it explicitly announces
+ * a new subject, which vetoes both.
+ */
+export function combineRelatedSignals(signals: JevRelatedSignals): number {
+	if (signals.topicSwitch >= JEV_TOPIC_SWITCH_VETO) return 1 - signals.topicSwitch;
+	return Math.max(signals.continuesTask, signals.reactsToReply ?? 0);
+}
+
+const JEV_CONTINUES_TASK_QUESTION =
+	"Does `new_message` continue, extend, or ask about the work described in `current_task` " +
+	"(a next step, sub-step, follow-up, clarification, or status check on it)?";
+const JEV_REACTS_TO_REPLY_QUESTION =
+	"Does `new_message` respond to `previous_reply`: an answer, approval, objection, reaction, or " +
+	"follow-up question about what the assistant just said?";
+const JEV_TOPIC_SWITCH_QUESTION =
+	"Does `new_message` explicitly move on to a different subject than the one being discussed " +
+	'(for example "lets discuss something else", "next question", "on to the next task"), rather ' +
+	"than continuing or reacting to it?";
+
+/**
+ * Asks Jev the atomic questions about whether `newUserMessage` still belongs to
+ * `currentDescriptor`, in one request. Returns the raw signals, or undefined on any failure — same
+ * "write nothing, retried naturally next turn" contract the rest of this module already uses.
+ * `previous_reply` is what the assistant last said: without it a terse follow-up ("go", "check")
+ * has nothing to be related to and scores as a topic change (seen live: "Check" scored 0.32-0.78
+ * within one task).
  */
 async function callJevRelated(
 	currentDescriptor: string,
 	newUserMessage: string,
 	previousReply: string,
-): Promise<number | undefined> {
+): Promise<JevRelatedSignals | undefined> {
 	const state: Record<string, string> = {
 		current_task: currentDescriptor || "(none tracked yet)",
 		new_message: newUserMessage,
@@ -112,7 +151,19 @@ async function callJevRelated(
 	if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
 		console.error("TASK_BOUNDARY_JEV_REQUEST", JSON.stringify(state));
 	}
-	return askJevNoul(state, JEV_RELATED_INSTRUCTIONS);
+	if (previousReply) {
+		const answers = await askJevNouls(state, {
+			continuesTask: JEV_CONTINUES_TASK_QUESTION,
+			reactsToReply: JEV_REACTS_TO_REPLY_QUESTION,
+			topicSwitch: JEV_TOPIC_SWITCH_QUESTION,
+		});
+		return answers;
+	}
+	const answers = await askJevNouls(state, {
+		continuesTask: JEV_CONTINUES_TASK_QUESTION,
+		topicSwitch: JEV_TOPIC_SWITCH_QUESTION,
+	});
+	return answers;
 }
 
 /** A message this short ("go", "check", "prod shadow") can only be a reaction to the assistant's last
@@ -128,13 +179,6 @@ export function isTerseFollowUp(text: string, previousReply: string): boolean {
 	const words = text.trim().split(/\s+/).filter(Boolean);
 	return words.length > 0 && words.length <= TERSE_FOLLOW_UP_MAX_WORDS;
 }
-
-/** `previous_reply` is what the assistant last said. Without it a terse follow-up ("go", "check",
- * "is it done?") has nothing to be related to and scores as a topic change (seen live: "Check"
- * scored 0.32-0.78 within one task). */
-const JEV_RELATED_INSTRUCTIONS =
-	"Does `new_message` continue or relate to `current_task`? `previous_reply`, when present, is what the assistant " +
-	"said just before; a short message that answers, approves, or follows up on it continues the task.";
 
 /** Cap on the assistant reply carried into a Jev call. Replies can be long; the ending (the
  * question asked or next step proposed) is what a terse follow-up refers to, so keep the tail. */
@@ -332,14 +376,16 @@ async function runDetection(options: MaybeDetectTaskBoundaryOptions): Promise<vo
 
 		let related: boolean;
 		let jevNoul: number | undefined;
+		let signals: JevRelatedSignals | undefined;
 		if (isTerseFollowUp(userMessageText, previousReply)) {
 			related = true; // deterministic: no Jev call needed, and none that could misfire
 			if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
 				console.error(`[task-boundary] terse follow-up, related=true (no Jev call) for ${key}`);
 			}
 		} else {
-			jevNoul = await callJevRelated(currentDescriptor, userMessageText, previousReply);
-			if (jevNoul === undefined) return; // failure: write nothing, retried naturally next turn
+			signals = await callJevRelated(currentDescriptor, userMessageText, previousReply);
+			if (signals === undefined) return; // failure: write nothing, retried naturally next turn
+			jevNoul = combineRelatedSignals(signals);
 			related = jevNoul >= JEV_RELATED_THRESHOLD;
 		}
 
@@ -362,7 +408,10 @@ async function runDetection(options: MaybeDetectTaskBoundaryOptions): Promise<vo
 		}
 
 		if (jevNoul !== undefined && process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
-			console.error(`[task-boundary] jev noul=${jevNoul} related=${related} for ${key}`);
+			const detail = signals
+				? ` (continues=${signals.continuesTask} reacts=${signals.reactsToReply ?? "-"} switch=${signals.topicSwitch})`
+				: "";
+			console.error(`[task-boundary] jev noul=${jevNoul} related=${related}${detail} for ${key}`);
 		}
 
 		const summary = await callSummaryModel(

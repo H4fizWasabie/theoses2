@@ -20,26 +20,29 @@ export interface JevCallOptions {
 	timeoutMs?: number;
 }
 
-interface JevNoulResponse {
-	answers?: { answer?: { noul?: number } };
+interface JevAnswer {
+	noul?: number;
+	choice?: string;
+	confidence?: number;
 }
 
-interface JevChoiceResponse {
-	answers?: { answer?: { choice?: string; confidence?: number } };
+interface JevResponse {
+	answers?: Record<string, JevAnswer | undefined>;
 }
 
-/** Posts one `questions.answer` request to the Jev decisions endpoint and returns its parsed JSON
- * body, or undefined on any failure (missing API key, network error, timeout, non-2xx response, malformed
- * body) — the single failure path shared by askJevNoul and askJevChoice. */
-async function askJev<T>(
+/** Posts a set of named questions to the Jev decisions endpoint and returns the parsed JSON body,
+ * or undefined on any failure (missing API key, network error, timeout, non-2xx response, malformed
+ * body) — the single failure path shared by askJevNoul, askJevNouls and askJevChoice. Questions in
+ * one request are evaluated in parallel by Jev, so several atomic questions cost one round trip. */
+async function askJev(
 	state: Record<string, string>,
-	question: Record<string, unknown>,
+	questions: Record<string, Record<string, unknown>>,
 	options: JevCallOptions = {},
-): Promise<T | undefined> {
+): Promise<JevResponse | undefined> {
 	const apiKey = process.env.OPENROUTER_API_KEY;
 	if (!apiKey) return undefined;
 
-	const body = { model: JEV_MODEL, state, questions: { answer: question } };
+	const body = { model: JEV_MODEL, state, questions };
 
 	try {
 		const response = await fetch(JEV_DECISIONS_URL, {
@@ -52,7 +55,7 @@ async function askJev<T>(
 			console.error(`Jev call failed: ${response.status} ${(await response.text()).slice(0, 200)}`);
 			return undefined;
 		}
-		return (await response.json()) as T;
+		return (await response.json()) as JevResponse;
 	} catch (error) {
 		console.error("Jev call failed:", error instanceof Error ? error.message : error);
 		return undefined;
@@ -71,9 +74,33 @@ export async function askJevNoul(
 	instructions: string,
 	options?: JevCallOptions,
 ): Promise<number | undefined> {
-	const parsed = await askJev<JevNoulResponse>(state, { type: "noul", instructions }, options);
+	const parsed = await askJev(state, { answer: { type: "noul", instructions } }, options);
 	const noul = parsed?.answers?.answer?.noul;
 	return typeof noul === "number" ? noul : undefined;
+}
+
+/**
+ * Asks several independent yes/no (Noul) questions about the same `state` in ONE request (keyed by
+ * name, evaluated in parallel by Jev). Per TypeSafe's guidance, atomic questions combined in code
+ * beat one broad question: each signal is inspectable and code decides how to weigh them. Returns
+ * a probability per name, or undefined if the call failed or ANY requested answer is missing (a
+ * partial verdict would silently skew the caller's combination rule).
+ */
+export async function askJevNouls<K extends string>(
+	state: Record<string, string>,
+	questions: Record<K, string>,
+	options?: JevCallOptions,
+): Promise<Record<K, number> | undefined> {
+	const names = Object.keys(questions) as K[];
+	const request = Object.fromEntries(names.map((name) => [name, { type: "noul", instructions: questions[name] }]));
+	const parsed = await askJev(state, request, options);
+	const result = {} as Record<K, number>;
+	for (const name of names) {
+		const noul = parsed?.answers?.[name]?.noul;
+		if (typeof noul !== "number") return undefined;
+		result[name] = noul;
+	}
+	return result;
 }
 
 export interface JevChoiceResult {
@@ -95,7 +122,7 @@ export async function askJevChoice(
 	criteria: Record<string, string>,
 	options?: JevCallOptions,
 ): Promise<JevChoiceResult | undefined> {
-	const parsed = await askJev<JevChoiceResponse>(state, { type: "choice", instructions, criteria }, options);
+	const parsed = await askJev(state, { answer: { type: "choice", instructions, criteria } }, options);
 	const answer = parsed?.answers?.answer;
 	if (typeof answer?.choice !== "string" || typeof answer?.confidence !== "number") return undefined;
 	if (!(answer.choice in criteria)) return undefined;
