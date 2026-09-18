@@ -27,10 +27,11 @@
  * goes to a small text-generating model (callSummaryModel), now asked only for the sentence, not a
  * JSON boolean.
  *
- * SHADOW MODE (issue #186, Q15): this module always runs and always writes its entries, but
- * compaction.ts only *logs* what it would have done with a detected boundary — it does not yet
- * change compaction's live behavior. That flip happens once the detector's accuracy has been
- * validated against real traffic.
+ * LIVE (issue #186): a detected boundary is not just logged. compaction.ts (prepareCompaction) resets
+ * the summary chain at the most recent task_boundary marker, dropping the previous compaction's
+ * summary/Goal and file-op tracking. So a false "unrelated" verdict discards real context; treat
+ * verdict accuracy here as a correctness matter, not a logging one. The `[task-boundary]` and
+ * `[compaction] resetting chain` lines under THEOSES_DEBUG_TASK_BOUNDARY show what was decided and applied.
  */
 
 import { type Api, contentText, type Model, retryAssistantCall } from "theoses-ai";
