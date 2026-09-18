@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: new `core/intent-router.ts` module — `classifyUrgency()` (Jev Noul-backed, 3 s timeout, fail-open), `resolveIntentRouterMode()` and `urgentIntakeNotice()`; exported via `core/sdk.ts`. (#268, #269)
+
 ## [1.0.55] - 2026-09-18
 
 - feat: add a TypeSafe Jev Choice primitive client (`askJevChoice`, alongside the existing Noul `askJevNoul`) to `jev-client.ts`. Task-boundary detection now escalates to the larger text model when Jev's Noul verdict lands within `JEV_AMBIGUOUS_BAND` of `JEV_RELATED_THRESHOLD`, instead of trusting a near-coin-flip probability outright — verified live against real staging traffic to actually land in the escalation band for genuinely ambiguous messages. Memory consolidation's edge-relation classification (previously a closed-vocabulary pick riding along inside DeepSeek's free-form JSON generation) is now cross-checked against a Jev Choice call and logged for comparison (`edge-relation-shadow-log.jsonl`), but does not yet override DeepSeek's pick: two live measurements against real staging edges (62 total) showed DeepSeek and Jev disagree on `EDGE_RELATION_DESCRIPTIONS`'s 8 categories ~58-59% of the time regardless of how much context Jev is given, with confidence not reliably separating correct from incorrect picks — left in shadow mode pending a less-overlapping relation vocabulary rather than shipped on unproven data.
