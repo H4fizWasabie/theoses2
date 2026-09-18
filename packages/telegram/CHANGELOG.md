@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: capture reply-to-message context when replying to a rich message (Bot API 10.1 sendRichMessage/rich editMessageText). Telegram never populates `reply_to_message.text`/`.caption` for those - only a `rich_message.blocks` tree comes back - so `replyText()` was silently dropping the quoted context on nearly every reply to a theoses answer. Now flattens `rich_message.blocks` as a fallback.
+
 ## [1.0.52] - 2026-09-17
 
 ## [1.0.51] - 2026-09-15

@@ -141,10 +141,48 @@ function messageText(ctx: Context): string {
 	return ctx.message?.text ?? ctx.message?.caption ?? "";
 }
 
-function replyText(ctx: Context): string | undefined {
+/**
+ * Recursively pulls plain text out of a rich-message block/span tree. The exact shape isn't
+ * publicly documented beyond "blocks" (paragraph/list/etc, each optionally nesting more blocks,
+ * items, or inline spans) and "spans" (bold/url/etc, each wrapping more text or spans) - rather
+ * than hardcode every node type, this walks any `text`, `items`, or `blocks` property it finds and
+ * concatenates what falls out, so an unrecognized node degrades to "keep its text" instead of
+ * vanishing silently.
+ */
+function flattenRichNode(node: unknown): string {
+	if (node == null) return "";
+	if (typeof node === "string") return node;
+	if (Array.isArray(node)) return node.map(flattenRichNode).join("");
+	if (typeof node === "object") {
+		const obj = node as { text?: unknown; items?: unknown; blocks?: unknown; label?: unknown };
+		const parts = [flattenRichNode(obj.text), flattenRichNode(obj.items), flattenRichNode(obj.blocks)].filter(
+			Boolean,
+		);
+		if (!parts.length) return "";
+		return typeof obj.label === "string" ? `${obj.label} ${parts.join(" ")}` : parts.join(" ");
+	}
+	return "";
+}
+
+/**
+ * A message sent via sendRichMessage/rich editMessageText (see RawApiWithRichMessage above) comes
+ * back on reply_to_message with no `.text`/`.caption` at all - Telegram only echoes a
+ * `rich_message.blocks` tree for those, so replyText() falls back to flattening it. Verified
+ * directly against a live reply payload before wiring this in (a reply to a rich answer was
+ * silently losing its quoted context - the bare .text/.caption check never found anything).
+ */
+function flattenRichMessage(richMessage: unknown): string | undefined {
+	const blocks = (richMessage as { blocks?: unknown } | undefined)?.blocks;
+	if (!Array.isArray(blocks)) return undefined;
+	const text = flattenRichNode(blocks).trim();
+	return text || undefined;
+}
+
+export function replyText(ctx: Context): string | undefined {
 	const reply = ctx.message?.reply_to_message;
 	const text = reply?.text ?? reply?.caption;
-	return text || undefined;
+	if (text) return text;
+	return flattenRichMessage((reply as { rich_message?: unknown } | undefined)?.rich_message);
 }
 
 function assistantText(event: AgentSessionEvent): string | undefined {

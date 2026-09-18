@@ -20,7 +20,7 @@ vi.mock("theoses-coding-agent", () => ({
 }));
 
 import { createAgentSession, SessionManager } from "theoses-coding-agent";
-import { createTelegramBot, parseModelCommand } from "../src/index.ts";
+import { createTelegramBot, parseModelCommand, replyText } from "../src/index.ts";
 
 function messageUpdate(updateId: number, messageId: number, text: string): Update {
 	return {
@@ -149,6 +149,87 @@ describe("Telegram update dispatch", () => {
 
 		releasePrompt?.();
 		await vi.waitFor(() => expect(promptResolved).toBe(true));
+	});
+});
+
+describe("replyText", () => {
+	function replyUpdate(replyToMessage: Record<string, unknown>): { message: { reply_to_message: unknown } } {
+		return { message: { reply_to_message: replyToMessage } } as never;
+	}
+
+	it("returns undefined when there is no reply", () => {
+		expect(replyText({ message: {} } as never)).toBeUndefined();
+	});
+
+	it("reads .text from a classic reply", () => {
+		expect(replyText(replyUpdate({ text: "hello" }) as never)).toBe("hello");
+	});
+
+	it("falls back to .caption when .text is absent", () => {
+		expect(replyText(replyUpdate({ caption: "a photo caption" }) as never)).toBe("a photo caption");
+	});
+
+	// Bot API 10.1 rich messages (sendRichMessage/rich editMessageText) come back on
+	// reply_to_message with no .text/.caption at all - only a rich_message.blocks tree. Payload
+	// shape below is exactly what a live reply to a rich-sent theoses answer returned.
+	it("flattens rich_message.blocks when .text/.caption are absent", () => {
+		const richMessage = {
+			blocks: [
+				{ type: "paragraph", text: "No need — already ran and finished. Summary:" },
+				{
+					type: "list",
+					items: [
+						{
+							label: "•",
+							blocks: [
+								{
+									type: "paragraph",
+									text: [
+										{ type: "bold", text: "Sync succeeded:" },
+										" 3 posts synced across daily-quote, daily-jokes, github-repo-highlight, workplace-drama.",
+									],
+								},
+							],
+						},
+						{
+							label: "•",
+							blocks: [
+								{
+									type: "paragraph",
+									text: [
+										{
+											type: "bold",
+											text: [{ type: "url", text: "learnings.md", url: "learnings.md" }, " regenerated"],
+										},
+										" for all 4 workspaces (fresh insight files the posting jobs read tomorrow).",
+									],
+								},
+							],
+						},
+						{
+							label: "•",
+							blocks: [
+								{ type: "paragraph", text: "Crontab is live again for tomorrow's automatic 21:30 KUL run." },
+							],
+						},
+					],
+				},
+				{ type: "paragraph", text: "Nothing left to do tonight, abah." },
+			],
+		};
+
+		const result = replyText(replyUpdate({ rich_message: richMessage }) as never);
+		expect(result).toContain("No need — already ran and finished. Summary:");
+		expect(result).toContain(
+			"Sync succeeded: 3 posts synced across daily-quote, daily-jokes, github-repo-highlight, workplace-drama.",
+		);
+		expect(result).toContain("learnings.md regenerated");
+		expect(result).toContain("Nothing left to do tonight, abah.");
+	});
+
+	it("returns undefined for an empty or malformed rich_message", () => {
+		expect(replyText(replyUpdate({ rich_message: {} }) as never)).toBeUndefined();
+		expect(replyText(replyUpdate({ rich_message: { blocks: [] } }) as never)).toBeUndefined();
 	});
 });
 
