@@ -71,9 +71,10 @@ describe("classifyUrgency", () => {
 });
 
 describe("urgentIntakeNotice", () => {
-	it("produces a single-line provenance notice", () => {
+	it("produces a single-line trailing harness notice with a no-quote clause", () => {
 		const notice = urgentIntakeNotice();
-		expect(notice).toMatch(/^\[intake:/);
+		expect(notice).toMatch(/^\[URGENCY INTAKE:/);
 		expect(notice).not.toContain("\n");
+		expect(notice).toContain("do not mention");
 	});
 });

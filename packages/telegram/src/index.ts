@@ -712,7 +712,9 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			let promptText = messageText(ctx) || attachmentNote || "";
 			const urgency = await urgencyPromise;
 			if (urgency.mode === "on" && urgency.isUrgent && messageText(ctx)) {
-				promptText = `${urgentIntakeNotice()}\n\n${promptText}`;
+				// Appended, clock-annotation style: trailing harness metadata on the newest turn,
+				// never part of the cached prefix, and worded so it doesn't leak into replies.
+				promptText = `${promptText}${urgentIntakeNotice()}`;
 			}
 			try {
 				await session.prompt(promptText, {

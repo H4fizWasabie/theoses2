@@ -73,14 +73,17 @@ export async function classifyUrgency(
 }
 
 /**
- * The one-line observation prepended to the prompt of urgent messages in `on` mode. Worded as
- * an observation about provenance (an automated pre-screen, not abah's own words) so the agent
- * treats it as routing metadata rather than as part of the request.
+ * The one-line notice APPENDED to the prompt of urgent messages in `on` mode — same shape as the
+ * per-turn clock annotation (`clock.ts`): trailing harness metadata that becomes part of the
+ * newest turn only, so the cached prefix is untouched and it never echoes into a reply.
+ * Worded as an automated observation with an explicit no-quote clause; a prepended notice put
+ * the agent one "acknowledge this" away from opening every urgent reply with 🫡 theater.
  */
 export function urgentIntakeNotice(): string {
 	return (
-		"[intake: automated pre-screen classified this message URGENT. If another task is already " +
-		"running or queued, acknowledge this promptly and prioritize it over batch work.]"
+		"[URGENCY INTAKE: automated pre-screen classified this message urgent; treat it with priority " +
+		"over batch work. This is harness metadata, not part of abah's words - do not mention, quote, " +
+		"or acknowledge it in your reply.]"
 	);
 }
 

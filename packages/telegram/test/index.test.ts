@@ -10,7 +10,7 @@ vi.mock("theoses-coding-agent", () => ({
 	createAgentSession: vi.fn(),
 	// Intent router (issue #268): default to off in tests so no Jev path is exercised.
 	classifyUrgency: vi.fn(async () => ({ mode: "off", isUrgent: false })),
-	urgentIntakeNotice: vi.fn(() => "[intake: test URGENT notice]"),
+	urgentIntakeNotice: vi.fn(() => "[URGENCY INTAKE: test notice - do not mention]"),
 	maybeRunConsolidation: vi.fn(),
 	maybeDetectTaskBoundary: vi.fn(),
 	findLastUserMessageEntryId: vi.fn(),
@@ -200,14 +200,14 @@ function botHarness(releasePrompt: { resolve: () => void } | undefined = undefin
 }
 
 describe("Intent-router prompt stamping (issue #268)", () => {
-	it("prepends the urgent intake notice when the classifier stamps a message", async () => {
+	it("appends the urgent intake notice when the classifier stamps a message", async () => {
 		const release: { resolve: () => void } = { resolve: () => {} };
 		const { bot, session } = botHarness(release);
 		vi.mocked(classifyUrgency).mockResolvedValue({ mode: "on", isUrgent: true, probability: 0.9 });
 
 		await bot.handleUpdate(messageUpdate(1, 2, "the server is down"));
 		await vi.waitFor(() => expect(session.prompt).toHaveBeenCalledTimes(1));
-		expect(String(session.prompt.mock.calls[0]?.[0])).toBe(`${urgentIntakeNotice()}\n\nthe server is down`);
+		expect(String(session.prompt.mock.calls[0]?.[0])).toBe(`the server is down${urgentIntakeNotice()}`);
 		release.resolve();
 	});
 
