@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- docs: correct the stale "shadow mode" note in `task-boundary-detector.ts`; chain reset has been live since #186. (#274)
+
 ## [1.0.57] - 2026-09-18
 
 - fix: every Jev request now carries an `AbortSignal.timeout` (default 5 s, `{ timeoutMs }` override) so a stalled response is cancelled instead of hanging its caller. (#270)
