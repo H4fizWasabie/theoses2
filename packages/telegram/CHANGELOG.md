@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.56] - 2026-09-18
 
 - feat: Jev-powered urgency pre-screen (intent-router, `THEOSES_INTENT_ROUTER=off|shadow|on`). One cheap Jev Noul call classifies each inbound Telegram message before the agent turn; in `on` mode messages scoring >= 0.85 get a clock-annotation provenance stamp appended to the prompt. Default `off` is byte-identical to prior behavior. (#268, #269)
 

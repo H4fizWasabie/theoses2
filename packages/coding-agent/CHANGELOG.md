@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.56] - 2026-09-18
 
 - feat: new `core/intent-router.ts` module — `classifyUrgency()` (Jev Noul-backed, 3 s timeout, fail-open), `resolveIntentRouterMode()` and `urgentIntakeNotice()`; exported via `core/sdk.ts`. (#268, #269)
 
