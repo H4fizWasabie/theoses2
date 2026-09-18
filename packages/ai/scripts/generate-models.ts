@@ -2079,8 +2079,12 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 		}
 
 		// Process Kimi For Coding models
-		if (data["kimi-for-coding"]?.models) {
-			const kimiModels = data["kimi-for-coding"].models as Record<string, ModelsDevModel>;
+		// models.dev renamed this provider from "kimi-for-coding" to "kimi-code-plan-global" (model ids
+		// unchanged); keep the old key as a fallback. Missing both makes the shard cleanup below
+		// delete kimi-coding.models.ts while kimi-coding.ts still imports it.
+		const kimiCodingData = data["kimi-code-plan-global"]?.models ? data["kimi-code-plan-global"] : data["kimi-for-coding"];
+		if (kimiCodingData?.models) {
+			const kimiModels = kimiCodingData.models as Record<string, ModelsDevModel>;
 			const hasCanonicalModel = Object.prototype.hasOwnProperty.call(kimiModels, "kimi-for-coding");
 
 			const kimiAliases = new Set(["k2p5", "k2p6", "k2p7"]);
