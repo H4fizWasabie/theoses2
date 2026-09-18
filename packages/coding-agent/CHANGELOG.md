@@ -4,6 +4,10 @@
 
 - docs: correct the stale "shadow mode" note in `task-boundary-detector.ts`; chain reset has been live since #186. (#274)
 
+## [1.0.58] - 2026-09-18
+
+- feat: task-boundary asks Jev three atomic Noul questions in one request (`continuesTask`, `reactsToReply`, `topicSwitch`) and combines them in code (`combineRelatedSignals`, explicit topic-switch veto) instead of one broad question; new `askJevNouls()` in `jev-client`. (#276)
+
 ## [1.0.57] - 2026-09-18
 
 - fix: every Jev request now carries an `AbortSignal.timeout` (default 5 s, `{ timeoutMs }` override) so a stalled response is cancelled instead of hanging its caller. (#270)
