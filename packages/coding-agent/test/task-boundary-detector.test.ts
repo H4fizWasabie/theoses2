@@ -2,6 +2,7 @@ import type { AgentMessage } from "theoses-agent-core";
 import { describe, expect, it } from "vitest";
 import type { CustomEntry, SessionEntry, SessionMessageEntry } from "../src/core/session-manager.ts";
 import {
+	combineRelatedSignals,
 	findLastUserMessageEntryId,
 	findLatestTaskBoundary,
 	findPreviousAssistantText,
@@ -152,5 +153,29 @@ describe("isTerseFollowUp", () => {
 
 	it("ignores empty input", () => {
 		expect(isTerseFollowUp("   ", "Deployed.")).toBe(false);
+	});
+});
+
+describe("combineRelatedSignals", () => {
+	it("is related when the message continues the task", () => {
+		expect(combineRelatedSignals({ continuesTask: 0.8, reactsToReply: 0.2, topicSwitch: 0.1 })).toBe(0.8);
+	});
+
+	it("is related when it only reacts to the last reply (terse reactions)", () => {
+		expect(combineRelatedSignals({ continuesTask: 0.2, reactsToReply: 0.93, topicSwitch: 0.22 })).toBe(0.93);
+	});
+
+	it("works without a previous reply", () => {
+		expect(combineRelatedSignals({ continuesTask: 0.7, topicSwitch: 0.1 })).toBe(0.7);
+	});
+
+	it("lets an explicit topic switch veto the other signals", () => {
+		const combined = combineRelatedSignals({ continuesTask: 0.9, reactsToReply: 0.9, topicSwitch: 0.85 });
+		expect(combined).toBeCloseTo(0.15);
+		expect(combined).toBeLessThan(0.6);
+	});
+
+	it("ignores a topic-switch signal below the veto", () => {
+		expect(combineRelatedSignals({ continuesTask: 0.3, reactsToReply: 0.4, topicSwitch: 0.59 })).toBe(0.4);
 	});
 });
