@@ -29,16 +29,19 @@ it("uses API-equivalent reference costs for Coding Plan models", () => {
 		cacheRead: 0.26,
 		cacheWrite: 0,
 	});
-	expect(getBuiltinModel("zai-coding-cn", "glm-5.1").cost).toEqual({
+	// glm-5.1 and glm-5v-turbo were retired from the China Coding Plan catalog in favor of
+	// glm-5.3/glm-5.3-flash - both now carry their own directly-published API price rather than
+	// borrowing a reference cost from the "zai" pay-as-you-go catalog.
+	expect(getBuiltinModel("zai-coding-cn", "glm-5.3").cost).toEqual({
 		input: 1.4,
 		output: 4.4,
 		cacheRead: 0.26,
 		cacheWrite: 0,
 	});
-	expect(getBuiltinModel("zai-coding-cn", "glm-5v-turbo").cost).toEqual({
-		input: 1.2,
-		output: 4,
-		cacheRead: 0.24,
+	expect(getBuiltinModel("zai-coding-cn", "glm-5.3-flash").cost).toEqual({
+		input: 0.075,
+		output: 0.25,
+		cacheRead: 0.015,
 		cacheWrite: 0,
 	});
 });
@@ -46,8 +49,9 @@ it("uses API-equivalent reference costs for Coding Plan models", () => {
 it("keeps zero costs for Coding Plan models without a matching API price", () => {
 	const zeroCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
+	// glm-5.2-highspeed only exists on "zai" now - dropped from zai-coding-cn (see above).
+	expect(getBuiltinModel("zai", "glm-5.2-highspeed").cost).toEqual(zeroCost);
 	for (const provider of ["zai", "zai-coding-cn"] as const) {
-		expect(getBuiltinModel(provider, "glm-5.2-highspeed").cost).toEqual(zeroCost);
 		expect(getBuiltinModel(provider, "glm-5.3-highspeed").cost).toEqual(zeroCost);
 	}
 });
