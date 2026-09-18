@@ -283,7 +283,9 @@ async function runDetection(options: MaybeDetectTaskBoundaryOptions): Promise<vo
 			const escalated = await callEscalatedRelated(modelRuntime, currentDescriptor, userMessageText, key);
 			if (escalated !== undefined) {
 				if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
-					console.error(`[task-boundary] jev noul=${jevNoul} ambiguous, escalated related=${escalated} for ${key}`);
+					console.error(
+						`[task-boundary] jev noul=${jevNoul} ambiguous, escalated related=${escalated} for ${key}`,
+					);
 				}
 				related = escalated;
 			}
