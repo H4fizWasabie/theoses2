@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
 	type Api,
@@ -11,8 +11,8 @@ import {
 import type { Context, SimpleStreamOptions } from "theoses-ai/compat";
 import { getAgentDir } from "../config.ts";
 import { EpisodicStore } from "./episodic-store.ts";
-import { askJevNoul } from "./jev-client.ts";
-import { EDGE_RELATIONS, type EdgeRelation, FileMemoryStore } from "./memory-store.ts";
+import { askJevChoice, askJevNoul } from "./jev-client.ts";
+import { EDGE_RELATION_DESCRIPTIONS, EDGE_RELATIONS, type EdgeRelation, FileMemoryStore } from "./memory-store.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { SessionManager, type SessionMessageEntry } from "./session-manager.ts";
 import { parseStructuredJson } from "./structured-output.ts";
@@ -332,12 +332,90 @@ function parseConsolidationResponse(text: string): ParsedConsolidation {
 	};
 }
 
+/**
+ * Confidence floor a real override would use, once one is enabled. Currently only used to label
+ * each shadow-log line with "would this threshold have overridden" — two hand-picked staging
+ * probes (2026-09-18) aren't enough evidence to trust a number against real data, so
+ * confirmEdgeRelation below never actually overrides yet (see SHADOW MODE comment). This constant
+ * exists so the threshold under evaluation is a single, greppable place, not scattered literals.
+ */
+const EDGE_RELATION_CONFIDENCE_THRESHOLD = 0.4;
+
+function edgeRelationShadowLogPath(): string {
+	return (
+		process.env.THEOSES_EDGE_RELATION_SHADOW_LOG ?? join(dirname(getAgentDir()), "edge-relation-shadow-log.jsonl")
+	);
+}
+
+interface EdgeRelationShadowLogEntry {
+	timestamp: string;
+	from: string;
+	to: string;
+	proposedRel: EdgeRelation;
+	jevChoice: string | null;
+	jevConfidence: number | null;
+	agrees: boolean | null;
+	wouldOverrideAtThreshold: boolean;
+}
+
+/** Appends one shadow-log line, truncated to keep entries reviewable and the file from ballooning
+ * on long node texts. Never throws — a logging failure must not block a real consolidation pass. */
+function logEdgeRelationShadow(entry: EdgeRelationShadowLogEntry): void {
+	try {
+		const path = edgeRelationShadowLogPath();
+		mkdirSync(dirname(path), { recursive: true });
+		appendFileSync(path, `${JSON.stringify(entry)}\n`);
+	} catch (error) {
+		console.error("Edge-relation shadow log write failed:", error instanceof Error ? error.message : error);
+	}
+}
+
+/**
+ * SHADOW MODE (same pattern as task-boundary-detector.ts's issue #186 Q15): always calls Jev's
+ * Choice primitive and always logs the comparison against DeepSeek's proposed `rel`, but always
+ * returns `proposedRel` unchanged — it does not yet affect what gets written to the memory graph.
+ *
+ * Two live measurements against real staging edges (2026-09-18) ruled out both obvious fixes:
+ * bare `from`/`to` state agreed with DeepSeek only 42% of the time with confidence barely
+ * correlated to correctness (avg 0.60 on agreement vs 0.49 on disagreement); adding a raw,
+ * unfocused 6000-char transcript tail as a third `context` field (thinking Jev just needed more
+ * signal) made it *worse* (41% agreement, gap down to 0.49 vs 0.43) — consistent with TypeSafe's
+ * own state guidance (docs/concepts/state: "include only information the model needs... extraneous
+ * details risk diluting decision quality"), since a raw transcript dump is exactly the unfocused
+ * shape that page warns against. The remaining, more likely explanation: EDGE_RELATION_DESCRIPTIONS'
+ * 8 categories (depends_on/used_in/located_at/supersedes/...) are underspecified enough that
+ * DeepSeek and Jev land on different-but-defensible picks for the same fact pair regardless of
+ * how much text either sees — a vocabulary problem, not a state-shape problem. Left in shadow mode
+ * pending a redesigned, less-overlapping relation vocabulary; do not enable a real override on the
+ * current EDGE_RELATION_DESCRIPTIONS without re-measuring first.
+ */
+async function confirmEdgeRelation(fromText: string, toText: string, proposedRel: EdgeRelation): Promise<EdgeRelation> {
+	const result = await askJevChoice(
+		{ from: fromText, to: toText },
+		"What relation best describes how `from` relates to `to`?",
+		EDGE_RELATION_DESCRIPTIONS,
+	);
+
+	logEdgeRelationShadow({
+		timestamp: new Date().toISOString(),
+		from: fromText.slice(0, 200),
+		to: toText.slice(0, 200),
+		proposedRel,
+		jevChoice: result?.choice ?? null,
+		jevConfidence: result?.confidence ?? null,
+		agrees: result ? result.choice === proposedRel : null,
+		wouldOverrideAtThreshold: result !== undefined && result.confidence >= EDGE_RELATION_CONFIDENCE_THRESHOLD,
+	});
+
+	return proposedRel;
+}
+
 /** Writes the parsed response to the memory/episodic stores, resolving local fact ids to real node ids. */
-function applyConsolidationResult(
+async function applyConsolidationResult(
 	parsed: ParsedConsolidation,
 	memoryStore: FileMemoryStore,
 	episodicStore: EpisodicStore,
-): void {
+): Promise<void> {
 	const idMap = new Map<string, string>();
 	for (const fact of parsed.facts) {
 		const node = memoryStore.createNode({ subject: fact.subject, body: fact.body });
@@ -345,8 +423,19 @@ function applyConsolidationResult(
 	}
 	const resolve = (id: string): string => idMap.get(id) ?? id;
 
+	/** Local facts aren't real nodes yet when edges are confirmed, so their text comes from the
+	 * parsed response itself; already-existing nodes are read back from the store. */
+	const factById = new Map(parsed.facts.map((f) => [f.id, f]));
+	const nodeText = (id: string): string => {
+		const fact = factById.get(id);
+		if (fact) return fact.body ? `${fact.subject} — ${fact.body}` : fact.subject;
+		const node = memoryStore.getNode(id);
+		return node ? (node.body ? `${node.subject} — ${node.body}` : node.subject) : id;
+	};
+
 	for (const edge of parsed.edges) {
-		memoryStore.addEdge(resolve(edge.from), { target: resolve(edge.to), rel: edge.rel });
+		const rel = await confirmEdgeRelation(nodeText(edge.from), nodeText(edge.to), edge.rel);
+		memoryStore.addEdge(resolve(edge.from), { target: resolve(edge.to), rel });
 	}
 
 	episodicStore.recordEpisode({
@@ -537,7 +626,7 @@ async function runConsolidationPass(params: {
 		throw new Error(`Consolidation pass errored: ${response.errorMessage ?? "unknown error"}`);
 
 	const parsed = parseConsolidationResponse(contentText(response.content));
-	applyConsolidationResult(parsed, memoryStore, episodicStore);
+	await applyConsolidationResult(parsed, memoryStore, episodicStore);
 }
 
 async function runIfTriggered(options: MaybeRunConsolidationOptions): Promise<void> {

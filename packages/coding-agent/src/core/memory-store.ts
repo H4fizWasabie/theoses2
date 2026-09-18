@@ -18,6 +18,19 @@ export const EDGE_RELATIONS = [
 ] as const;
 export type EdgeRelation = (typeof EDGE_RELATIONS)[number];
 
+/** Short description per relation, for surfaces (Jev Choice criteria today) that need to explain
+ * the closed vocabulary rather than just list its labels. Keep in sync with EDGE_RELATIONS. */
+export const EDGE_RELATION_DESCRIPTIONS: Record<EdgeRelation, string> = {
+	prefers: "'from' expresses a preference for 'to' (a choice, a style, a tool)",
+	attributed_to: "'from' is a statement, decision, or action made by 'to' (a person or team)",
+	depends_on: "'from' requires 'to' to exist or function first (a technical or logical dependency)",
+	located_at: "'from' is physically or organizationally located at 'to' (a place, host, or system)",
+	requires: "'from' needs 'to' as a precondition or input, without 'to' being a dependency in the technical sense",
+	supersedes: "'from' replaces or overrides an earlier fact, 'to', that is now outdated",
+	used_in: "'from' is used as part of or within 'to'",
+	maintains: "'from' is responsible for the upkeep or ownership of 'to'",
+};
+
 export interface MemoryEdge {
 	target: string;
 	rel: EdgeRelation;

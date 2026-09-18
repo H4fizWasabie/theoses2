@@ -86,6 +86,15 @@ const TASK_BOUNDARY_RETRY_POLICY = { enabled: true, maxRetries: 1, baseDelayMs: 
 const JEV_RELATED_THRESHOLD = 0.6;
 
 /**
+ * Half-width of the band around JEV_RELATED_THRESHOLD treated as "too close to call". Noul has no
+ * separate confidence field (TypeSafe's own docs: the probability doubles as confidence via its
+ * distance from 0.5) — inside this band Jev's verdict is barely more than a coin flip relative to
+ * the threshold, so runDetection escalates to the larger text model instead of trusting the raw
+ * split. Outside the band, Jev's verdict is used as-is (no extra call, no added latency/cost).
+ */
+const JEV_AMBIGUOUS_BAND = 0.1;
+
+/**
  * Asks Jev whether `newUserMessage` still relates to `currentDescriptor`. Returns the raw noul
  * probability (0 = unrelated, 1 = related), or undefined on any failure — same "write nothing,
  * retried naturally next turn" contract the rest of this module already uses.
@@ -96,6 +105,52 @@ async function callJevRelated(currentDescriptor: string, newUserMessage: string)
 		console.error("TASK_BOUNDARY_JEV_REQUEST", JSON.stringify(state));
 	}
 	return askJevNoul(state, "Does `new_message` continue or relate to `current_task`?");
+}
+
+const ESCALATED_RELATED_INSTRUCTIONS = `Does the new message below continue or relate to the current task? Reply with ONLY the single word "true" or "false" — no quotes, no commentary, no markdown.`;
+
+/**
+ * Escalation path for a Jev verdict landing inside JEV_AMBIGUOUS_BAND: asks the same model
+ * callSummaryModel already uses for a direct yes/no, since Jev's own probability was too close to
+ * JEV_RELATED_THRESHOLD to trust on its own. Returns undefined on failure or an unparseable reply
+ * — callers fall back to the raw Jev verdict in that case, never blocking the turn on escalation.
+ */
+async function callEscalatedRelated(
+	modelRuntime: ModelRuntime,
+	currentDescriptor: string,
+	newUserMessage: string,
+	sessionAffinityId: string,
+): Promise<boolean | undefined> {
+	const model = resolveTaskBoundaryModel(modelRuntime);
+	const promptText = `${ESCALATED_RELATED_INSTRUCTIONS}\n\nCurrent task: ${currentDescriptor || "(none tracked yet)"}\n\nNew message: ${newUserMessage}`;
+	const context: Context = {
+		messages: [{ role: "user", content: [{ type: "text", text: promptText }], timestamp: Date.now() }],
+	};
+	const streamOptions: SimpleStreamOptions = {
+		maxTokens: model.maxTokens,
+		toolChoice: "none",
+		sessionId: sessionAffinityId,
+	};
+
+	if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
+		console.error("TASK_BOUNDARY_ESCALATION_PROMPT", promptText.slice(0, 500));
+	}
+
+	try {
+		const response = await retryAssistantCall(
+			() => modelRuntime.completeSimple(model, context, streamOptions),
+			TASK_BOUNDARY_RETRY_POLICY,
+			undefined,
+		);
+		if (response.stopReason === "aborted" || response.stopReason === "error") return undefined;
+		const text = contentText(response.content).trim().toLowerCase();
+		if (text.startsWith("true")) return true;
+		if (text.startsWith("false")) return false;
+		return undefined;
+	} catch (error) {
+		console.error("Task-boundary escalation call failed:", error instanceof Error ? error.message : error);
+		return undefined;
+	}
 }
 
 const TASK_SUMMARY_INSTRUCTIONS_RELATED = `The new message below continues the current task. Write an updated one-line description of the task, refined to reflect its current state (it may have evolved, e.g. gained a sub-step). Reply with ONLY the single self-contained sentence — no quotes, no commentary, no markdown.`;
@@ -222,7 +277,17 @@ async function runDetection(options: MaybeDetectTaskBoundaryOptions): Promise<vo
 
 		const jevNoul = await callJevRelated(currentDescriptor, userMessageText);
 		if (jevNoul === undefined) return; // failure: write nothing, retried naturally next turn
-		const related = jevNoul >= JEV_RELATED_THRESHOLD;
+		let related = jevNoul >= JEV_RELATED_THRESHOLD;
+
+		if (Math.abs(jevNoul - JEV_RELATED_THRESHOLD) < JEV_AMBIGUOUS_BAND) {
+			const escalated = await callEscalatedRelated(modelRuntime, currentDescriptor, userMessageText, key);
+			if (escalated !== undefined) {
+				if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
+					console.error(`[task-boundary] jev noul=${jevNoul} ambiguous, escalated related=${escalated} for ${key}`);
+				}
+				related = escalated;
+			}
+		}
 
 		if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
 			console.error(`[task-boundary] jev noul=${jevNoul} related=${related} for ${key}`);
