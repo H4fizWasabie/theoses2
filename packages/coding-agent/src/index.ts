@@ -208,7 +208,6 @@ export {
 	type AgentSessionServices,
 	type BackfillOptions,
 	backfillFromSessionLog,
-	CONSOLIDATION_TRIGGER_PHRASES,
 	CONSOLIDATION_TURN_CEILING,
 	type CreateAgentSessionFromServicesOptions,
 	type CreateAgentSessionOptions,

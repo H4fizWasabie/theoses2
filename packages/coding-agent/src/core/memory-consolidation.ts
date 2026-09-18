@@ -11,6 +11,7 @@ import {
 import type { Context, SimpleStreamOptions } from "theoses-ai/compat";
 import { getAgentDir } from "../config.ts";
 import { EpisodicStore } from "./episodic-store.ts";
+import { askJevNoul } from "./jev-client.ts";
 import { EDGE_RELATIONS, type EdgeRelation, FileMemoryStore } from "./memory-store.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { SessionManager, type SessionMessageEntry } from "./session-manager.ts";
@@ -24,26 +25,39 @@ import { parseStructuredJson } from "./structured-output.ts";
  */
 const CONSOLIDATION_RETRY_POLICY = { enabled: true, maxRetries: 3, baseDelayMs: 2000 };
 
-/** Case-insensitive substring match anywhere in the user's message fires a consolidation pass. */
-export const CONSOLIDATION_TRIGGER_PHRASES = [
-	"thanks",
-	"thank you",
-	"great job",
-	"good work",
-	"nice work",
-	"perfect",
-	"awesome",
-	"that's all",
-	"all done",
-];
-
-/** Rare-case fallback for sessions that never say a completion phrase. */
+/** Rare-case fallback for sessions that never signal completion. Checked before the Jev call
+ * below (no network round trip needed) so a long-running session is always eventually flushed
+ * regardless of what the user says. */
 export const CONSOLIDATION_TURN_CEILING = 70;
 
-export function shouldTriggerConsolidation(userMessageText: string, turnsSinceCheckpoint: number): boolean {
-	const lower = userMessageText.toLowerCase();
-	if (CONSOLIDATION_TRIGGER_PHRASES.some((phrase) => lower.includes(phrase))) return true;
-	return turnsSinceCheckpoint >= CONSOLIDATION_TURN_CEILING;
+/**
+ * Noul threshold for treating the message as a completion signal. Mirrors task-boundary-
+ * detector.ts's JEV_RELATED_THRESHOLD reasoning: a false trigger just runs consolidation a little
+ * early (cheap — it dedupes against existing memory nodes anyway), while a missed signal only
+ * delays capture until CONSOLIDATION_TURN_CEILING, so there's no strong reason to bias this one
+ * off the neutral midpoint the way task-boundary's is.
+ */
+const CONSOLIDATION_TRIGGER_THRESHOLD = 0.5;
+
+/**
+ * Replaces the old phrase-matching trigger ("thanks"/"that's all"/etc. as a case-insensitive
+ * substring anywhere in the message) with a TypeSafe Jev Noul call. The keyword list had the same
+ * two failure modes task-boundary-detector.ts's old prompt-based approach did: false positives
+ * ("thanks for that, now also fix the login bug" contains "thanks" but isn't a sign-off) and false
+ * negatives (a real wrap-up with no matching phrase never fires). Jev reads the message's actual
+ * meaning instead of matching substrings, at a fraction of a cent per turn.
+ */
+export async function shouldTriggerConsolidation(
+	userMessageText: string,
+	turnsSinceCheckpoint: number,
+): Promise<boolean> {
+	if (turnsSinceCheckpoint >= CONSOLIDATION_TURN_CEILING) return true;
+	const noul = await askJevNoul(
+		{ message: userMessageText },
+		"Does `message` signal that the user considers the current task or conversation finished (e.g. thanks, a sign-off, or explicit confirmation of completion), rather than continuing it?",
+	);
+	if (noul === undefined) return false; // Jev call failed: skip this turn, the turn ceiling still catches a long session eventually
+	return noul >= CONSOLIDATION_TRIGGER_THRESHOLD;
 }
 
 // ---------------------------------------------------------------------------
@@ -552,7 +566,7 @@ async function runIfTriggered(options: MaybeRunConsolidationOptions): Promise<vo
 		const window = branch.slice(startIndex).filter((e): e is SessionMessageEntry => e.type === "message");
 		if (window.length === 0) return;
 
-		if (!shouldTriggerConsolidation(userMessageText, window.length)) return;
+		if (!(await shouldTriggerConsolidation(userMessageText, window.length))) return;
 
 		// Issue #177: chunk the live trigger the same way backfillFromSessionLog already does, so a
 		// live pass can never balloon past CONSOLIDATION_TURN_CEILING messages regardless of how long
