@@ -13,12 +13,19 @@
  * positives on a mid-task "thanks"; false negatives on a silent topic pivot with no closing
  * phrase at all).
  *
- * This module is the fix for the false-negative gap: on every user turn, it asks a cheap model
- * whether the new message still relates to a rolling "current task" descriptor it maintains
- * itself, and — on a detected shift — writes a marker compaction can use to stop chaining the
- * old Goal forward. Both the descriptor and the marker are stored as CustomEntry (session-
- * manager.ts), the same mechanism extensions already use to persist state across session
- * reloads without participating in LLM context.
+ * This module is the fix for the false-negative gap: on every user turn, it asks whether the new
+ * message still relates to a rolling "current task" descriptor it maintains itself, and — on a
+ * detected shift — writes a marker compaction can use to stop chaining the old Goal forward. Both
+ * the descriptor and the marker are stored as CustomEntry (session-manager.ts), the same
+ * mechanism extensions already use to persist state across session reloads without participating
+ * in LLM context.
+ *
+ * The related/unrelated judgment is a TypeSafe Jev Noul call (see callJevRelated below, via
+ * jev-client.ts), not a text-generating model: it's a narrow, calibrated yes/no question with no
+ * free-form output to parse, and costs a fraction of a cent per turn. Jev cannot generate the
+ * rolling one-line task summary itself (System One models don't produce text), so that half still
+ * goes to a small text-generating model (callSummaryModel), now asked only for the sentence, not a
+ * JSON boolean.
  *
  * SHADOW MODE (issue #186, Q15): this module always runs and always writes its entries, but
  * compaction.ts only *logs* what it would have done with a detected boundary — it does not yet
@@ -28,6 +35,7 @@
 
 import { type Api, contentText, type Model, retryAssistantCall } from "theoses-ai";
 import type { Context, SimpleStreamOptions } from "theoses-ai/compat";
+import { askJevNoul } from "./jev-client.ts";
 import { resolveConsolidationModel } from "./memory-consolidation.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { CustomEntry, SessionEntry, SessionManager } from "./session-manager.ts";
@@ -52,9 +60,11 @@ export interface TaskBoundaryData {
 }
 
 /**
- * Placeholder resolver: reuses memory-consolidation's model (same cheap/fast tier, same
- * cost-strict OpenRouter provider routing) until a dedicated model is chosen (tracked in issue
- * #186 — the detection *mechanism* is model-agnostic by design; only the model id is pending).
+ * Resolves the model used for the rolling task-summary sentence only (the related/unrelated
+ * judgment itself goes to Jev — see callJevRelated). Reuses memory-consolidation's model (same
+ * cheap/fast tier, same cost-strict OpenRouter provider routing) until a dedicated model is
+ * chosen (tracked in issue #186 — the detection *mechanism* is model-agnostic by design; only the
+ * model id is pending).
  */
 export function resolveTaskBoundaryModel(modelRuntime: ModelRuntime): Model<Api> {
 	return resolveConsolidationModel(modelRuntime);
@@ -65,48 +75,39 @@ export function resolveTaskBoundaryModel(modelRuntime: ModelRuntime): Model<Api>
  * the "no boundary on failure" default from issue #186 Q13. */
 const TASK_BOUNDARY_RETRY_POLICY = { enabled: true, maxRetries: 1, baseDelayMs: 500 };
 
-const TASK_BOUNDARY_INSTRUCTIONS = `You judge whether a new message continues the current task or starts something unrelated.
+/**
+ * Noul threshold for calling a message "related". Set above the neutral 0.5 midpoint to mirror
+ * the old prompt's explicit bias ("err toward related: false when genuinely unsure") now that the
+ * bias is an explicit, tunable number in code instead of an instruction the model had to remember
+ * to follow: a false "unrelated" verdict just resets the rolling descriptor early (cheap), while a
+ * missed shift lets a stale Goal keep biasing the model on unrelated requests (issue #186's actual
+ * context-rot problem).
+ */
+const JEV_RELATED_THRESHOLD = 0.6;
 
-You are given:
-- "Current task": a one-line description of what the conversation has been doing (empty if nothing tracked yet).
-- "New message": the user's latest message.
-
-Decide whether the new message still relates to the current task. Err toward "related: false" when genuinely unsure — a wrong "unrelated" is cheap to recover from, a missed shift is not.
-
-Also produce an updated one-line "current task" description:
-- If related: refine the description to reflect the task's current state (it may have evolved, e.g. gained a sub-step). Keep it a single self-contained sentence.
-- If unrelated: describe the NEW task the message is starting.
-
-Reply with ONLY this JSON:
-{"related": <boolean>, "currentTaskSummary": "<one self-contained sentence>"}`;
-
-interface TaskBoundaryResponse {
-	related: boolean;
-	currentTaskSummary: string;
+/**
+ * Asks Jev whether `newUserMessage` still relates to `currentDescriptor`. Returns the raw noul
+ * probability (0 = unrelated, 1 = related), or undefined on any failure — same "write nothing,
+ * retried naturally next turn" contract the rest of this module already uses.
+ */
+async function callJevRelated(currentDescriptor: string, newUserMessage: string): Promise<number | undefined> {
+	const state = { current_task: currentDescriptor || "(none tracked yet)", new_message: newUserMessage };
+	if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
+		console.error("TASK_BOUNDARY_JEV_REQUEST", JSON.stringify(state));
+	}
+	return askJevNoul(state, "Does `new_message` continue or relate to `current_task`?");
 }
 
-function parseTaskBoundaryResponse(text: string): TaskBoundaryResponse | undefined {
-	const trimmed = text
+const TASK_SUMMARY_INSTRUCTIONS_RELATED = `The new message below continues the current task. Write an updated one-line description of the task, refined to reflect its current state (it may have evolved, e.g. gained a sub-step). Reply with ONLY the single self-contained sentence — no quotes, no commentary, no markdown.`;
+
+const TASK_SUMMARY_INSTRUCTIONS_NEW = `The new message below starts a task unrelated to the current one. Write a one-line description of this NEW task. Reply with ONLY the single self-contained sentence — no quotes, no commentary, no markdown.`;
+
+/** Strips wrapping quotes a model sometimes adds despite being told not to. */
+function cleanSummary(text: string): string {
+	return text
 		.trim()
-		.replace(/^```json/, "")
-		.replace(/```$/, "")
+		.replace(/^["'“](.*)["'”]$/s, "$1")
 		.trim();
-	for (let start = 0; start < trimmed.length; start++) {
-		if (trimmed[start] !== "{") continue;
-		for (let end = trimmed.length; end > start; end--) {
-			if (trimmed[end - 1] !== "}") continue;
-			const candidate = trimmed.slice(start, end);
-			try {
-				const parsed = JSON.parse(candidate);
-				if (typeof parsed.related === "boolean" && typeof parsed.currentTaskSummary === "string") {
-					return { related: parsed.related, currentTaskSummary: parsed.currentTaskSummary.trim() };
-				}
-			} catch {
-				// keep scanning for a valid object
-			}
-		}
-	}
-	return undefined;
 }
 
 /** Scans a branch for the most recent CustomEntry of the given customType. */
@@ -141,14 +142,18 @@ export function findLastUserMessageEntryId(branch: SessionEntry[]): string | und
 	return undefined;
 }
 
-async function callDetector(
+/** Regenerates the rolling one-line task summary. `related` was already decided by Jev
+ * (callJevRelated) — this call only writes the sentence, so its output needs no JSON parsing. */
+async function callSummaryModel(
 	modelRuntime: ModelRuntime,
 	currentDescriptor: string,
 	newUserMessage: string,
+	related: boolean,
 	sessionAffinityId: string,
-): Promise<TaskBoundaryResponse | undefined> {
+): Promise<string | undefined> {
 	const model = resolveTaskBoundaryModel(modelRuntime);
-	const promptText = `${TASK_BOUNDARY_INSTRUCTIONS}\n\nCurrent task: ${currentDescriptor || "(none tracked yet)"}\n\nNew message: ${newUserMessage}`;
+	const instructions = related ? TASK_SUMMARY_INSTRUCTIONS_RELATED : TASK_SUMMARY_INSTRUCTIONS_NEW;
+	const promptText = `${instructions}\n\nCurrent task: ${currentDescriptor || "(none tracked yet)"}\n\nNew message: ${newUserMessage}`;
 	const context: Context = {
 		messages: [{ role: "user", content: [{ type: "text", text: promptText }], timestamp: Date.now() }],
 	};
@@ -159,7 +164,7 @@ async function callDetector(
 	};
 
 	if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
-		console.error("TASK_BOUNDARY_PROMPT", promptText.slice(0, 500));
+		console.error("TASK_BOUNDARY_SUMMARY_PROMPT", promptText.slice(0, 500));
 	}
 
 	try {
@@ -169,9 +174,10 @@ async function callDetector(
 			undefined,
 		);
 		if (response.stopReason === "aborted" || response.stopReason === "error") return undefined;
-		return parseTaskBoundaryResponse(contentText(response.content));
+		const summary = cleanSummary(contentText(response.content));
+		return summary || undefined;
 	} catch (error) {
-		console.error("Task-boundary detection call failed:", error instanceof Error ? error.message : error);
+		console.error("Task-boundary summary call failed:", error instanceof Error ? error.message : error);
 		return undefined;
 	}
 }
@@ -213,23 +219,30 @@ async function runDetection(options: MaybeDetectTaskBoundaryOptions): Promise<vo
 	try {
 		const branch = mainSessionManager.getBranch();
 		const currentDescriptor = getTaskDescriptor(branch);
-		const result = await callDetector(modelRuntime, currentDescriptor, userMessageText, key);
-		if (!result) return; // failure: write nothing, retried naturally next turn
+
+		const jevNoul = await callJevRelated(currentDescriptor, userMessageText);
+		if (jevNoul === undefined) return; // failure: write nothing, retried naturally next turn
+		const related = jevNoul >= JEV_RELATED_THRESHOLD;
+
+		if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
+			console.error(`[task-boundary] jev noul=${jevNoul} related=${related} for ${key}`);
+		}
+
+		const summary = await callSummaryModel(modelRuntime, currentDescriptor, userMessageText, related, key);
+		if (!summary) return; // failure: write nothing, retried naturally next turn
 
 		mainSessionManager.appendCustomEntry(TASK_DESCRIPTOR_CUSTOM_TYPE, {
-			summary: result.currentTaskSummary,
+			summary,
 		} satisfies TaskDescriptorData);
 
-		if (!result.related) {
+		if (!related) {
 			mainSessionManager.appendCustomEntry(TASK_BOUNDARY_CUSTOM_TYPE, {
-				taskSummary: result.currentTaskSummary,
+				taskSummary: summary,
 				beforeEntryId: userMessageEntryId,
 			} satisfies TaskBoundaryData);
 
 			if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
-				console.error(
-					`[task-boundary] shift detected for ${key} before entry ${userMessageEntryId}: "${result.currentTaskSummary}"`,
-				);
+				console.error(`[task-boundary] shift detected for ${key} before entry ${userMessageEntryId}: "${summary}"`);
 			}
 		}
 	} finally {

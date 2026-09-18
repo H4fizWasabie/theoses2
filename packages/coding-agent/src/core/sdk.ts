@@ -133,7 +133,6 @@ export type {
 export {
 	type BackfillOptions,
 	backfillFromSessionLog,
-	CONSOLIDATION_TRIGGER_PHRASES,
 	CONSOLIDATION_TURN_CEILING,
 	type MaybeRunConsolidationOptions,
 	maybeRunConsolidation,
