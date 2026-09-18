@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.54] - 2026-09-18
 
 - feat: replace two fragile text-based heuristics with TypeSafe Jev (System One) Noul calls. Task-boundary detection's related/unrelated judgment (previously a boolean smuggled inside a hand-parsed JSON blob from a chat model) and memory consolidation's completion trigger (previously a case-insensitive keyword list like "thanks"/"that's all", prone to false positives on "thanks for that, now also fix X" and false negatives on a silent topic pivot) now both go to Jev's Noul primitive via a new shared `jev-client.ts` — a calibrated probability at a fraction of a cent per call, verified live against realistic inputs before merging. `shouldTriggerConsolidation()` is now async; `CONSOLIDATION_TRIGGER_PHRASES` is removed (no longer used).
 
