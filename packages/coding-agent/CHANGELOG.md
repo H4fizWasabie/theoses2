@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.57] - 2026-09-18
 
 - fix: every Jev request now carries an `AbortSignal.timeout` (default 5 s, `{ timeoutMs }` override) so a stalled response is cancelled instead of hanging its caller. (#270)
