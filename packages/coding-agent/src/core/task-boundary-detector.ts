@@ -99,12 +99,44 @@ const JEV_AMBIGUOUS_BAND = 0.1;
  * probability (0 = unrelated, 1 = related), or undefined on any failure — same "write nothing,
  * retried naturally next turn" contract the rest of this module already uses.
  */
-async function callJevRelated(currentDescriptor: string, newUserMessage: string): Promise<number | undefined> {
-	const state = { current_task: currentDescriptor || "(none tracked yet)", new_message: newUserMessage };
+async function callJevRelated(
+	currentDescriptor: string,
+	newUserMessage: string,
+	previousReply: string,
+): Promise<number | undefined> {
+	const state: Record<string, string> = {
+		current_task: currentDescriptor || "(none tracked yet)",
+		new_message: newUserMessage,
+	};
+	if (previousReply) state.previous_reply = previousReply;
 	if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
 		console.error("TASK_BOUNDARY_JEV_REQUEST", JSON.stringify(state));
 	}
-	return askJevNoul(state, "Does `new_message` continue or relate to `current_task`?");
+	return askJevNoul(state, JEV_RELATED_INSTRUCTIONS);
+}
+
+/** `previous_reply` is what the assistant last said. Without it a terse follow-up ("go", "check",
+ * "is it done?") has nothing to be related to and scores as a topic change (seen live: "Check"
+ * scored 0.32-0.78 within one task). */
+const JEV_RELATED_INSTRUCTIONS =
+	"Does `new_message` continue or relate to `current_task`? `previous_reply`, when present, is what the assistant " +
+	"said just before; a short message that answers, approves, or follows up on it continues the task.";
+
+/** Cap on the assistant reply carried into a Jev call. Replies can be long; the ending (the
+ * question asked or next step proposed) is what a terse follow-up refers to, so keep the tail. */
+const PREVIOUS_REPLY_MAX_CHARS = 600;
+
+/** Text of the last assistant message before `beforeEntryId` (tail-truncated), or "" if none. */
+export function findPreviousAssistantText(branch: SessionEntry[], beforeEntryId: string): string {
+	const anchor = branch.findIndex((entry) => entry.id === beforeEntryId);
+	for (let i = (anchor === -1 ? branch.length : anchor) - 1; i >= 0; i--) {
+		const entry = branch[i];
+		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+		const text = contentText(entry.message.content).trim();
+		if (!text) continue; // tool-call-only turn: keep looking for one that said something
+		return text.length > PREVIOUS_REPLY_MAX_CHARS ? text.slice(-PREVIOUS_REPLY_MAX_CHARS) : text;
+	}
+	return "";
 }
 
 const ESCALATED_RELATED_INSTRUCTIONS = `Does the new message below continue or relate to the current task? Reply with ONLY the single word "true" or "false" — no quotes, no commentary, no markdown.`;
@@ -119,10 +151,12 @@ async function callEscalatedRelated(
 	modelRuntime: ModelRuntime,
 	currentDescriptor: string,
 	newUserMessage: string,
+	previousReply: string,
 	sessionAffinityId: string,
 ): Promise<boolean | undefined> {
 	const model = resolveTaskBoundaryModel(modelRuntime);
-	const promptText = `${ESCALATED_RELATED_INSTRUCTIONS}\n\nCurrent task: ${currentDescriptor || "(none tracked yet)"}\n\nNew message: ${newUserMessage}`;
+	const replyLine = previousReply ? `\n\nAssistant's previous reply: ${previousReply}` : "";
+	const promptText = `${ESCALATED_RELATED_INSTRUCTIONS}\n\nCurrent task: ${currentDescriptor || "(none tracked yet)"}${replyLine}\n\nNew message: ${newUserMessage}`;
 	const context: Context = {
 		messages: [{ role: "user", content: [{ type: "text", text: promptText }], timestamp: Date.now() }],
 	};
@@ -275,12 +309,20 @@ async function runDetection(options: MaybeDetectTaskBoundaryOptions): Promise<vo
 		const branch = mainSessionManager.getBranch();
 		const currentDescriptor = getTaskDescriptor(branch);
 
-		const jevNoul = await callJevRelated(currentDescriptor, userMessageText);
+		const previousReply = findPreviousAssistantText(branch, userMessageEntryId);
+
+		const jevNoul = await callJevRelated(currentDescriptor, userMessageText, previousReply);
 		if (jevNoul === undefined) return; // failure: write nothing, retried naturally next turn
 		let related = jevNoul >= JEV_RELATED_THRESHOLD;
 
 		if (Math.abs(jevNoul - JEV_RELATED_THRESHOLD) < JEV_AMBIGUOUS_BAND) {
-			const escalated = await callEscalatedRelated(modelRuntime, currentDescriptor, userMessageText, key);
+			const escalated = await callEscalatedRelated(
+				modelRuntime,
+				currentDescriptor,
+				userMessageText,
+				previousReply,
+				key,
+			);
 			if (escalated !== undefined) {
 				if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
 					console.error(

@@ -4,6 +4,7 @@ import type { CustomEntry, SessionEntry, SessionMessageEntry } from "../src/core
 import {
 	findLastUserMessageEntryId,
 	findLatestTaskBoundary,
+	findPreviousAssistantText,
 	getTaskDescriptor,
 	TASK_BOUNDARY_CUSTOM_TYPE,
 	TASK_DESCRIPTOR_CUSTOM_TYPE,
@@ -96,5 +97,38 @@ describe("findLastUserMessageEntryId", () => {
 		const a2 = messageEntry("assistant", "reply 2");
 		const branch: SessionEntry[] = [u1, a1, u2, a2, descriptorEntry("chatting")];
 		expect(findLastUserMessageEntryId(branch)).toBe(u2.id);
+	});
+});
+
+describe("findPreviousAssistantText", () => {
+	it("returns the assistant reply immediately before the anchored user message", () => {
+		const a1 = messageEntry("assistant", "Want me to open the PR?");
+		const u2 = messageEntry("user", "Go");
+		const branch: SessionEntry[] = [messageEntry("user", "fix it"), a1, u2];
+		expect(findPreviousAssistantText(branch, u2.id)).toBe("Want me to open the PR?");
+	});
+
+	it("ignores assistant messages after the anchor", () => {
+		const u1 = messageEntry("user", "hello");
+		const branch: SessionEntry[] = [u1, messageEntry("assistant", "later reply")];
+		expect(findPreviousAssistantText(branch, u1.id)).toBe("");
+	});
+
+	it("skips tool-call-only assistant turns with no text", () => {
+		const u2 = messageEntry("user", "Check");
+		const branch: SessionEntry[] = [
+			messageEntry("assistant", "Deployed to staging, send a test message."),
+			messageEntry("assistant", "   "),
+			u2,
+		];
+		expect(findPreviousAssistantText(branch, u2.id)).toBe("Deployed to staging, send a test message.");
+	});
+
+	it("keeps the tail of a long reply, where the question or next step lives", () => {
+		const long = `${"x".repeat(2000)}Shall I proceed?`;
+		const u2 = messageEntry("user", "yes");
+		const result = findPreviousAssistantText([messageEntry("assistant", long), u2], u2.id);
+		expect(result.length).toBe(600);
+		expect(result.endsWith("Shall I proceed?")).toBe(true);
 	});
 });

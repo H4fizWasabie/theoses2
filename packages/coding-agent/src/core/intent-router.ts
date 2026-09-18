@@ -14,7 +14,8 @@ export type IntentRouterMode = "off" | "shadow" | "on";
 const MAX_STATE_CHARS = 2000;
 /** At/above this Noul probability the message is stamped urgent. Calibrate from shadow logs. */
 const URGENT_PROBABILITY_THRESHOLD = 0.85;
-/** Jev adds ~100-500ms; anything past this is treated as "no verdict" rather than a stall. */
+/** Jev adds ~100-500ms; anything past this is treated as "no verdict" rather than a stall. Also
+ * passed to the request itself so the socket is cancelled, not just abandoned by withTimeout. */
 const JEV_TIMEOUT_MS = 3000;
 
 const URGENCY_INSTRUCTIONS =
@@ -58,7 +59,7 @@ export async function classifyUrgency(
 
 	const askNoul = options.askNoul ?? askJevNoul;
 	const probability = await withTimeout(
-		askNoul({ message: trimmed.slice(0, MAX_STATE_CHARS) }, URGENCY_INSTRUCTIONS),
+		askNoul({ message: trimmed.slice(0, MAX_STATE_CHARS) }, URGENCY_INSTRUCTIONS, { timeoutMs: JEV_TIMEOUT_MS }),
 		JEV_TIMEOUT_MS,
 	);
 
