@@ -4,6 +4,7 @@ import { Bot, type Context, InputFile } from "grammy";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
+	classifyUrgency,
 	configureHttpDispatcher,
 	createAgentSession,
 	DefaultResourceLoader,
@@ -14,6 +15,7 @@ import {
 	maybeRunConsolidation,
 	type SessionInfo,
 	SessionManager,
+	urgentIntakeNotice,
 } from "theoses-coding-agent";
 import { chunkHtml, formatTelegramHtml, renderToolCallBlocks, splitSections, type ToolCallEntry } from "./format.ts";
 
@@ -525,6 +527,9 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 		}
 
 		const messageId = ctx.message.message_id;
+		// Jev urgency pre-screen (issue #268): fired outside the queue chain so it runs
+		// concurrently with any already-queued turn; awaited just before prompt dispatch.
+		const urgencyPromise = classifyUrgency(messageText(ctx) ?? "");
 		const queued = queuedMessageIds.get(chat) ?? [];
 		queued.push(messageId);
 		queuedMessageIds.set(chat, queued);
@@ -704,8 +709,13 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			});
 			const abortController = new AbortController();
 			startTypingIndicator(bot, ctx.chat.id, abortController.signal);
+			let promptText = messageText(ctx) || attachmentNote || "";
+			const urgency = await urgencyPromise;
+			if (urgency.mode === "on" && urgency.isUrgent && messageText(ctx)) {
+				promptText = `${urgentIntakeNotice()}\n\n${promptText}`;
+			}
 			try {
-				await session.prompt(messageText(ctx) || attachmentNote || "", {
+				await session.prompt(promptText, {
 					replyContext: replyText(ctx),
 					images: images.length ? images : undefined,
 					source: "extension",
