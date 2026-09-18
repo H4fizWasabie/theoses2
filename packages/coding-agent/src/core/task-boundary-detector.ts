@@ -115,6 +115,20 @@ async function callJevRelated(
 	return askJevNoul(state, JEV_RELATED_INSTRUCTIONS);
 }
 
+/** A message this short ("go", "check", "prod shadow") can only be a reaction to the assistant's last
+ * reply, never a standalone topic. Kept at 2 words on purpose: a wrongly "related" verdict keeps a
+ * stale Goal chained forward (the costlier error, see JEV_RELATED_THRESHOLD), and 3+ word messages
+ * like "check my email" can genuinely start a new task. */
+const TERSE_FOLLOW_UP_MAX_WORDS = 2;
+
+/** True when `text` is a bare reaction that should be treated as continuing the task without asking
+ * Jev, provided there is a previous assistant reply for it to react to. */
+export function isTerseFollowUp(text: string, previousReply: string): boolean {
+	if (!previousReply) return false;
+	const words = text.trim().split(/\s+/).filter(Boolean);
+	return words.length > 0 && words.length <= TERSE_FOLLOW_UP_MAX_WORDS;
+}
+
 /** `previous_reply` is what the assistant last said. Without it a terse follow-up ("go", "check",
  * "is it done?") has nothing to be related to and scores as a topic change (seen live: "Check"
  * scored 0.32-0.78 within one task). */
@@ -187,9 +201,9 @@ async function callEscalatedRelated(
 	}
 }
 
-const TASK_SUMMARY_INSTRUCTIONS_RELATED = `The new message below continues the current task. Write an updated one-line description of the task, refined to reflect its current state (it may have evolved, e.g. gained a sub-step). Reply with ONLY the single self-contained sentence — no quotes, no commentary, no markdown.`;
+const TASK_SUMMARY_INSTRUCTIONS_RELATED = `The new message below continues the current task. Write an updated one-line description of the task, refined to reflect its current state (it may have evolved, e.g. gained a sub-step); if the assistant's previous reply is given, use it to say what a short message like "go" or "check" refers to. Reply with ONLY the single self-contained sentence — no quotes, no commentary, no markdown.`;
 
-const TASK_SUMMARY_INSTRUCTIONS_NEW = `The new message below starts a task unrelated to the current one. Write a one-line description of this NEW task. Reply with ONLY the single self-contained sentence — no quotes, no commentary, no markdown.`;
+const TASK_SUMMARY_INSTRUCTIONS_NEW = `The new message below starts a task unrelated to the current one. Write a one-line description of this NEW task (the assistant's previous reply, if given, is context only). Reply with ONLY the single self-contained sentence — no quotes, no commentary, no markdown.`;
 
 /** Strips wrapping quotes a model sometimes adds despite being told not to. */
 function cleanSummary(text: string): string {
@@ -237,12 +251,17 @@ async function callSummaryModel(
 	modelRuntime: ModelRuntime,
 	currentDescriptor: string,
 	newUserMessage: string,
+	previousReply: string,
 	related: boolean,
 	sessionAffinityId: string,
 ): Promise<string | undefined> {
 	const model = resolveTaskBoundaryModel(modelRuntime);
 	const instructions = related ? TASK_SUMMARY_INSTRUCTIONS_RELATED : TASK_SUMMARY_INSTRUCTIONS_NEW;
-	const promptText = `${instructions}\n\nCurrent task: ${currentDescriptor || "(none tracked yet)"}\n\nNew message: ${newUserMessage}`;
+	// The previous reply is what lets a terse message ("Check", "Go") be described as the concrete
+	// task it refers to; without it the descriptor freezes on stale text (seen live: a "strawberry"
+	// descriptor survived a whole conversation about the intent router).
+	const replyLine = previousReply ? `\n\nAssistant's previous reply: ${previousReply}` : "";
+	const promptText = `${instructions}\n\nCurrent task: ${currentDescriptor || "(none tracked yet)"}${replyLine}\n\nNew message: ${newUserMessage}`;
 	const context: Context = {
 		messages: [{ role: "user", content: [{ type: "text", text: promptText }], timestamp: Date.now() }],
 	};
@@ -311,11 +330,20 @@ async function runDetection(options: MaybeDetectTaskBoundaryOptions): Promise<vo
 
 		const previousReply = findPreviousAssistantText(branch, userMessageEntryId);
 
-		const jevNoul = await callJevRelated(currentDescriptor, userMessageText, previousReply);
-		if (jevNoul === undefined) return; // failure: write nothing, retried naturally next turn
-		let related = jevNoul >= JEV_RELATED_THRESHOLD;
+		let related: boolean;
+		let jevNoul: number | undefined;
+		if (isTerseFollowUp(userMessageText, previousReply)) {
+			related = true; // deterministic: no Jev call needed, and none that could misfire
+			if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
+				console.error(`[task-boundary] terse follow-up, related=true (no Jev call) for ${key}`);
+			}
+		} else {
+			jevNoul = await callJevRelated(currentDescriptor, userMessageText, previousReply);
+			if (jevNoul === undefined) return; // failure: write nothing, retried naturally next turn
+			related = jevNoul >= JEV_RELATED_THRESHOLD;
+		}
 
-		if (Math.abs(jevNoul - JEV_RELATED_THRESHOLD) < JEV_AMBIGUOUS_BAND) {
+		if (jevNoul !== undefined && Math.abs(jevNoul - JEV_RELATED_THRESHOLD) < JEV_AMBIGUOUS_BAND) {
 			const escalated = await callEscalatedRelated(
 				modelRuntime,
 				currentDescriptor,
@@ -333,11 +361,18 @@ async function runDetection(options: MaybeDetectTaskBoundaryOptions): Promise<vo
 			}
 		}
 
-		if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
+		if (jevNoul !== undefined && process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
 			console.error(`[task-boundary] jev noul=${jevNoul} related=${related} for ${key}`);
 		}
 
-		const summary = await callSummaryModel(modelRuntime, currentDescriptor, userMessageText, related, key);
+		const summary = await callSummaryModel(
+			modelRuntime,
+			currentDescriptor,
+			userMessageText,
+			previousReply,
+			related,
+			key,
+		);
 		if (!summary) return; // failure: write nothing, retried naturally next turn
 
 		mainSessionManager.appendCustomEntry(TASK_DESCRIPTOR_CUSTOM_TYPE, {

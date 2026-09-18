@@ -6,6 +6,7 @@ import {
 	findLatestTaskBoundary,
 	findPreviousAssistantText,
 	getTaskDescriptor,
+	isTerseFollowUp,
 	TASK_BOUNDARY_CUSTOM_TYPE,
 	TASK_DESCRIPTOR_CUSTOM_TYPE,
 	type TaskBoundaryData,
@@ -130,5 +131,26 @@ describe("findPreviousAssistantText", () => {
 		const result = findPreviousAssistantText([messageEntry("assistant", long), u2], u2.id);
 		expect(result.length).toBe(600);
 		expect(result.endsWith("Shall I proceed?")).toBe(true);
+	});
+});
+
+describe("isTerseFollowUp", () => {
+	it("treats 1-2 word messages as follow-ups when there is a previous reply", () => {
+		expect(isTerseFollowUp("Go", "Shall I proceed?")).toBe(true);
+		expect(isTerseFollowUp("Prod shadow", "Which mode?")).toBe(true);
+		expect(isTerseFollowUp("  check  ", "Deployed.")).toBe(true);
+	});
+
+	it("does not fire without a previous reply to react to", () => {
+		expect(isTerseFollowUp("Go", "")).toBe(false);
+	});
+
+	it("leaves 3+ word messages to Jev, since they can start a new task", () => {
+		expect(isTerseFollowUp("check my email", "Deployed.")).toBe(false);
+		expect(isTerseFollowUp("Is it done?", "Deployed.")).toBe(false);
+	});
+
+	it("ignores empty input", () => {
+		expect(isTerseFollowUp("   ", "Deployed.")).toBe(false);
 	});
 });

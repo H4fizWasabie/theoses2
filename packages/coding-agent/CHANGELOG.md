@@ -4,6 +4,7 @@
 
 - fix: every Jev request now carries an `AbortSignal.timeout` (default 5 s, `{ timeoutMs }` override) so a stalled response is cancelled instead of hanging its caller. (#270)
 - fix: task-boundary detection passes the assistant's previous reply to Jev (`previous_reply`) and to the escalation prompt, so terse follow-ups ("go", "check") are no longer scored as topic changes. (#270)
+- fix: task-boundary skips Jev for 1-2 word messages when a previous assistant reply exists (treated as related), and the rolling task summary now also sees the previous reply so the descriptor no longer freezes on stale text. (#270)
 
 ## [1.0.56] - 2026-09-18
 
