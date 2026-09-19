@@ -17,7 +17,7 @@ This is a source-derived index of configuration fields and environment names. It
 | `transport` | `auto` / transport value | `auto` |
 | `steeringMode`, `followUpMode` | `all` / `one-at-a-time` | Queue policy |
 | `theme` | string | Theme selection |
-| `compaction` | `enabled`, `reserveTokens`, `keepRecentTokens`, `maxHistoryTurns` | enabled; 16,384 reserve; 20,000 recent; 3 turns in accessors |
+| `compaction` | `enabled`, `reserveTokens`, `keepRecentTokens`, `maxHistoryTurns`, `maxDeferredTurns` | enabled; 16,384 reserve; 20,000 recent; 3 turns; 0 deferred turns (no cache-warm deferral) |
 | `branchSummary` | `reserveTokens`, `skipPrompt` | 16,384 reserve; prompt shown |
 | `retry` | enabled, max/base delay, provider retry settings | enabled; 3 retries; 2,000 ms base; provider delay ceiling 60,000 ms |
 | `hideThinkingBlock`, `showCacheMissNotices` | boolean | false |

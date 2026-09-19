@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: compaction is no longer deferred by default, so context stays small again. v1.0.59 let turn-triggered compaction wait up to `2 x maxHistoryTurns` (6) turns for the provider cache to go cold, and prod context reached 75k to 154k tokens (it was 13k to 45k before). The new `compaction.maxDeferredTurns` setting (default 0) sets how many extra turns compaction may wait; the hard cap is now `maxHistoryTurns + maxDeferredTurns`, so the default is 3 and `maxDeferredTurns: 3` restores the old 6. The sliding window now fits the turn that triggers compaction (`maxHistoryTurns + hardCap + 1`, was `+ hardCap`), which stops it dropping a turn one step before the compaction that rewrites the prefix anyway. Turn counts do not bound tokens: one long tool loop can still add tens of thousands.
+
 ## [1.0.63] - 2026-09-19
 
 - feat: the models used by memory consolidation (also task-boundary summaries) and the explorer sub-agent are configurable through `backgroundModels.consolidation` / `backgroundModels.explorer` in `settings.json` (`model`, `providers`, `quantizations`), so swapping a model or provider is a settings edit plus a restart instead of a code change and release. Omitted fields keep the code defaults (the free `deepseek-v4-flash-0731:free` on OpenInference, fp8, no fallbacks); a malformed value fails the background call with a message naming the setting. The overrides travel on `ModelRuntime` (`setBackgroundModels`, set wherever a runtime and settings are paired in `createAgentSession` / `createAgentSessionServices`).

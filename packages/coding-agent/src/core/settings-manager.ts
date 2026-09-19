@@ -20,7 +20,11 @@ export interface CompactionSettings {
 	enabled?: boolean; // default: true
 	reserveTokens?: number; // default: 16384
 	keepRecentTokens?: number; // default: 20000
-	maxHistoryTurns?: number; // default: 5. 0 disables turn-based compaction.
+	maxHistoryTurns?: number; // default: 3. 0 disables turn-based compaction.
+	// Extra turns a turn-triggered compaction may wait past maxHistoryTurns for the provider prompt cache to go
+	// cold, instead of rewriting the prompt while it is warm. default: 0 (compact as soon as maxHistoryTurns is
+	// exceeded, which keeps context small). Each extra turn can keep the cache warm longer but grows the context.
+	maxDeferredTurns?: number;
 }
 
 export interface BranchSummarySettings {
@@ -871,17 +875,23 @@ export class SettingsManager {
 		return this.settings.compaction?.maxHistoryTurns ?? 3;
 	}
 
+	getCompactionMaxDeferredTurns(): number {
+		return this.settings.compaction?.maxDeferredTurns ?? 0;
+	}
+
 	getCompactionSettings(): {
 		enabled: boolean;
 		reserveTokens: number;
 		keepRecentTokens: number;
 		maxHistoryTurns: number;
+		maxDeferredTurns: number;
 	} {
 		return {
 			enabled: this.getCompactionEnabled(),
 			reserveTokens: this.getCompactionReserveTokens(),
 			keepRecentTokens: this.getCompactionKeepRecentTokens(),
 			maxHistoryTurns: this.getCompactionMaxHistoryTurns(),
+			maxDeferredTurns: this.getCompactionMaxDeferredTurns(),
 		};
 	}
 

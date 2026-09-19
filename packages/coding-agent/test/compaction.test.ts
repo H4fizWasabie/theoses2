@@ -241,30 +241,43 @@ describe("cache-aware compaction deferral", () => {
 	const turns = (count: number): SessionEntry[] =>
 		Array.from({ length: count }, (_, i) => createMessageEntry(createUserMessage(`turn ${i}`)));
 
-	it("hard cap is twice maxHistoryTurns, falling back to 3 when turn compaction is disabled", () => {
-		expect(historyTurnHardCap(settings)).toBe(6);
+	// Opt-in deferral: compaction may wait up to 3 extra turns for the provider cache to go cold.
+	const deferring: CompactionSettings = { ...settings, maxDeferredTurns: 3 };
+
+	it("by default the hard cap equals maxHistoryTurns, falling back to 3 when turn compaction is disabled", () => {
+		expect(historyTurnHardCap(settings)).toBe(3);
 		expect(historyTurnHardCap({ ...settings, maxHistoryTurns: 0 })).toBe(3);
 	});
 
-	it("sliding window fits the turns a compaction keeps plus the whole deferral wait", () => {
-		expect(activeContextWindowTurns(settings)).toBe(9);
+	it("maxDeferredTurns raises the hard cap and ignores negative values", () => {
+		expect(historyTurnHardCap(deferring)).toBe(6);
+		expect(historyTurnHardCap({ ...settings, maxDeferredTurns: -2 })).toBe(3);
+	});
+
+	it("sliding window fits the kept turns plus every turn up to and including the one that compacts", () => {
+		expect(activeContextWindowTurns(settings)).toBe(7);
+		expect(activeContextWindowTurns(deferring)).toBe(10);
 		expect(activeContextWindowTurns({ ...settings, maxHistoryTurns: 0 })).toBe(3);
 	});
 
+	it("never defers by default: compaction runs as soon as maxHistoryTurns is exceeded, warm cache or not", () => {
+		expect(shouldDeferCompactionForCache(turns(4), settings, 10_000)).toBe(false);
+	});
+
 	it("defers while the provider cache is warm and turns are under the hard cap", () => {
-		expect(shouldDeferCompactionForCache(turns(5), settings, 10_000)).toBe(true);
+		expect(shouldDeferCompactionForCache(turns(5), deferring, 10_000)).toBe(true);
 	});
 
 	it("still defers after a 5 minute pause, which the provider cache can survive", () => {
-		expect(shouldDeferCompactionForCache(turns(5), settings, 5 * 60_000)).toBe(true);
+		expect(shouldDeferCompactionForCache(turns(5), deferring, 5 * 60_000)).toBe(true);
 	});
 
 	it("runs once the cache has gone cold", () => {
-		expect(shouldDeferCompactionForCache(turns(5), settings, CACHE_WARM_WINDOW_MS)).toBe(false);
+		expect(shouldDeferCompactionForCache(turns(5), deferring, CACHE_WARM_WINDOW_MS)).toBe(false);
 	});
 
 	it("runs regardless of cache once turns pass the hard cap", () => {
-		expect(shouldDeferCompactionForCache(turns(7), settings, 10_000)).toBe(false);
+		expect(shouldDeferCompactionForCache(turns(7), deferring, 10_000)).toBe(false);
 	});
 });
 
