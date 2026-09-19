@@ -255,6 +255,10 @@ describe("cache-aware compaction deferral", () => {
 		expect(shouldDeferCompactionForCache(turns(5), settings, 10_000)).toBe(true);
 	});
 
+	it("still defers after a 5 minute pause, which the provider cache can survive", () => {
+		expect(shouldDeferCompactionForCache(turns(5), settings, 5 * 60_000)).toBe(true);
+	});
+
 	it("runs once the cache has gone cold", () => {
 		expect(shouldDeferCompactionForCache(turns(5), settings, CACHE_WARM_WINDOW_MS)).toBe(false);
 	});

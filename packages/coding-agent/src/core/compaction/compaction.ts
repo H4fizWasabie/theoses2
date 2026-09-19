@@ -160,11 +160,17 @@ export function lastCompactionBoundary(pathEntries: SessionEntry[]): number {
 }
 
 /**
- * Providers cache a prompt prefix for only a few minutes. Any request sent within this window of the
+ * Providers cache a prompt prefix for a few minutes at least. Any request sent within this window of the
  * previous one can still hit that cache, so rewriting the history (compaction, chain reset, window slide)
- * inside it turns an otherwise cached request into a full-price miss.
+ * or the system prompt inside it turns an otherwise cached request into a full-price miss.
+ *
+ * The window errs long on purpose. Holding a rewrite while the provider cache has already expired costs
+ * only a slightly stale prompt and a few extra raw turns (bounded by the hard cap below); rewriting while
+ * it is still alive throws away a cache that would have hit. A production DeepSeek request sent 273s after
+ * the previous one was still able to read cached tokens, but the old 4 minute window had already released
+ * the rewrite, so a system prompt rebuild turned it into a 66k-token miss.
  */
-export const CACHE_WARM_WINDOW_MS = 4 * 60_000;
+export const CACHE_WARM_WINDOW_MS = 10 * 60_000;
 
 /** How many multiples of `maxHistoryTurns` a turn-triggered compaction may be deferred to keep the cache warm. */
 const HISTORY_TURN_HARD_CAP_FACTOR = 2;
