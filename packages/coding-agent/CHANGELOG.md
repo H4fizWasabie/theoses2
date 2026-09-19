@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.61] - 2026-09-19
 
 - fix: the prompt-cache warm window (`CACHE_WARM_WINDOW_MS`) is now 10 minutes, up from 4. Compaction, task-boundary chain resets and the system prompt rebuild (Working Note, artifact catalog) are held while the last response is inside it. A production request 273s after the previous one still read cached tokens, but the 4 minute window had released the system prompt rebuild, which rewrote the prompt ahead of the whole conversation and turned it into a 66k-token miss. The turn hard cap still bounds how long compaction can wait.
 - removed: `core/intent-router.ts` (`classifyUrgency`, `resolveIntentRouterMode`, `urgentIntakeNotice`) and its exports from `core/sdk.ts` and the package index, along with the `THEOSES_INTENT_ROUTER` env var. The urgency pre-screen (#268) is unused.
