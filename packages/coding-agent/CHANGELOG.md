@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.63] - 2026-09-19
 
 - feat: the models used by memory consolidation (also task-boundary summaries) and the explorer sub-agent are configurable through `backgroundModels.consolidation` / `backgroundModels.explorer` in `settings.json` (`model`, `providers`, `quantizations`), so swapping a model or provider is a settings edit plus a restart instead of a code change and release. Omitted fields keep the code defaults (the free `deepseek-v4-flash-0731:free` on OpenInference, fp8, no fallbacks); a malformed value fails the background call with a message naming the setting. The overrides travel on `ModelRuntime` (`setBackgroundModels`, set wherever a runtime and settings are paired in `createAgentSession` / `createAgentSessionServices`).
 
