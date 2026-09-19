@@ -115,6 +115,29 @@ function duplicateOf(a: SubjectWords, b: SubjectWords): boolean {
 	return jaccard(a.significant, b.significant) >= NEAR_DUPLICATE_JACCARD;
 }
 
+/** Share of significant words two subjects must have in common to count as the same fact when ranking results. */
+export const LIKELY_RESTATEMENT_JACCARD = 0.5;
+
+/**
+ * A looser cousin of `areDuplicateSubjects` for choosing which results to show, not for merging or archiving:
+ * two subjects that use the same numbers and the same negations and share at least `minJaccard` of their
+ * significant words are almost always the same fact reworded ("Hafiz is the creator of Theoses and should be
+ * addressed as 'abah'" against "The user is abah (Hafiz), creator of Theoses"). Of 40 pairs it flagged in the
+ * production store and read by hand, about 35 were true restatements and none was clearly a different fact.
+ * Showing only one of them costs a lookup one redundant result; it changes nothing that is stored.
+ */
+export function areLikelyRestatements(a: string, b: string, minJaccard: number = LIKELY_RESTATEMENT_JACCARD): boolean {
+	const wordsA = subjectWords(a);
+	const wordsB = subjectWords(b);
+	if (wordsA.normalized === "" || wordsB.normalized === "") return false;
+	if (wordsA.normalized === wordsB.normalized) return true;
+	if (wordsA.significant.size < MIN_WORDS_FOR_NEAR_MATCH || wordsB.significant.size < MIN_WORDS_FOR_NEAR_MATCH) {
+		return false;
+	}
+	if (!sameSet(wordsA.digitWords, wordsB.digitWords) || !sameSet(wordsA.negations, wordsB.negations)) return false;
+	return jaccard(wordsA.significant, wordsB.significant) >= minJaccard;
+}
+
 export interface DuplicateIndex {
 	/** The stored node this subject is a duplicate of in either direction, or undefined. Earliest wins on ties. */
 	find(subject: string): MemoryNode | undefined;
