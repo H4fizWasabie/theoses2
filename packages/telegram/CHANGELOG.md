@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- fix: the "typing..." indicator now starts when a message is received instead of when its turn reaches the model, so it covers session load after a restart, attachment downloads and queue waits. One indicator per chat is shared by all queued messages, it is re-sent immediately after the bot's first status message (Telegram clears typing when the bot sends a message), the refresh interval is 3s (was 4s, against Telegram's ~5s expiry), and `sendChatAction` failures are logged at most once per 30s instead of being swallowed.
+
+- removed: the Jev urgency pre-screen (`THEOSES_INTENT_ROUTER`) and its prompt stamping. It never fired an urgent verdict in production and cost one Jev call per inbound message; prompts are sent exactly as the message text again.
+
 ## [1.0.60] - 2026-09-19
 
 ## [1.0.59] - 2026-09-19

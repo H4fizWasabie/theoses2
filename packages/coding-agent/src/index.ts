@@ -215,7 +215,6 @@ export {
 	type CreateAgentSessionRuntimeFactory,
 	type CreateAgentSessionRuntimeResult,
 	type CreateAgentSessionServicesOptions,
-	classifyUrgency,
 	// Factory
 	createAgentSession,
 	createAgentSessionFromServices,
@@ -238,7 +237,6 @@ export {
 	EpisodicStore,
 	FileMemoryStore,
 	findLastUserMessageEntryId,
-	type IntentRouterMode,
 	type MaybeDetectTaskBoundaryOptions,
 	type MaybeRunConsolidationOptions,
 	type MemoryEdge,
@@ -246,14 +244,11 @@ export {
 	maybeDetectTaskBoundary,
 	maybeRunConsolidation,
 	type PromptTemplate,
-	resolveIntentRouterMode,
 	resolveTaskBoundaryModel,
 	shouldTriggerConsolidation,
 	stripClockAnnotation,
 	type TaskBoundaryData,
 	type TaskDescriptorData,
-	type UrgencyVerdict,
-	urgentIntakeNotice,
 } from "./core/sdk.ts";
 export {
 	type ArtifactEntry,

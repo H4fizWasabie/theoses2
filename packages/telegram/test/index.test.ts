@@ -8,9 +8,6 @@ vi.mock("theoses-coding-agent", () => ({
 		open: vi.fn(),
 	},
 	createAgentSession: vi.fn(),
-	// Intent router (issue #268): default to off in tests so no Jev path is exercised.
-	classifyUrgency: vi.fn(async () => ({ mode: "off", isUrgent: false })),
-	urgentIntakeNotice: vi.fn(() => "[URGENCY INTAKE: test notice - do not mention]"),
 	maybeRunConsolidation: vi.fn(),
 	maybeDetectTaskBoundary: vi.fn(),
 	findLastUserMessageEntryId: vi.fn(),
@@ -22,7 +19,7 @@ vi.mock("theoses-coding-agent", () => ({
 	}),
 }));
 
-import { classifyUrgency, createAgentSession, SessionManager, urgentIntakeNotice } from "theoses-coding-agent";
+import { createAgentSession, SessionManager } from "theoses-coding-agent";
 import { createTelegramBot, parseModelCommand, replyText } from "../src/index.ts";
 
 function messageUpdate(updateId: number, messageId: number, text: string): Update {
@@ -147,8 +144,6 @@ describe("Telegram update dispatch", () => {
 		// dispatches updates strictly sequentially, so a handler that blocks on the full turn
 		// (which can run for minutes on a long tool call) makes every subsequent update, including
 		// a "/stop", undeliverable until the turn ends on its own.
-		// waitFor: the queued turn now also awaits the intent-router promise (issue #268), so the
-		// prompt call lands one microtask tick later than when this test was written.
 		await vi.waitFor(() => expect(session.prompt).toHaveBeenCalledTimes(1));
 		expect(promptResolved).toBe(false);
 
@@ -157,22 +152,26 @@ describe("Telegram update dispatch", () => {
 	});
 });
 
-function botHarness(releasePrompt: { resolve: () => void } | undefined = undefined) {
+function typingHarness(options: { sessionGate?: Promise<void> } = {}) {
+	const listeners: Array<(event: unknown) => void> = [];
+	const prompts: Array<() => void> = [];
 	const sessionManager = {
 		getChannelSessionKey: () => ({ channel: "telegram", channelSessionId: "1" }),
 		getCwd: () => "/tmp/telegram-test",
 	};
 	const session = {
 		isStreaming: false,
-		prompt: vi.fn(async (_text: string) => {
-			if (releasePrompt) {
-				await new Promise<void>((resolve) => {
-					releasePrompt.resolve = resolve;
-				});
-			}
-		}),
+		prompt: vi.fn(
+			() =>
+				new Promise<void>((resolve) => {
+					prompts.push(resolve);
+				}),
+		),
 		abort: vi.fn(async () => {}),
-		subscribe: vi.fn(() => () => {}),
+		subscribe: vi.fn((listener: (event: unknown) => void) => {
+			listeners.push(listener);
+			return () => {};
+		}),
 		getActiveToolNames: vi.fn(() => []),
 		setActiveToolsByName: vi.fn(),
 		sessionManager,
@@ -180,7 +179,10 @@ function botHarness(releasePrompt: { resolve: () => void } | undefined = undefin
 	};
 	vi.mocked(SessionManager.list).mockResolvedValue([]);
 	vi.mocked(SessionManager.create).mockReturnValue(sessionManager as never);
-	vi.mocked(createAgentSession).mockResolvedValue({ session } as never);
+	vi.mocked(createAgentSession).mockImplementation((async () => {
+		await options.sessionGate;
+		return { session };
+	}) as never);
 
 	const bot = createTelegramBot({ token: "test-token", ownerChatId: "1", cwd: "/tmp/telegram-test" });
 	bot.botInfo = {
@@ -196,28 +198,126 @@ function botHarness(releasePrompt: { resolve: () => void } | undefined = undefin
 		has_main_web_app: false,
 	} as never;
 	vi.spyOn(bot.api, "sendMessage").mockResolvedValue({ message_id: 100 } as never);
-	return { bot, session };
+	const sendChatAction = vi.spyOn(bot.api, "sendChatAction").mockResolvedValue(true as never);
+	return { bot, session, sendChatAction, listeners, prompts };
 }
 
-describe("Intent-router prompt stamping (issue #268)", () => {
-	it("appends the urgent intake notice when the classifier stamps a message", async () => {
-		const release: { resolve: () => void } = { resolve: () => {} };
-		const { bot, session } = botHarness(release);
-		vi.mocked(classifyUrgency).mockResolvedValue({ mode: "on", isUrgent: true, probability: 0.9 });
+describe("Telegram typing indicator", () => {
+	it("starts as soon as the message is received, before the session exists", async () => {
+		vi.useFakeTimers();
+		try {
+			let openGate: () => void = () => {};
+			const gate = new Promise<void>((resolve) => {
+				openGate = resolve;
+			});
+			const { bot, session, sendChatAction, prompts } = typingHarness({ sessionGate: gate });
 
-		await bot.handleUpdate(messageUpdate(1, 2, "the server is down"));
-		await vi.waitFor(() => expect(session.prompt).toHaveBeenCalledTimes(1));
-		expect(String(session.prompt.mock.calls[0]?.[0])).toBe(`the server is down${urgentIntakeNotice()}`);
-		release.resolve();
+			await bot.handleUpdate(messageUpdate(1, 1, "hello"));
+			await vi.advanceTimersByTimeAsync(0);
+
+			expect(sendChatAction).toHaveBeenCalledWith(1, "typing");
+			expect(session.prompt).not.toHaveBeenCalled();
+
+			openGate();
+			await vi.advanceTimersByTimeAsync(0);
+			prompts[0]?.();
+			await vi.advanceTimersByTimeAsync(0);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
-	it("passes normal messages through unchanged", async () => {
-		const { bot, session } = botHarness();
-		vi.mocked(classifyUrgency).mockResolvedValue({ mode: "on", isUrgent: false, probability: 0.1 });
+	it("stops re-sending once the turn has finished", async () => {
+		vi.useFakeTimers();
+		try {
+			const { bot, sendChatAction, prompts } = typingHarness();
 
-		await bot.handleUpdate(messageUpdate(1, 3, "haha good one"));
-		await vi.waitFor(() => expect(session.prompt).toHaveBeenCalledTimes(1));
-		expect(String(session.prompt.mock.calls[0]?.[0])).toBe("haha good one");
+			await bot.handleUpdate(messageUpdate(1, 1, "hello"));
+			await vi.advanceTimersByTimeAsync(0);
+			await vi.advanceTimersByTimeAsync(3000);
+			expect(sendChatAction).toHaveBeenCalledTimes(2);
+
+			prompts[0]?.();
+			await vi.advanceTimersByTimeAsync(0);
+			const callsAtEnd = sendChatAction.mock.calls.length;
+			await vi.advanceTimersByTimeAsync(20_000);
+			expect(sendChatAction).toHaveBeenCalledTimes(callsAtEnd);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("shares one indicator between the running turn and a queued message", async () => {
+		vi.useFakeTimers();
+		try {
+			const { bot, sendChatAction, prompts } = typingHarness();
+
+			await bot.handleUpdate(messageUpdate(1, 1, "first"));
+			await vi.advanceTimersByTimeAsync(0);
+			await bot.handleUpdate(messageUpdate(2, 2, "second"));
+			await vi.advanceTimersByTimeAsync(0);
+			await vi.advanceTimersByTimeAsync(3000);
+
+			// One at receipt plus one tick: a second timer for the queued message would make it 3.
+			expect(sendChatAction).toHaveBeenCalledTimes(2);
+
+			prompts[0]?.();
+			await vi.advanceTimersByTimeAsync(0);
+			await vi.advanceTimersByTimeAsync(3000);
+			// Still typing for the queued message after the first turn ended.
+			expect(sendChatAction.mock.calls.length).toBeGreaterThan(2);
+
+			prompts[1]?.();
+			await vi.advanceTimersByTimeAsync(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("re-sends right after the bot's first status message clears it", async () => {
+		vi.useFakeTimers();
+		try {
+			const { bot, sendChatAction, listeners, prompts } = typingHarness();
+
+			await bot.handleUpdate(messageUpdate(1, 1, "run something"));
+			await vi.advanceTimersByTimeAsync(0);
+			const before = sendChatAction.mock.calls.length;
+
+			for (const listener of listeners) {
+				listener({ type: "tool_execution_start", toolName: "bash", toolCallId: "t1", args: {} });
+			}
+			await vi.advanceTimersByTimeAsync(0);
+
+			expect(sendChatAction.mock.calls.length).toBe(before + 1);
+
+			prompts[0]?.();
+			await vi.advanceTimersByTimeAsync(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("logs a failing indicator once per interval instead of swallowing it", async () => {
+		vi.useFakeTimers();
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const { bot, sendChatAction, prompts } = typingHarness();
+			sendChatAction.mockRejectedValue(new Error("Too Many Requests"));
+
+			await bot.handleUpdate(messageUpdate(1, 1, "hello"));
+			await vi.advanceTimersByTimeAsync(0);
+			await vi.advanceTimersByTimeAsync(9000);
+
+			const typingErrors = errorSpy.mock.calls.filter((call) => String(call[0]).includes("typing indicator failed"));
+			expect(typingErrors).toHaveLength(1);
+			expect(String(typingErrors[0]?.[1])).toContain("Too Many Requests");
+
+			prompts[0]?.();
+			await vi.advanceTimersByTimeAsync(0);
+		} finally {
+			errorSpy.mockRestore();
+			vi.useRealTimers();
+		}
 	});
 });
 

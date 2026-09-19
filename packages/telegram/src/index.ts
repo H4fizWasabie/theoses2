@@ -4,7 +4,6 @@ import { Bot, type Context, InputFile } from "grammy";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
-	classifyUrgency,
 	configureHttpDispatcher,
 	createAgentSession,
 	DefaultResourceLoader,
@@ -15,7 +14,6 @@ import {
 	maybeRunConsolidation,
 	type SessionInfo,
 	SessionManager,
-	urgentIntakeNotice,
 } from "theoses-coding-agent";
 import { chunkHtml, formatTelegramHtml, renderToolCallBlocks, splitSections, type ToolCallEntry } from "./format.ts";
 
@@ -30,7 +28,10 @@ const TELEGRAM_MESSAGE_LIMIT = 4000;
 const TELEGRAM_DOWNLOAD_TIMEOUT_MS = 120_000;
 const TELEGRAM_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024;
 const TELEGRAM_STOP_REQUEST_TTL_MS = 30_000;
-const TYPING_INTERVAL_MS = 4000; // Telegram's typing indicator expires after ~5s, so it must be re-sent.
+// Telegram's typing indicator expires after ~5s, so it must be re-sent. 3s leaves room for a late timer
+// or a slow API call before it lapses.
+const TYPING_INTERVAL_MS = 3000;
+const TYPING_FAILURE_LOG_INTERVAL_MS = 30_000;
 // Bot API's own documented ceiling for a rich message's text (headings/bold/tables/etc combined).
 const RICH_MESSAGE_CHAR_LIMIT = 32768;
 
@@ -327,14 +328,6 @@ async function sendTelegramReply(
 	}
 }
 
-/** Re-sends the Telegram "typing..." chat action every few seconds until `signal` aborts. */
-function startTypingIndicator(bot: Bot, chatId: number, signal: AbortSignal): void {
-	const tick = () => void bot.api.sendChatAction(chatId, "typing").catch(() => {});
-	tick();
-	const interval = setInterval(tick, TYPING_INTERVAL_MS);
-	signal.addEventListener("abort", () => clearInterval(interval));
-}
-
 async function downloadFile(bot: Bot, token: string, fileId: string): Promise<Uint8Array> {
 	const file = await bot.api.getFile(fileId);
 	if (!file.file_path) throw new Error("Telegram file has no download path");
@@ -477,6 +470,46 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 		return true;
 	};
 
+	// One typing indicator per chat, shared by every message queued for it. It starts when a message is
+	// received (not when its turn reaches the model), so session load, attachment downloads and queue
+	// waits are covered, and it ends when the last holder releases it.
+	const typingIndicators = new Map<string, { holders: number; interval: ReturnType<typeof setInterval> }>();
+	let lastTypingFailureLogAt = 0;
+	const sendTyping = (id: number): void => {
+		bot.api.sendChatAction(id, "typing").catch((error: unknown) => {
+			// Failures used to be swallowed silently, which made a missing indicator undiagnosable.
+			const now = Date.now();
+			if (now - lastTypingFailureLogAt < TYPING_FAILURE_LOG_INTERVAL_MS) return;
+			lastTypingFailureLogAt = now;
+			console.error("Telegram typing indicator failed:", error instanceof Error ? error.message : error);
+		});
+	};
+	const acquireTyping = (chat: string, id: number): (() => void) => {
+		let indicator = typingIndicators.get(chat);
+		if (!indicator) {
+			sendTyping(id);
+			indicator = { holders: 0, interval: setInterval(() => sendTyping(id), TYPING_INTERVAL_MS) };
+			indicator.interval.unref?.();
+			typingIndicators.set(chat, indicator);
+		}
+		indicator.holders++;
+		let released = false;
+		return () => {
+			if (released) return;
+			released = true;
+			const current = typingIndicators.get(chat);
+			if (!current) return;
+			current.holders--;
+			if (current.holders > 0) return;
+			clearInterval(current.interval);
+			typingIndicators.delete(chat);
+		};
+	};
+	/** Telegram drops the typing status the moment the bot sends a message, so re-send it right after one. */
+	const refreshTyping = (chat: string, id: number): void => {
+		if (typingIndicators.has(chat)) sendTyping(id);
+	};
+
 	bot.on("message", async (ctx) => {
 		const chat = chatId(ctx);
 		if (chat !== ownerChatId || !ctx.message) return;
@@ -527,9 +560,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 		}
 
 		const messageId = ctx.message.message_id;
-		// Jev urgency pre-screen (issue #268): fired outside the queue chain so it runs
-		// concurrently with any already-queued turn; awaited just before prompt dispatch.
-		const urgencyPromise = classifyUrgency(messageText(ctx) ?? "");
+		const releaseTyping = acquireTyping(chat, ctx.chat.id);
 		const queued = queuedMessageIds.get(chat) ?? [];
 		queued.push(messageId);
 		queuedMessageIds.set(chat, queued);
@@ -640,6 +671,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 								reply_parameters: { message_id: ctx.message.message_id },
 							});
 							statusMessageId = sent.message_id;
+							refreshTyping(chat, ctx.chat.id);
 						} else {
 							await bot.api.editMessageText(ctx.chat.id, statusMessageId, text);
 						}
@@ -661,6 +693,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 								reply_parameters: { message_id: ctx.message.message_id },
 							});
 							statusMessageId = sent.message_id;
+							refreshTyping(chat, ctx.chat.id);
 						} else {
 							await rawApi.editMessageText({
 								chat_id: ctx.chat.id,
@@ -707,24 +740,15 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 					}
 				}
 			});
-			const abortController = new AbortController();
-			startTypingIndicator(bot, ctx.chat.id, abortController.signal);
-			let promptText = messageText(ctx) || attachmentNote || "";
-			const urgency = await urgencyPromise;
-			if (urgency.mode === "on" && urgency.isUrgent && messageText(ctx)) {
-				// Appended, clock-annotation style: trailing harness metadata on the newest turn,
-				// never part of the cached prefix, and worded so it doesn't leak into replies.
-				promptText = `${promptText}${urgentIntakeNotice()}`;
-			}
 			try {
-				await session.prompt(promptText, {
+				await session.prompt(messageText(ctx) || attachmentNote || "", {
 					replyContext: replyText(ctx),
 					images: images.length ? images : undefined,
 					source: "extension",
 				});
 			} finally {
 				unsubscribe();
-				abortController.abort();
+				releaseTyping();
 				runningTool.delete(chat);
 			}
 			await statusPending;
@@ -805,6 +829,8 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 		// own dispatch loop move on to the next update instead of waiting on it.
 		void next
 			.finally(() => {
+				// Also covers turns that never reach the prompt: skipped by /stop, /model, or a failure.
+				releaseTyping();
 				const depth = (queueDepth.get(chat) ?? 1) - 1;
 				if (depth > 0) queueDepth.set(chat, depth);
 				else queueDepth.delete(chat);
