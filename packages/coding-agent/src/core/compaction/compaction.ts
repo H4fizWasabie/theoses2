@@ -131,6 +131,8 @@ export interface CompactionSettings {
 	reserveTokens: number;
 	keepRecentTokens: number;
 	maxHistoryTurns: number;
+	/** Extra turns compaction may wait past `maxHistoryTurns` for the provider cache to go cold. Default 0. */
+	maxDeferredTurns?: number;
 }
 
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
@@ -138,6 +140,7 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 	reserveTokens: 16384,
 	keepRecentTokens: 20000,
 	maxHistoryTurns: 3,
+	maxDeferredTurns: 0,
 };
 
 /** Count user turns in `pathEntries[startIndex..]`. Mirrors the counting logic in
@@ -172,29 +175,29 @@ export function lastCompactionBoundary(pathEntries: SessionEntry[]): number {
  */
 export const CACHE_WARM_WINDOW_MS = 10 * 60_000;
 
-/** How many multiples of `maxHistoryTurns` a turn-triggered compaction may be deferred to keep the cache warm. */
-const HISTORY_TURN_HARD_CAP_FACTOR = 2;
-
 /** Legacy fixed window used when turn-based compaction is disabled (`maxHistoryTurns <= 0`). */
 const FALLBACK_ACTIVE_TURNS = 3;
 
 /**
  * Hard ceiling on user turns since the last compaction. Turn-triggered compaction fires past
- * `maxHistoryTurns` but waits for a cold cache; this ceiling bounds that wait.
+ * `maxHistoryTurns` but may wait up to `maxDeferredTurns` more for a cold cache; this ceiling bounds that
+ * wait. With the default `maxDeferredTurns` of 0 the ceiling equals `maxHistoryTurns`, so compaction is
+ * never deferred and context stays small.
  */
 export function historyTurnHardCap(settings: CompactionSettings): number {
 	if (settings.maxHistoryTurns <= 0) return FALLBACK_ACTIVE_TURNS;
-	return settings.maxHistoryTurns * HISTORY_TURN_HARD_CAP_FACTOR;
+	return settings.maxHistoryTurns + Math.max(0, settings.maxDeferredTurns ?? 0);
 }
 
 /**
  * Size of the sliding window in `limitActiveContextMessages`. A compaction keeps `maxHistoryTurns` raw
- * turns and the deferred wait adds up to `historyTurnHardCap` more, so a smaller window would drop turns
- * (and rewrite the prefix) while compaction is still deliberately waiting.
+ * turns and runs after the turn that passes `historyTurnHardCap`, so at that turn's prompt the context
+ * holds the kept turns plus `historyTurnHardCap + 1` new ones. A smaller window would drop a turn (and
+ * rewrite the prefix) one step before the compaction that is about to rewrite it anyway.
  */
 export function activeContextWindowTurns(settings: CompactionSettings): number {
 	if (settings.maxHistoryTurns <= 0) return FALLBACK_ACTIVE_TURNS;
-	return settings.maxHistoryTurns + historyTurnHardCap(settings);
+	return settings.maxHistoryTurns + historyTurnHardCap(settings) + 1;
 }
 
 /**

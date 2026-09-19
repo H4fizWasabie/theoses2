@@ -252,6 +252,21 @@ describe("SettingsManager", () => {
 		});
 	});
 
+	describe("compaction turn settings", () => {
+		it("defaults to compacting past 3 turns with no cache-warm deferral", () => {
+			const settings = SettingsManager.inMemory().getCompactionSettings();
+
+			expect(settings.maxHistoryTurns).toBe(3);
+			expect(settings.maxDeferredTurns).toBe(0);
+		});
+
+		it("reads maxDeferredTurns from settings", () => {
+			const manager = SettingsManager.inMemory({ compaction: { maxHistoryTurns: 4, maxDeferredTurns: 2 } });
+
+			expect(manager.getCompactionSettings()).toMatchObject({ maxHistoryTurns: 4, maxDeferredTurns: 2 });
+		});
+	});
+
 	describe("httpIdleTimeoutMs", () => {
 		it("should default to 5 minutes", () => {
 			const manager = SettingsManager.create(projectDir, agentDir);

@@ -134,16 +134,22 @@ Use `--offline` or `THEOSES_OFFLINE=1` to disable startup network operations.
 | `compaction.enabled` | boolean | `true` | Enable auto-compaction |
 | `compaction.reserveTokens` | number | `16384` | Tokens reserved for LLM response |
 | `compaction.keepRecentTokens` | number | `20000` | Recent tokens to keep (not summarized) |
+| `compaction.maxHistoryTurns` | number | `3` | Compaction triggers once more than this many user turns have accumulated since the last one, and keeps this many raw turns. `0` disables turn-based compaction |
+| `compaction.maxDeferredTurns` | number | `0` | Extra turns compaction may wait past `maxHistoryTurns` for the provider prompt cache to go cold, instead of rewriting the prompt while it is warm. `0` compacts as soon as `maxHistoryTurns` is exceeded, which keeps context small. A larger value trades a bigger context (peak is roughly `maxHistoryTurns + maxDeferredTurns + 1` turns plus the kept turns) for fewer cache misses |
 
 ```json
 {
   "compaction": {
     "enabled": true,
     "reserveTokens": 16384,
-    "keepRecentTokens": 20000
+    "keepRecentTokens": 20000,
+    "maxHistoryTurns": 3,
+    "maxDeferredTurns": 0
   }
 }
 ```
+
+Turn counts bound how many turns are kept, not how many tokens. One turn with a long tool loop can add tens of thousands of tokens by itself, so context can still pass the size you expect from the turn count.
 
 ### Branch Summary
 
