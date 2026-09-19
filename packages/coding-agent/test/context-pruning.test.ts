@@ -70,7 +70,7 @@ describe("pruneFinishedTurnOutputs: tool results", () => {
 
 		expect(messages[0]).toBe(atCap);
 		expect(messages[1]).toBe(small);
-		expect(stats).toEqual({ toolResults: 0, toolCallArguments: 0, charsRemoved: 0 });
+		expect(stats).toEqual({ toolResults: 0, toolCallArguments: 0, images: 0, charsRemoved: 0 });
 	});
 
 	it("returns the same array when nothing changed", () => {
@@ -150,7 +150,7 @@ describe("pruneFinishedTurnOutputs: tool results", () => {
 
 		expect(again.messages).toEqual(first.messages);
 		expect(twice.messages).toBe(first.messages);
-		expect(twice.stats).toEqual({ toolResults: 0, toolCallArguments: 0, charsRemoved: 0 });
+		expect(twice.stats).toEqual({ toolResults: 0, toolCallArguments: 0, images: 0, charsRemoved: 0 });
 	});
 
 	it("stays idempotent at the smallest allowed cap, where the marker is longer than the excerpt", () => {
@@ -265,5 +265,148 @@ describe("pruneFinishedTurnOutputs: settings", () => {
 
 		const input = [toolResult(long(300))];
 		expect(pruneFinishedTurnOutputs(input, { toolResultMaxChars: 50, toolCallArgsMaxChars: 0 }).messages).toBe(input);
+	});
+});
+
+const png = (fill: string) => ({ type: "image" as const, data: fill.repeat(4000), mimeType: "image/png" });
+const withImages = (
+	role: "user" | "toolResult",
+	...blocks: Array<ReturnType<typeof png> | { type: "text"; text: string }>
+): AgentMessage =>
+	(role === "user"
+		? { role: "user", content: blocks, timestamp: 1 }
+		: {
+				role: "toolResult",
+				toolCallId: "c",
+				toolName: "read",
+				content: blocks,
+				isError: false,
+				timestamp: 1,
+			}) as AgentMessage;
+
+function blocksOf(message: AgentMessage): Array<{ type: string; text?: string; data?: string }> {
+	return (message as { content: Array<{ type: string; text?: string; data?: string }> }).content;
+}
+
+describe("pruneFinishedTurnOutputs: images", () => {
+	const OFF = { toolResultMaxChars: 0, toolCallArgsMaxChars: 0 };
+	const saveTo = (path = "/session/images/x.png") => vi.fn((_data: string, _mime: string): string | undefined => path);
+
+	it("keeps the newest images and replaces older ones with a note naming the saved file", () => {
+		const messages = [
+			withImages("toolResult", png("a")),
+			withImages("toolResult", png("b")),
+			withImages("toolResult", png("c")),
+			withImages("toolResult", png("d")),
+			withImages("toolResult", png("e")),
+		];
+		const saveImage = vi.fn((data: string, _mime: string) => `/session/images/${data[0]}.png`);
+
+		const { messages: out, stats } = pruneFinishedTurnOutputs(messages, { ...OFF, keepRecentImages: 3, saveImage });
+
+		expect(out.map((m) => blocksOf(m)[0].type)).toEqual(["text", "text", "image", "image", "image"]);
+		expect(blocksOf(out[0])[0].text).toBe(
+			"[image omitted from this earlier read output; saved at /session/images/a.png, view it again with the read tool]",
+		);
+		expect(blocksOf(out[1])[0].text).toContain("/session/images/b.png");
+		expect(out[2]).toBe(messages[2]);
+		expect(stats.images).toBe(2);
+		expect(saveImage).toHaveBeenCalledTimes(2);
+	});
+
+	it("counts images across user messages and tool results together", () => {
+		const messages = [withImages("user", png("a")), withImages("toolResult", png("b")), withImages("user", png("c"))];
+
+		const { messages: out } = pruneFinishedTurnOutputs(messages, {
+			...OFF,
+			keepRecentImages: 1,
+			saveImage: saveTo(),
+		});
+
+		expect(blocksOf(out[0])[0].text).toContain("earlier user message");
+		expect(blocksOf(out[1])[0].text).toContain("earlier read output");
+		expect(blocksOf(out[2])[0].type).toBe("image");
+	});
+
+	it("keeps text next to an image and only swaps the image block", () => {
+		const messages = [
+			withImages("user", { type: "text", text: "what is this?" }, png("a")),
+			withImages("user", png("b")),
+		];
+
+		const { messages: out } = pruneFinishedTurnOutputs(messages, {
+			...OFF,
+			keepRecentImages: 1,
+			saveImage: saveTo(),
+		});
+
+		expect(blocksOf(out[0])[0]).toEqual({ type: "text", text: "what is this?" });
+		expect(blocksOf(out[0])[1].text).toContain("image omitted");
+	});
+
+	it("replaces every image when asked to keep none", () => {
+		const { messages: out, stats } = pruneFinishedTurnOutputs(
+			[withImages("user", png("a")), withImages("user", png("b"))],
+			{ ...OFF, keepRecentImages: 0, saveImage: saveTo() },
+		);
+
+		expect(out.every((m) => blocksOf(m)[0].type === "text")).toBe(true);
+		expect(stats.images).toBe(2);
+	});
+
+	it("leaves images alone when there are no more than it keeps", () => {
+		const input = [withImages("user", png("a")), withImages("user", png("b"))];
+
+		expect(pruneFinishedTurnOutputs(input, { ...OFF, keepRecentImages: 3, saveImage: saveTo() }).messages).toBe(
+			input,
+		);
+	});
+
+	it("keeps an image it could not save, rather than losing it for good", () => {
+		const input = [withImages("user", png("a")), withImages("user", png("b"))];
+
+		const { messages: out, stats } = pruneFinishedTurnOutputs(input, {
+			...OFF,
+			keepRecentImages: 0,
+			saveImage: () => undefined,
+		});
+
+		expect(out).toBe(input);
+		expect(stats.images).toBe(0);
+	});
+
+	it("does nothing when images are off (no setting, negative, or nowhere to save)", () => {
+		const input = [withImages("user", png("a")), withImages("user", png("b"))];
+
+		expect(pruneFinishedTurnOutputs(input, { ...OFF, saveImage: saveTo() }).messages).toBe(input);
+		expect(pruneFinishedTurnOutputs(input, { ...OFF, keepRecentImages: -1, saveImage: saveTo() }).messages).toBe(
+			input,
+		);
+		expect(pruneFinishedTurnOutputs(input, { ...OFF, keepRecentImages: 0 }).messages).toBe(input);
+	});
+
+	it("is idempotent, so the same messages give the same result on every request", () => {
+		const input = [
+			withImages("toolResult", png("a")),
+			withImages("toolResult", png("b")),
+			withImages("toolResult", png("c")),
+			withImages("toolResult", png("d")),
+		];
+		const options = { ...OFF, keepRecentImages: 2, saveImage: (data: string) => `/p/${data[0]}.png` };
+
+		const first = pruneFinishedTurnOutputs(input, options);
+		const twice = pruneFinishedTurnOutputs(first.messages, options);
+
+		expect(twice.messages).toBe(first.messages);
+		expect(twice.stats.images).toBe(0);
+		expect(pruneFinishedTurnOutputs(input, options).messages).toEqual(first.messages);
+	});
+
+	it("works together with the text cuts in one pass", () => {
+		const input = [toolResult(long(5000)), withImages("user", png("a")), withImages("user", png("b"))];
+
+		const { stats } = pruneFinishedTurnOutputs(input, { ...CAPS, keepRecentImages: 1, saveImage: saveTo() });
+
+		expect(stats).toMatchObject({ toolResults: 1, images: 1 });
 	});
 });

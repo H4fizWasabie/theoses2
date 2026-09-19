@@ -114,6 +114,7 @@ import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import { exportSessionToJsonl } from "./session-export.ts";
+import { saveImageFile } from "./session-images.ts";
 import {
 	type BranchSummaryEntry,
 	type CompactionEntry,
@@ -1334,12 +1335,19 @@ export class AgentSession {
 			const pruned = pruneFinishedTurnOutputs(this.agent.state.messages, {
 				...this.settingsManager.getContextPruningSettings(),
 				spill: (name, text) => spillPrunedText(this.sessionManager, name, text),
+				// The same content-addressed file the session log references, so a note can point straight at it.
+				// An in-memory session has no directory to save into (and must not create one), so its images are kept.
+				saveImage: (data, mimeType) =>
+					this.sessionManager.isPersisted()
+						? saveImageFile(this.sessionManager.getArtifactDirectory(), data, mimeType)
+						: undefined,
 			});
-			if (pruned.stats.toolResults > 0 || pruned.stats.toolCallArguments > 0) {
+			if (pruned.stats.toolResults > 0 || pruned.stats.toolCallArguments > 0 || pruned.stats.images > 0) {
 				this.agent.state.messages = pruned.messages;
 				console.error(
-					`[context-pruning] cut ${pruned.stats.toolResults} tool results and ${pruned.stats.toolCallArguments} ` +
-						`tool-call arguments from finished turns (${pruned.stats.charsRemoved} chars)`,
+					`[context-pruning] cut ${pruned.stats.toolResults} tool results, ${pruned.stats.toolCallArguments} ` +
+						`tool-call arguments and ${pruned.stats.images} images from finished turns ` +
+						`(${pruned.stats.charsRemoved} chars of text)`,
 				);
 			}
 			if (!this._isPromptCacheWarm()) {

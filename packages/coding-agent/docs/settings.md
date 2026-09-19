@@ -159,18 +159,21 @@ Every tool result and tool-call argument stays in the conversation, and is sent 
 |---------|------|---------|-------------|
 | `contextPruning.toolResultMaxChars` | number | `1500` | Tool results with more text than this are cut. `0` turns it off. Values from 1 to 399 are raised to 400 |
 | `contextPruning.toolCallArgsMaxChars` | number | `1500` | String values inside tool-call arguments (a file being written, an edit's text) longer than this are cut. `0` turns it off. Values from 1 to 399 are raised to 400 |
+| `contextPruning.keepRecentImages` | number | `3` | How many of the newest images from finished turns stay in the context. Older ones are replaced by a note with the path of the saved image file, which the model can `read` to view it again. `0` replaces them all; a negative number turns it off. An image that cannot be saved is kept |
 
 ```json
 {
   "contextPruning": {
     "toolResultMaxChars": 1500,
-    "toolCallArgsMaxChars": 1500
+    "toolCallArgsMaxChars": 1500,
+    "keepRecentImages": 3
   }
 }
 ```
 
 - The marker says how many characters were omitted and where the full text is saved (`pruned-<tool call id>` in the session's artifact directory), so the model can `read` it. These files are not added to the artifact catalog in the system prompt.
 - Only the live context changes. The session log keeps the original text, so consolidation, backfill and replays still see everything.
+- Images are not stored in the session log any more: each is saved once as a real file, `images/<hash>.<ext>` in the session's artifact directory (mode 0600, identical images share a file), and the log line holds a reference that is turned back into the image when the session loads. That saved file is what an omitted-image note points to. To convert a log written before this, run `theoses sessions externalize-images <session-file>` (`--dry-run` first; stop the service that writes the file, and a backup is kept).
 - The cut is applied once, at the start of a turn, and is identical on every request in that turn, so it does not add prompt-cache misses of its own: the previous turn's messages are already being rewritten at that point, because reasoning is dropped from earlier turns.
 - `recall_turns` returns only conversational text, never tool output; the saved files and a fresh tool call are how cut output is recovered.
 

@@ -98,9 +98,11 @@ describe("AgentSession prunes finished-turn tool output before a new turn", () =
 		if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
 	});
 
-	async function createSession(options: { settings?: Partial<Settings>; persist?: boolean } = {}) {
+	async function createSession(
+		options: { settings?: Partial<Settings>; persist?: boolean; messages?: AgentMessage[] } = {},
+	) {
 		const sent: Context["messages"][] = [];
-		const seeded = finishedTurn();
+		const seeded = options.messages ?? finishedTurn();
 		const agent = new Agent({
 			getApiKey: () => "test-key",
 			initialState: {
@@ -229,5 +231,116 @@ describe("AgentSession prunes finished-turn tool output before a new turn", () =
 		expect(savedPath).toContain("pruned-result-call_old.txt");
 		expect(readFileSync(savedPath, "utf8")).toBe(BIG_OUTPUT);
 		expect(sessionManager.getArtifactCatalog()).not.toContain("pruned-");
+	});
+
+	describe("images", () => {
+		const picture = (fill: string) => ({
+			type: "image" as const,
+			data: Buffer.alloc(4000, fill.charCodeAt(0)).toString("base64"),
+			mimeType: "image/png",
+		});
+		/** Five finished turns, each with a screenshot the assistant opened with read. */
+		function screenshotTurns(): AgentMessage[] {
+			return ["a", "b", "c", "d", "e"].flatMap((name, i) => [
+				{ role: "user", content: [{ type: "text", text: `look at ${name}` }], timestamp: i },
+				assistant(
+					[{ type: "toolCall", id: `call_${name}`, name: "read", arguments: { path: `/tmp/${name}.png` } }],
+					"toolUse",
+				),
+				{
+					role: "toolResult",
+					toolCallId: `call_${name}`,
+					toolName: "read",
+					content: [{ type: "text", text: "Read image file [image/png]" }, picture(name)],
+					isError: false,
+					timestamp: i,
+				},
+				assistant([{ type: "text", text: `seen ${name}` }]),
+			]) as AgentMessage[];
+		}
+		// Five finished turns would trip turn-based compaction, whose summarizer call would arrive first.
+		const NO_COMPACTION = { enabled: false, maxHistoryTurns: 20 };
+		const imageBlocks = (messages: Context["messages"]) =>
+			messages.flatMap((m) =>
+				(m.role === "toolResult" || m.role === "user") && Array.isArray(m.content)
+					? m.content.filter((b) => b.type === "image")
+					: [],
+			);
+		const notes = (messages: Context["messages"]) =>
+			messages
+				.flatMap((m) => (m.role === "toolResult" && Array.isArray(m.content) ? m.content : []))
+				.flatMap((b) => (b.type === "text" && b.text.startsWith("[image omitted") ? [b.text] : []));
+
+		it("sends the newest three images and a note with a real file path for each older one", async () => {
+			const { session: s, sent } = await createSession({
+				persist: true,
+				messages: screenshotTurns(),
+				settings: { compaction: NO_COMPACTION },
+			});
+
+			await s.prompt("next question");
+
+			expect(imageBlocks(sent[0])).toHaveLength(3);
+			const older = notes(sent[0]);
+			expect(older).toHaveLength(2);
+			for (const note of older) {
+				const path = note.match(/saved at (\S+?), view it again with the read tool/)?.[1] ?? "";
+				expect(path).toContain("/images/");
+				expect(existsSync(path)).toBe(true);
+				expect(readFileSync(path).length).toBe(4000);
+			}
+		});
+
+		it("keeps every image in a session that is not persisted, because there is nowhere to save them", async () => {
+			const { session: s, sent } = await createSession({
+				messages: screenshotTurns(),
+				settings: { compaction: NO_COMPACTION },
+			});
+
+			await s.prompt("next question");
+
+			expect(imageBlocks(sent[0])).toHaveLength(5);
+			expect(notes(sent[0])).toHaveLength(0);
+		});
+
+		it("keeps none when configured to, and all of them when turned off", async () => {
+			const none = await createSession({
+				persist: true,
+				messages: screenshotTurns(),
+				settings: { compaction: NO_COMPACTION, contextPruning: { keepRecentImages: 0 } },
+			});
+			await none.session.prompt("next question");
+			expect(imageBlocks(none.sent[0])).toHaveLength(0);
+			expect(notes(none.sent[0])).toHaveLength(5);
+			none.session.dispose();
+
+			const off = await createSession({
+				persist: true,
+				messages: screenshotTurns(),
+				settings: { compaction: NO_COMPACTION, contextPruning: { keepRecentImages: -1 } },
+			});
+			await off.session.prompt("next question");
+			expect(imageBlocks(off.sent[0])).toHaveLength(5);
+		});
+
+		it("does not change the session log, and sends the same images on the next turn", async () => {
+			const {
+				session: s,
+				sent,
+				sessionManager,
+			} = await createSession({
+				persist: true,
+				messages: screenshotTurns(),
+				settings: { compaction: NO_COMPACTION },
+			});
+			const before = JSON.stringify(sessionManager.getEntries());
+
+			await s.prompt("first follow-up");
+			await s.prompt("second follow-up");
+
+			expect(JSON.stringify(sessionManager.getEntries()).startsWith(before.slice(0, -1))).toBe(true);
+			expect(imageBlocks(sent[1])).toHaveLength(3);
+			expect(notes(sent[1])).toEqual(notes(sent[0]));
+		});
 	});
 });

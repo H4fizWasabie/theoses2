@@ -33,6 +33,7 @@ import { handleMcpCommand } from "./cli/mcp-command.ts";
 import { handleMemoryCommand } from "./cli/memory-command.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
+import { handleSessionsCommand } from "./cli/sessions-command.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
 import { handleUpdateCommand } from "./cli-commands.ts";
 import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, VERSION } from "./config.ts";
@@ -582,6 +583,11 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 
 	if (await handleMemoryCommand(args)) {
+		process.exit(process.exitCode ?? 0);
+		return;
+	}
+
+	if (await handleSessionsCommand(args)) {
 		process.exit(process.exitCode ?? 0);
 		return;
 	}

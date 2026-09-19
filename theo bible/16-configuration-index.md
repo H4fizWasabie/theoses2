@@ -18,7 +18,7 @@ This is a source-derived index of configuration fields and environment names. It
 | `steeringMode`, `followUpMode` | `all` / `one-at-a-time` | Queue policy |
 | `theme` | string | Theme selection |
 | `compaction` | `enabled`, `reserveTokens`, `keepRecentTokens`, `maxHistoryTurns`, `maxDeferredTurns` | enabled; 16,384 reserve; 20,000 recent; 3 turns; 0 deferred turns (no cache-warm deferral) |
-| `contextPruning` | `toolResultMaxChars`, `toolCallArgsMaxChars` | 1,500 each; 0 disables; cuts oversized tool output of finished turns from the live context at the next turn start |
+| `contextPruning` | `toolResultMaxChars`, `toolCallArgsMaxChars`, `keepRecentImages` | 1,500 each (0 disables); 3 images kept (0 = replace all, negative = off); cuts oversized tool output and older images of finished turns from the live context at the next turn start |
 | `branchSummary` | `reserveTokens`, `skipPrompt` | 16,384 reserve; prompt shown |
 | `retry` | enabled, max/base delay, provider retry settings | enabled; 3 retries; 2,000 ms base; provider delay ceiling 60,000 ms |
 | `hideThinkingBlock`, `showCacheMissNotices` | boolean | false |
