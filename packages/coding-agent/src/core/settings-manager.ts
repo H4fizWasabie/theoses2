@@ -33,6 +33,11 @@ export interface ContextPruningSettings {
 	toolResultMaxChars?: number;
 	/** String values in tool-call arguments over this many characters are cut likewise. default: 1500. 0 disables. */
 	toolCallArgsMaxChars?: number;
+	/**
+	 * How many of the newest images from finished turns stay in the context; older ones become a note
+	 * naming the file they were saved to. default: 3. 0 replaces them all; a negative number turns it off.
+	 */
+	keepRecentImages?: number;
 }
 
 export interface BranchSummarySettings {
@@ -904,13 +909,15 @@ export class SettingsManager {
 		};
 	}
 
-	getContextPruningSettings(): { toolResultMaxChars: number; toolCallArgsMaxChars: number } {
+	getContextPruningSettings(): { toolResultMaxChars: number; toolCallArgsMaxChars: number; keepRecentImages: number } {
 		const configured = this.settings.contextPruning;
 		// A missing or non-numeric value falls back to the default; 0 is a real value that turns the cut off.
-		const cap = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 1500);
+		const number = (value: unknown, fallback: number): number =>
+			typeof value === "number" && Number.isFinite(value) ? value : fallback;
 		return {
-			toolResultMaxChars: cap(configured?.toolResultMaxChars),
-			toolCallArgsMaxChars: cap(configured?.toolCallArgsMaxChars),
+			toolResultMaxChars: number(configured?.toolResultMaxChars, 1500),
+			toolCallArgsMaxChars: number(configured?.toolCallArgsMaxChars, 1500),
+			keepRecentImages: Math.floor(number(configured?.keepRecentImages, 3)),
 		};
 	}
 

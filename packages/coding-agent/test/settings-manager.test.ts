@@ -257,6 +257,7 @@ describe("SettingsManager", () => {
 			expect(SettingsManager.inMemory().getContextPruningSettings()).toEqual({
 				toolResultMaxChars: 1500,
 				toolCallArgsMaxChars: 1500,
+				keepRecentImages: 3,
 			});
 		});
 
@@ -265,7 +266,19 @@ describe("SettingsManager", () => {
 				contextPruning: { toolResultMaxChars: 800, toolCallArgsMaxChars: 0 },
 			});
 
-			expect(manager.getContextPruningSettings()).toEqual({ toolResultMaxChars: 800, toolCallArgsMaxChars: 0 });
+			expect(manager.getContextPruningSettings()).toEqual({
+				toolResultMaxChars: 800,
+				toolCallArgsMaxChars: 0,
+				keepRecentImages: 3,
+			});
+			expect(
+				SettingsManager.inMemory({ contextPruning: { keepRecentImages: 0 } }).getContextPruningSettings()
+					.keepRecentImages,
+			).toBe(0);
+			expect(
+				SettingsManager.inMemory({ contextPruning: { keepRecentImages: -1 } }).getContextPruningSettings()
+					.keepRecentImages,
+			).toBe(-1);
 		});
 
 		it("falls back to the default for a value that is not a number", () => {
@@ -273,7 +286,11 @@ describe("SettingsManager", () => {
 				contextPruning: { toolResultMaxChars: "lots" as unknown as number, toolCallArgsMaxChars: Number.NaN },
 			});
 
-			expect(manager.getContextPruningSettings()).toEqual({ toolResultMaxChars: 1500, toolCallArgsMaxChars: 1500 });
+			expect(manager.getContextPruningSettings()).toEqual({
+				toolResultMaxChars: 1500,
+				toolCallArgsMaxChars: 1500,
+				keepRecentImages: 3,
+			});
 		});
 	});
 

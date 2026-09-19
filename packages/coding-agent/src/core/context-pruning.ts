@@ -38,11 +38,22 @@ export interface ContextPruningOptions {
 	 * filesystem-safe file name so the same input always maps to the same file.
 	 */
 	spill?: (name: string, text: string) => string | undefined;
+	/**
+	 * How many of the newest images in finished turns stay in the context; older ones are replaced by a
+	 * note naming the file they were saved to. 0 replaces them all, undefined or negative leaves images alone.
+	 */
+	keepRecentImages?: number;
+	/**
+	 * Saves an image so it can be looked at again and returns the file path, or undefined if it cannot be
+	 * saved. An image that cannot be saved is kept: replacing it would lose it for good.
+	 */
+	saveImage?: (data: string, mimeType: string) => string | undefined;
 }
 
 export interface ContextPruningStats {
 	toolResults: number;
 	toolCallArguments: number;
+	images: number;
 	charsRemoved: number;
 }
 
@@ -151,6 +162,65 @@ function pruneAssistantToolCalls(
 	return changed ? { ...message, content } : message;
 }
 
+interface ImageBlock {
+	type: "image";
+	data: string;
+	mimeType: string;
+}
+
+/**
+ * Replaces all but the newest `keep` images with a note naming the file each was saved to, so the
+ * model can `read` it again. Images are counted across every message passed in, in order.
+ */
+function pruneOldImages(
+	messages: AgentMessage[],
+	keep: number,
+	saveImage: NonNullable<ContextPruningOptions["saveImage"]>,
+	stats: ContextPruningStats,
+): AgentMessage[] {
+	const located: Array<{ message: number; block: number }> = [];
+	messages.forEach((message, messageIndex) => {
+		if ((message.role !== "user" && message.role !== "toolResult") || !Array.isArray(message.content)) return;
+		message.content.forEach((block, blockIndex) => {
+			if (block.type === "image") located.push({ message: messageIndex, block: blockIndex });
+		});
+	});
+	const toCut = located.slice(0, Math.max(0, located.length - keep));
+	if (toCut.length === 0) return messages;
+
+	const replacements = new Map<number, Map<number, string>>();
+	for (const { message: messageIndex, block: blockIndex } of toCut) {
+		const message = messages[messageIndex];
+		if ((message.role !== "user" && message.role !== "toolResult") || !Array.isArray(message.content)) continue;
+		const block = message.content[blockIndex] as ImageBlock;
+		const path = saveImage(block.data, block.mimeType);
+		if (!path) continue;
+		const where = message.role === "user" ? "user message" : `${message.toolName} output`;
+		const note = `[image omitted from this earlier ${where}; saved at ${path}, view it again with the read tool]`;
+		const forMessage = replacements.get(messageIndex) ?? new Map<number, string>();
+		forMessage.set(blockIndex, note);
+		replacements.set(messageIndex, forMessage);
+		stats.images++;
+	}
+	if (replacements.size === 0) return messages;
+
+	return messages.map((message, messageIndex) => {
+		const forMessage = replacements.get(messageIndex);
+		if (
+			!forMessage ||
+			(message.role !== "user" && message.role !== "toolResult") ||
+			!Array.isArray(message.content)
+		) {
+			return message;
+		}
+		const content = message.content.map((block, blockIndex) => {
+			const note = forMessage.get(blockIndex);
+			return note === undefined ? block : { type: "text" as const, text: note };
+		});
+		return { ...message, content } as AgentMessage;
+	});
+}
+
 /**
  * Returns the messages with oversized tool results and tool-call arguments cut down. Call it only
  * with messages from finished turns (before the new user message is appended). Already-cut text
@@ -162,8 +232,10 @@ export function pruneFinishedTurnOutputs(
 ): ContextPruningResult {
 	const resultCap = effectiveCap(options.toolResultMaxChars);
 	const argsCap = effectiveCap(options.toolCallArgsMaxChars);
-	const stats: ContextPruningStats = { toolResults: 0, toolCallArguments: 0, charsRemoved: 0 };
-	if (resultCap === 0 && argsCap === 0) return { messages, stats };
+	const stats: ContextPruningStats = { toolResults: 0, toolCallArguments: 0, images: 0, charsRemoved: 0 };
+	const keepImages = options.keepRecentImages ?? -1;
+	const cutImages = keepImages >= 0 && options.saveImage !== undefined;
+	if (resultCap === 0 && argsCap === 0 && !cutImages) return { messages, stats };
 
 	let changed = false;
 	const pruned = messages.map((message) => {
@@ -173,5 +245,8 @@ export function pruneFinishedTurnOutputs(
 		if (next !== message) changed = true;
 		return next;
 	});
-	return { messages: changed ? pruned : messages, stats };
+	const base = changed ? pruned : messages;
+	const withoutOldImages =
+		cutImages && options.saveImage ? pruneOldImages(base, keepImages, options.saveImage, stats) : base;
+	return { messages: withoutOldImages, stats };
 }

@@ -12,7 +12,7 @@ import {
 	writeFileSync,
 } from "fs";
 import { readdir, stat } from "fs/promises";
-import { basename, join, resolve } from "path";
+import { basename, dirname, join, resolve } from "path";
 import { createInterface } from "readline";
 import { StringDecoder } from "string_decoder";
 import type { AgentMessage } from "theoses-agent-core";
@@ -27,6 +27,7 @@ import {
 	createCustomMessage,
 } from "./messages.ts";
 import { type SessionLookupKey, sessionLookupKey } from "./session-cwd.ts";
+import { externalizeImages, hydrateImages } from "./session-images.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
 
@@ -1005,6 +1006,7 @@ export class SessionManager {
 
 			const header = this.fileEntries.find((e) => e.type === "session") as SessionHeader | undefined;
 			this.sessionId = header?.id ?? createSessionId();
+			this._hydrateImages();
 
 			if (migrateToCurrentVersion(this.fileEntries)) {
 				this._rewriteFile();
@@ -1070,12 +1072,21 @@ export class SessionManager {
 		}
 	}
 
+	/** Restores image bytes that the log holds as references. The files sit next to the session's own log. */
+	private _hydrateImages(): void {
+		const inSessionDir = join(this.sessionDir, "artifacts", this.sessionId);
+		const beside = this.sessionFile ? join(dirname(this.sessionFile), "artifacts", this.sessionId) : inSessionDir;
+		const missing = hydrateImages(this.fileEntries, existsSync(inSessionDir) ? inSessionDir : beside);
+		if (missing > 0)
+			console.error(`[session] ${missing} image(s) referenced by ${this.sessionFile} could not be restored`);
+	}
+
 	private _rewriteFile(): void {
 		if (!this.persist || !this.sessionFile) return;
 		const fd = openSync(this.sessionFile, "w");
 		try {
 			for (const entry of this.fileEntries) {
-				writeFileSync(fd, `${JSON.stringify(entry)}\n`);
+				writeFileSync(fd, this._serializeEntry(entry));
 			}
 		} finally {
 			closeSync(fd);
@@ -1282,7 +1293,7 @@ export class SessionManager {
 		const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
 		if (!hasAssistant) {
 			if (this.flushed) {
-				appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`);
+				appendFileSync(this.sessionFile, this._serializeEntry(entry));
 			} else {
 				// Mark as not flushed so when assistant arrives, all entries get written
 				this.flushed = false;
@@ -1294,15 +1305,23 @@ export class SessionManager {
 			const fd = openSync(this.sessionFile, "wx");
 			try {
 				for (const e of this.fileEntries) {
-					writeFileSync(fd, `${JSON.stringify(e)}\n`);
+					writeFileSync(fd, this._serializeEntry(e));
 				}
 			} finally {
 				closeSync(fd);
 			}
 			this.flushed = true;
 		} else {
-			appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`);
+			appendFileSync(this.sessionFile, this._serializeEntry(entry));
 		}
+	}
+
+	/**
+	 * One session-log line. Images are saved to files in the artifact directory and the line carries a
+	 * reference (see session-images.ts); the in-memory entry keeps its bytes.
+	 */
+	private _serializeEntry(entry: FileEntry): string {
+		return `${JSON.stringify(externalizeImages(entry, () => this.getArtifactDirectory()))}\n`;
 	}
 
 	private _appendEntry(entry: SessionEntry): void {
