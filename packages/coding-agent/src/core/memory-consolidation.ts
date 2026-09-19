@@ -13,6 +13,7 @@ import { getAgentDir } from "../config.ts";
 import { type ResolvedBackgroundModelSetting, resolveBackgroundModelSetting } from "./background-models.ts";
 import { EpisodicStore } from "./episodic-store.ts";
 import { askJevChoice, askJevNoul } from "./jev-client.ts";
+import { createDuplicateIndex } from "./memory-dedup.ts";
 import { EDGE_RELATION_DESCRIPTIONS, EDGE_RELATIONS, type EdgeRelation, FileMemoryStore } from "./memory-store.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { SessionManager, type SessionMessageEntry } from "./session-manager.ts";
@@ -244,26 +245,26 @@ function buildExistingNodesSection(memoryStore: FileMemoryStore, transcript: str
 	return candidates.map((c) => `${c.id}: ${c.text}`).join("\n") || "No existing memory nodes.";
 }
 
-interface ParsedFact {
+export interface ParsedFact {
 	id: string;
 	subject: string;
 	body?: string;
 }
 
-interface ParsedEdge {
+export interface ParsedEdge {
 	from: string;
 	to: string;
 	rel: EdgeRelation;
 }
 
-interface ParsedEpisode {
+export interface ParsedEpisode {
 	summary: string;
 	startedAt: string;
 	endedAt: string;
 	relatedFactIds?: string[];
 }
 
-interface ParsedConsolidation {
+export interface ParsedConsolidation {
 	facts: ParsedFact[];
 	edges: ParsedEdge[];
 	episode: ParsedEpisode;
@@ -421,17 +422,37 @@ async function confirmEdgeRelation(fromText: string, toText: string, proposedRel
 	return proposedRel;
 }
 
-/** Writes the parsed response to the memory/episodic stores, resolving local fact ids to real node ids. */
-async function applyConsolidationResult(
+/**
+ * Writes the parsed response to the memory/episodic stores, resolving local fact ids to real node ids.
+ *
+ * The model is asked not to re-emit a fact that already exists, but it only sees a handful of keyword-
+ * matched subjects, so restatements got through: 11% of the real store was duplicates. A fact that only
+ * restates a stored node (see memory-dedup.ts: identical after normalising, or a conservative near match
+ * that adds no words) is not written again; its local id resolves to the existing node, so edges and the
+ * episode attach to it. A restatement that adds words is a more specific fact and is still created.
+ */
+export async function applyConsolidationResult(
 	parsed: ParsedConsolidation,
 	memoryStore: FileMemoryStore,
 	episodicStore: EpisodicStore,
 ): Promise<void> {
 	const idMap = new Map<string, string>();
+	const duplicates = createDuplicateIndex(memoryStore.listNodes());
+	let reused = 0;
 	for (const fact of parsed.facts) {
+		const existing = duplicates.findRestatement(fact.subject);
+		if (existing) {
+			idMap.set(fact.id, existing.id);
+			reused++;
+			// Losslessly adopt an elaboration the stored node lacks.
+			if (fact.body && !existing.body) memoryStore.writeNode({ ...existing, body: fact.body });
+			continue;
+		}
 		const node = memoryStore.createNode({ subject: fact.subject, body: fact.body });
+		duplicates.add(node);
 		idMap.set(fact.id, node.id);
 	}
+	if (reused > 0) console.error(`[memory-dedup] reused ${reused} stored node(s) for facts that only restate them`);
 	const resolve = (id: string): string => idMap.get(id) ?? id;
 
 	/** Local facts aren't real nodes yet when edges are confirmed, so their text comes from the
@@ -445,6 +466,8 @@ async function applyConsolidationResult(
 	};
 
 	for (const edge of parsed.edges) {
+		// Two facts that were merged into one stored node would otherwise become a self-edge.
+		if (resolve(edge.from) === resolve(edge.to)) continue;
 		const rel = await confirmEdgeRelation(nodeText(edge.from), nodeText(edge.to), edge.rel);
 		memoryStore.addEdge(resolve(edge.from), { target: resolve(edge.to), rel });
 	}

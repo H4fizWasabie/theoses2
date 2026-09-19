@@ -30,6 +30,7 @@ import { processFileArguments } from "./cli/file-processor.ts";
 import { buildInitialMessage } from "./cli/initial-message.ts";
 import { listModels } from "./cli/list-models.ts";
 import { handleMcpCommand } from "./cli/mcp-command.ts";
+import { handleMemoryCommand } from "./cli/memory-command.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
@@ -576,6 +577,11 @@ export async function main(args: string[], options?: MainOptions) {
 	configureHttpDispatcher();
 
 	if (await handleMcpCommand(args, bootstrapSettingsManager)) {
+		process.exit(process.exitCode ?? 0);
+		return;
+	}
+
+	if (await handleMemoryCommand(args)) {
 		process.exit(process.exitCode ?? 0);
 		return;
 	}
