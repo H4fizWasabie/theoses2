@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ReadonlySessionManager } from "../session-manager.ts";
 
@@ -31,6 +31,29 @@ export function spillTruncatedOutput(options: SpillOutputOptions): string | unde
 		const data = Buffer.from(raw, "utf-8");
 		writeFileSync(path, data, { mode: 0o600 });
 		sessionManager.appendArtifact(`${tool} output`, path, data.byteLength);
+		return path;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Persist text that context pruning cut out of the live messages, at a path the model can `read`.
+ * Unlike `spillTruncatedOutput` this does not register a catalog entry: a long loop cuts hundreds of
+ * results, and listing them would crowd real document attachments out of the system prompt's artifact
+ * catalog (and change that prompt). The file name is derived from the tool call id, so pruning the
+ * same result again, or after a restart, maps to the same file and the prompt text stays identical.
+ * Fails open like `spillTruncatedOutput`: returns undefined when there is nowhere to write.
+ */
+export function spillPrunedText(
+	sessionManager: ReadonlySessionManager | undefined,
+	name: string,
+	text: string,
+): string | undefined {
+	if (!sessionManager) return undefined;
+	try {
+		const path = join(sessionManager.getArtifactDirectory(), `pruned-${name}`);
+		if (!existsSync(path)) writeFileSync(path, text, { mode: 0o600 });
 		return path;
 	} catch {
 		return undefined;

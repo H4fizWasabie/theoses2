@@ -252,6 +252,31 @@ describe("SettingsManager", () => {
 		});
 	});
 
+	describe("context pruning settings", () => {
+		it("defaults both caps to 1500 characters", () => {
+			expect(SettingsManager.inMemory().getContextPruningSettings()).toEqual({
+				toolResultMaxChars: 1500,
+				toolCallArgsMaxChars: 1500,
+			});
+		});
+
+		it("reads configured caps independently, keeping 0 as a real value that turns a cut off", () => {
+			const manager = SettingsManager.inMemory({
+				contextPruning: { toolResultMaxChars: 800, toolCallArgsMaxChars: 0 },
+			});
+
+			expect(manager.getContextPruningSettings()).toEqual({ toolResultMaxChars: 800, toolCallArgsMaxChars: 0 });
+		});
+
+		it("falls back to the default for a value that is not a number", () => {
+			const manager = SettingsManager.inMemory({
+				contextPruning: { toolResultMaxChars: "lots" as unknown as number, toolCallArgsMaxChars: Number.NaN },
+			});
+
+			expect(manager.getContextPruningSettings()).toEqual({ toolResultMaxChars: 1500, toolCallArgsMaxChars: 1500 });
+		});
+	});
+
 	describe("compaction turn settings", () => {
 		it("defaults to compacting past 3 turns with no cache-warm deferral", () => {
 			const settings = SettingsManager.inMemory().getCompactionSettings();
