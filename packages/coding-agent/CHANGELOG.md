@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: structured-output JSON repair (memory consolidation, compaction distillation) now strips stray control and zero-width characters that appear between tokens, string-aware so string values are never edited. Production consolidation passes were failing on a U+200B before a key and an ESC before a closing bracket, stalling the checkpoint for 15 minutes each time.
+
 ## [1.0.59] - 2026-09-19
 
 - docs: correct the stale "shadow mode" note in `task-boundary-detector.ts`; chain reset has been live since #186. (#274)

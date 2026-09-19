@@ -38,10 +38,12 @@ it("uses API-equivalent reference costs for Coding Plan models", () => {
 		cacheRead: 0.26,
 		cacheWrite: 0,
 	});
+	// models.dev doubled glm-5.3-flash from 0.075/0.25 to 0.15/0.5 on 2026-09-19; the build
+	// regenerates costs from it, so this tracks the current published price.
 	expect(getBuiltinModel("zai-coding-cn", "glm-5.3-flash").cost).toEqual({
-		input: 0.075,
-		output: 0.25,
-		cacheRead: 0.015,
+		input: 0.15,
+		output: 0.5,
+		cacheRead: 0.03,
 		cacheWrite: 0,
 	});
 });
