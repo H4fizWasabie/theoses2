@@ -16,7 +16,7 @@ import { askJevChoice, askJevNoul } from "./jev-client.ts";
 import { createDuplicateIndex } from "./memory-dedup.ts";
 import { EDGE_RELATION_DESCRIPTIONS, EDGE_RELATIONS, type EdgeRelation, FileMemoryStore } from "./memory-store.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
-import { SessionManager, type SessionMessageEntry } from "./session-manager.ts";
+import { type SessionEntry, SessionManager, type SessionMessageEntry } from "./session-manager.ts";
 import { parseStructuredJson } from "./structured-output.ts";
 
 /**
@@ -663,6 +663,30 @@ async function runConsolidationPass(params: {
 	await applyConsolidationResult(parsed, memoryStore, episodicStore);
 }
 
+/**
+ * Picks the messages a live consolidation pass should read: everything after the checkpointed entry.
+ *
+ * A checkpoint id that is not in the branch used to mean "start from the beginning", so the whole session
+ * history was consolidated again in 70-message chunks. That happened on 2026-09-19: the production and
+ * staging bots shared one checkpoint key (`telegram:<chat id>`), each overwrote the other's entry id, and
+ * staging re-consolidated its entire 25MB session (112 passes, 1,309 nodes written into the shared memory
+ * store, about 376 duplicates in all). The same thing would follow a branch switch (the id sits on another
+ * branch of the session) or any session rewrite. A missing id now takes at most the last
+ * CONSOLIDATION_TURN_CEILING messages, one chunk; a session shorter than that is still read in full.
+ * With no checkpoint at all (a session consolidation has never seen) the whole session is read, as before.
+ */
+export function selectConsolidationWindow(
+	branch: SessionEntry[],
+	lastEntryId: string | null,
+): { window: SessionMessageEntry[]; checkpointMissing: boolean } {
+	const anchor = lastEntryId ? branch.findIndex((e) => e.id === lastEntryId) : -1;
+	const messages = branch.slice(anchor + 1).filter((e): e is SessionMessageEntry => e.type === "message");
+	if (lastEntryId && anchor === -1) {
+		return { window: messages.slice(-CONSOLIDATION_TURN_CEILING), checkpointMissing: true };
+	}
+	return { window: messages, checkpointMissing: false };
+}
+
 async function runIfTriggered(options: MaybeRunConsolidationOptions): Promise<void> {
 	const { channel, channelSessionId, userMessageText, mainSessionManager, modelRuntime } = options;
 
@@ -685,8 +709,12 @@ async function runIfTriggered(options: MaybeRunConsolidationOptions): Promise<vo
 		const lastEntryId = entry?.lastEntryId ?? null;
 
 		const branch = mainSessionManager.getBranch();
-		const startIndex = lastEntryId ? branch.findIndex((e) => e.id === lastEntryId) + 1 : 0;
-		const window = branch.slice(startIndex).filter((e): e is SessionMessageEntry => e.type === "message");
+		const { window, checkpointMissing } = selectConsolidationWindow(branch, lastEntryId);
+		if (checkpointMissing) {
+			console.error(
+				`[consolidation] checkpoint entry ${lastEntryId} for ${key} is not in this session's branch; consolidating only its last ${window.length} messages instead of the whole history`,
+			);
+		}
 		if (window.length === 0) return;
 
 		if (!(await shouldTriggerConsolidation(userMessageText, window.length))) return;
