@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { rename, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { stringify } from "yaml";
 import { getMemoriesDir } from "../config.ts";
 import { parseFrontmatter } from "../utils/frontmatter.ts";
@@ -243,11 +244,113 @@ interface CachedNodeFile {
  */
 const nodeFileCaches = new Map<string, Map<string, CachedNodeFile>>();
 
+/**
+ * The in-memory cache above starts empty in every process, so the first listing after each restart
+ * still parsed all 7.9k files (about 3 s, blocking the event loop). The default memory directory's
+ * cache is therefore also written to a file next to it and loaded on first use. Entries carry the
+ * same mtime and size check, so a stale or foreign file only costs a re-parse of what changed; the
+ * services sharing a directory each write it atomically (temp file, then rename).
+ */
+
+/** Bump when `parseNode`'s output changes, so a cache written by an older build is not trusted. */
+const PERSISTED_NODE_CACHE_VERSION = 1;
+/** Writes are coalesced: consolidation adds nodes every chunk and each listing after that would rewrite it. */
+const PERSIST_DELAY_MS = 3000;
+
+const persistingDirs = new Set<string>();
+const persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function persistedCachePath(dir: string): string {
+	return join(dirname(dir), `.${basename(dir)}.node-cache.json`);
+}
+
+function isCachedNodeFile(value: unknown): value is CachedNodeFile {
+	if (typeof value !== "object" || value === null) return false;
+	const entry = value as Partial<CachedNodeFile>;
+	if (typeof entry.mtimeMs !== "number" || typeof entry.size !== "number") return false;
+	if (entry.node === null) return true;
+	const node = entry.node as Partial<MemoryNode> | undefined;
+	return (
+		typeof node === "object" &&
+		node !== null &&
+		typeof node.id === "string" &&
+		typeof node.subject === "string" &&
+		typeof node.at === "string" &&
+		Array.isArray(node.edges)
+	);
+}
+
+function loadPersistedNodeCache(dir: string): Map<string, CachedNodeFile> {
+	const cache = new Map<string, CachedNodeFile>();
+	try {
+		const parsed = JSON.parse(readFileSync(persistedCachePath(dir), "utf8")) as {
+			version?: number;
+			entries?: Record<string, unknown>;
+		};
+		if (parsed.version !== PERSISTED_NODE_CACHE_VERSION || typeof parsed.entries !== "object" || !parsed.entries) {
+			return cache;
+		}
+		for (const [name, entry] of Object.entries(parsed.entries)) if (isCachedNodeFile(entry)) cache.set(name, entry);
+	} catch {
+		// Missing, unreadable or corrupt: start empty and rebuild. The cache is only an optimization.
+	}
+	return cache;
+}
+
+/** Writes the directory's cache now (used by the debounce timer, and by tests and shutdown hooks). */
+export async function flushPersistedNodeCache(dir: string): Promise<void> {
+	const timer = persistTimers.get(dir);
+	if (timer) {
+		clearTimeout(timer);
+		persistTimers.delete(dir);
+	}
+	const cache = nodeFileCaches.get(dir);
+	if (!cache || !persistingDirs.has(dir)) return;
+	const path = persistedCachePath(dir);
+	const temp = `${path}.${process.pid}.tmp`;
+	try {
+		const contents = JSON.stringify({ version: PERSISTED_NODE_CACHE_VERSION, entries: Object.fromEntries(cache) });
+		await writeFile(temp, contents, { mode: 0o600 });
+		await rename(temp, path);
+	} catch {
+		// Best effort, same as loading.
+	}
+}
+
+function schedulePersistedNodeCache(dir: string): void {
+	if (persistTimers.has(dir)) return;
+	const timer = setTimeout(() => {
+		persistTimers.delete(dir);
+		void flushPersistedNodeCache(dir);
+	}, PERSIST_DELAY_MS);
+	timer.unref?.();
+	persistTimers.set(dir, timer);
+}
+
+/** Forgets every in-memory node cache, to simulate a fresh process (tests). Persisted files are untouched. */
+export function clearMemoryNodeCaches(): void {
+	nodeFileCaches.clear();
+	persistingDirs.clear();
+	for (const timer of persistTimers.values()) clearTimeout(timer);
+	persistTimers.clear();
+}
+
+export interface FileMemoryStoreOptions {
+	/**
+	 * Persist the parsed-node cache next to the directory so a restarted process does not re-parse
+	 * every file. Default: only for the default memory directory, so stores built on a throwaway
+	 * directory (tests) leave nothing behind.
+	 */
+	persistIndex?: boolean;
+}
+
 export class FileMemoryStore implements MemoryStore {
 	private readonly dir: string;
+	private readonly persistIndex: boolean;
 
-	constructor(dir = defaultMemoryDir()) {
-		this.dir = dir;
+	constructor(dir?: string, options: FileMemoryStoreOptions = {}) {
+		this.dir = dir ?? defaultMemoryDir();
+		this.persistIndex = options.persistIndex ?? dir === undefined;
 		this.migrateLegacyStore();
 	}
 
@@ -296,11 +399,13 @@ export class FileMemoryStore implements MemoryStore {
 		}
 		let cache = nodeFileCaches.get(this.dir);
 		if (!cache) {
-			cache = new Map();
+			cache = this.persistIndex ? loadPersistedNodeCache(this.dir) : new Map();
 			nodeFileCaches.set(this.dir, cache);
 		}
+		if (this.persistIndex) persistingDirs.add(this.dir);
 		const seen = new Set<string>();
 		const nodes: MemoryNode[] = [];
+		let changed = false;
 		for (const name of readdirSync(this.dir)) {
 			if (!name.endsWith(".md")) continue;
 			const path = join(this.dir, name);
@@ -311,6 +416,7 @@ export class FileMemoryStore implements MemoryStore {
 				if (!entry || entry.mtimeMs !== stat.mtimeMs || entry.size !== stat.size) {
 					entry = { mtimeMs: stat.mtimeMs, size: stat.size, node: parseNode(readFileSync(path, "utf8")) ?? null };
 					cache.set(name, entry);
+					changed = true;
 				}
 				seen.add(name);
 				if (entry.node) nodes.push(entry.node);
@@ -319,7 +425,12 @@ export class FileMemoryStore implements MemoryStore {
 				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 			}
 		}
-		for (const name of cache.keys()) if (!seen.has(name)) cache.delete(name);
+		for (const name of cache.keys()) {
+			if (seen.has(name)) continue;
+			cache.delete(name);
+			changed = true;
+		}
+		if (changed && this.persistIndex) schedulePersistedNodeCache(this.dir);
 		return nodes;
 	}
 
