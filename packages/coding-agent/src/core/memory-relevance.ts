@@ -21,12 +21,20 @@
  * took a median 824ms (p95 1.1s) and cost about $0.00006. The extra candidates were labeled after Jev chose them,
  * so their precision (86%) is the softer number.
  *
+ * Showing one of each group of restatements (2026-09-20, the same 30 queries, 20 candidates each): among the
+ * results shown, 28 near-duplicate pairs in 17 queries before the store was cleaned up (21 pairs in 15 queries
+ * after it) became 0. The freed slots were taken by 23 other results (live store), 16 of them relevant (70%; three
+ * of the seven misses were plain Procura descriptions for a query that names Procura). Results shown per query
+ * stayed at 7.6 against 7.7. It trades a little raw precision, since the dropped repeats were all relevant, for
+ * more distinct facts and less repeated text in the model's context.
+ *
  * Jev only ranks what the keyword search found; it cannot surface a node the search missed. Every failure path
  * (no API key, timeout, malformed answer, or every candidate scored under the floor) returns undefined, and the
  * caller falls back to the plain keyword results, so this can only change what is shown, never break `remember`.
  */
 
 import { askJevNouls } from "./jev-client.ts";
+import { areLikelyRestatements } from "./memory-dedup.ts";
 import { type MemoryRecord, REMEMBER_RESULT_LIMIT } from "./memory-store.ts";
 
 /** How many keyword-search candidates the `remember` tool asks the store for before ranking them. */
@@ -44,8 +52,8 @@ export function isRememberRelevanceEnabled(env: NodeJS.ProcessEnv = process.env)
 }
 
 /**
- * Orders `records` by Jev's relevance to `query`, drops those under RELEVANCE_MIN_NOUL and keeps at most `limit`.
- * Returns undefined when there is nothing trustworthy to return: no records, a failed or partial Jev answer, or
+ * Orders `records` by Jev's relevance to `query`, drops those under RELEVANCE_MIN_NOUL, shows only the best-scoring
+ * one of each group of restatements of the same fact, and keeps at most `limit`. Returns undefined when there is nothing trustworthy to return: no records, a failed or partial Jev answer, or
  * no record above the floor.
  */
 export async function rankByRelevance(
@@ -70,15 +78,31 @@ export async function rankByRelevance(
 	const scores = await askJevNouls(state, questions, { timeoutMs: RELEVANCE_TIMEOUT_MS });
 	if (scores === undefined) return undefined;
 
-	const kept = records
+	const ranked = records
 		.map((record, index) => ({ record, score: scores[names[index]] }))
 		.filter((entry) => entry.score >= RELEVANCE_MIN_NOUL)
-		.sort((a, b) => b.score - a.score)
-		.slice(0, limit);
+		.sort((a, b) => b.score - a.score);
+
+	// A fact stored five times in different words scores high five times and would fill five of the slots, so a
+	// candidate that restates one already chosen is skipped and the slot goes to the next different fact. It is
+	// compared with the skipped ones too: a rewording can sit closer to another rewording than to the one shown.
+	const kept: typeof ranked = [];
+	const accountedFor: string[] = [];
+	let collapsed = 0;
+	for (const entry of ranked) {
+		if (kept.length >= limit) break;
+		if (accountedFor.some((text) => areLikelyRestatements(text, entry.record.text))) {
+			collapsed++;
+			accountedFor.push(entry.record.text);
+			continue;
+		}
+		accountedFor.push(entry.record.text);
+		kept.push(entry);
+	}
 
 	if (process.env.THEOSES_DEBUG_REMEMBER) {
 		console.error(
-			`[remember] relevance: ${records.length} candidates, kept ${kept.length}, ${Date.now() - started}ms, top ${kept[0]?.score.toFixed(2) ?? "-"}`,
+			`[remember] relevance: ${records.length} candidates, kept ${kept.length}, collapsed ${collapsed} restatements, ${Date.now() - started}ms, top ${kept[0]?.score.toFixed(2) ?? "-"}`,
 		);
 	}
 	return kept.length > 0 ? kept.map((entry) => entry.record) : undefined;
