@@ -27,6 +27,14 @@ export interface CompactionSettings {
 	maxDeferredTurns?: number;
 }
 
+/** Cuts oversized tool output out of turns that have already finished (see context-pruning.ts). */
+export interface ContextPruningSettings {
+	/** Tool results over this many characters are cut when the next turn starts. default: 1500. 0 disables. */
+	toolResultMaxChars?: number;
+	/** String values in tool-call arguments over this many characters are cut likewise. default: 1500. 0 disables. */
+	toolCallArgsMaxChars?: number;
+}
+
 export interface BranchSummarySettings {
 	reserveTokens?: number; // default: 16384 (tokens reserved for prompt + LLM response)
 	skipPrompt?: boolean; // default: false - when true, skips "Summarize branch?" prompt and defaults to no summary
@@ -108,6 +116,7 @@ export interface Settings {
 	followUpMode?: "all" | "one-at-a-time";
 	theme?: string;
 	compaction?: CompactionSettings;
+	contextPruning?: ContextPruningSettings;
 	branchSummary?: BranchSummarySettings;
 	retry?: RetrySettings;
 	hideThinkingBlock?: boolean;
@@ -892,6 +901,16 @@ export class SettingsManager {
 			keepRecentTokens: this.getCompactionKeepRecentTokens(),
 			maxHistoryTurns: this.getCompactionMaxHistoryTurns(),
 			maxDeferredTurns: this.getCompactionMaxDeferredTurns(),
+		};
+	}
+
+	getContextPruningSettings(): { toolResultMaxChars: number; toolCallArgsMaxChars: number } {
+		const configured = this.settings.contextPruning;
+		// A missing or non-numeric value falls back to the default; 0 is a real value that turns the cut off.
+		const cap = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 1500);
+		return {
+			toolResultMaxChars: cap(configured?.toolResultMaxChars),
+			toolCallArgsMaxChars: cap(configured?.toolCallArgsMaxChars),
 		};
 	}
 
