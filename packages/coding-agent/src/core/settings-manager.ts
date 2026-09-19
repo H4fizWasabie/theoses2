@@ -8,6 +8,7 @@ import type { TuiMode as RendererTuiMode, ScrollViewScrollbar } from "theoses-tu
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { stripBom } from "../utils/text.ts";
+import type { BackgroundModelConfig } from "./background-models.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 import type {
 	HttpSidecarToolSourceOptions,
@@ -92,6 +93,10 @@ export interface Settings {
 	// breaking a session's own compaction pipeline. Falls back to the active chat model if unset.
 	summarizationProvider?: string;
 	summarizationModel?: string;
+	// Model and provider routing for the OpenRouter-only background paths: memory consolidation (also used
+	// for task-boundary summaries) and the explorer sub-agent. Each entry overrides the code defaults in
+	// background-models.ts; read once at startup.
+	backgroundModels?: BackgroundModelConfig;
 	defaultThinkingLevel?: ThinkingLevel;
 	modelThinkingLevels?: Record<string, ThinkingLevel>; // per-model default thinking level overrides keyed by "provider/modelId"
 	transport?: TransportSetting; // default: "auto"
@@ -743,6 +748,10 @@ export class SettingsManager {
 
 	getSummarizationModel(): string | undefined {
 		return this.settings.summarizationModel;
+	}
+
+	getBackgroundModels(): BackgroundModelConfig {
+		return this.settings.backgroundModels ?? {};
 	}
 
 	setSummarizationModelAndProvider(provider: string, modelId: string): void {

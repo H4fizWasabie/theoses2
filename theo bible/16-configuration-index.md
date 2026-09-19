@@ -11,6 +11,7 @@ This is a source-derived index of configuration fields and environment names. It
 | `lastChangelogVersion` | string | Changelog bookkeeping |
 | `defaultProvider`, `defaultModel` | string | Seed model selection |
 | `summarizationProvider`, `summarizationModel` | string | Maintenance calls use these when set; otherwise active model |
+| `backgroundModels` | `consolidation` / `explorer` → `model`, `providers`, `quantizations` | Overrides the OpenRouter model and provider routing of memory consolidation (and task-boundary summaries) and the explorer; code defaults otherwise; read at startup |
 | `defaultThinkingLevel` | thinking level | Model capability clamping applies |
 | `modelThinkingLevels` | provider/model → thinking level | Per-model override |
 | `transport` | `auto` / transport value | `auto` |

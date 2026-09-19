@@ -47,6 +47,29 @@ Use `/trust` in interactive mode to save a project trust decision for future ses
 }
 ```
 
+### Background Models
+
+Memory consolidation (which also writes task-boundary summaries) and the explorer sub-agent call OpenRouter with their own model and provider routing, separate from the chat model. `backgroundModels.consolidation` and `backgroundModels.explorer` override the defaults in code. Settings are read at startup, so a change needs a restart.
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `backgroundModels.<name>.model` | string | `"deepseek/deepseek-v4-flash-0731:free"` | OpenRouter model id |
+| `backgroundModels.<name>.providers` | string[] | `["OpenInference"]` | OpenRouter provider `order`, by the endpoints API's `provider_name`. Requests fail instead of falling back to a provider outside the list. Must not be empty |
+| `backgroundModels.<name>.quantizations` | string[] | `["fp8"]` | Accepted quantizations. An empty list turns the filter off |
+
+Any field you omit keeps its default. A malformed value fails the background call with a message naming the setting, rather than silently using the default.
+
+```json
+{
+  "backgroundModels": {
+    "consolidation": {
+      "model": "deepseek/deepseek-v4-flash-0731",
+      "providers": ["Baidu", "DeepInfra"]
+    }
+  }
+}
+```
+
 ### UI & Display
 
 | Setting | Type | Default | Description |
