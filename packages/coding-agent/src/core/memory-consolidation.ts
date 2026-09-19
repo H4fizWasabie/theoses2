@@ -13,7 +13,7 @@ import { getAgentDir } from "../config.ts";
 import { type ResolvedBackgroundModelSetting, resolveBackgroundModelSetting } from "./background-models.ts";
 import { EpisodicStore } from "./episodic-store.ts";
 import { askJevChoice, askJevNoul } from "./jev-client.ts";
-import { createDuplicateIndex } from "./memory-dedup.ts";
+import { createMemoryWriteGate, isMemoryGateEnabled } from "./memory-gate.ts";
 import { EDGE_RELATION_DESCRIPTIONS, EDGE_RELATIONS, type EdgeRelation, FileMemoryStore } from "./memory-store.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { type SessionEntry, SessionManager, type SessionMessageEntry } from "./session-manager.ts";
@@ -437,11 +437,13 @@ export async function applyConsolidationResult(
 	episodicStore: EpisodicStore,
 ): Promise<void> {
 	const idMap = new Map<string, string>();
-	const duplicates = createDuplicateIndex(memoryStore.listNodes());
+	const gate = createMemoryWriteGate(memoryStore.listNodes(), { jev: isMemoryGateEnabled() });
 	let reused = 0;
+	let superseded = 0;
 	for (const fact of parsed.facts) {
-		const existing = duplicates.findRestatement(fact.subject);
-		if (existing) {
+		const verdict = await gate.check(fact.subject);
+		if (verdict.action === "reuse") {
+			const existing = verdict.existing;
 			idMap.set(fact.id, existing.id);
 			reused++;
 			// Losslessly adopt an elaboration the stored node lacks.
@@ -449,10 +451,15 @@ export async function applyConsolidationResult(
 			continue;
 		}
 		const node = memoryStore.createNode({ subject: fact.subject, body: fact.body });
-		duplicates.add(node);
+		if (verdict.action === "supersede") {
+			memoryStore.addEdge(node.id, { target: verdict.existing.id, rel: "supersedes" });
+			superseded++;
+		}
+		gate.noteStored(node);
 		idMap.set(fact.id, node.id);
 	}
 	if (reused > 0) console.error(`[memory-dedup] reused ${reused} stored node(s) for facts that only restate them`);
+	if (superseded > 0) console.error(`[memory-gate] ${superseded} new fact(s) replace a less detailed stored node`);
 	const resolve = (id: string): string => idMap.get(id) ?? id;
 
 	/** Local facts aren't real nodes yet when edges are confirmed, so their text comes from the
