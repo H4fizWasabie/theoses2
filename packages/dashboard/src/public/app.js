@@ -1,3 +1,5 @@
+import { createGraph, isGraphSettled, reheatGraph, stepGraphSimulation } from "./graph-layout.js";
+
 const state = { sessions: [], active: null, history: [], runtime: null, reply: null, tabs: [], activeTab: null, pending: 0, preview: false, filesRoot: "/home", graph: null, liveTurn: null };
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
@@ -500,120 +502,20 @@ $("path-form").addEventListener("submit", (event) => {
 
 // --- Obsidian-style force-directed memory graph view ---
 
-const GRAPH_REPULSION = 1800;
-const GRAPH_SPRING_LENGTH = 70;
-const GRAPH_SPRING_STRENGTH = 0.03;
-const GRAPH_DAMPING = 0.85;
-const GRAPH_ANCHOR_STRENGTH = 0.025;
-const GRAPH_MAX_SPEED = 8;
+// Layout and simulation live in graph-layout.js (pure, unit-tested); this file owns the canvas and input.
 const GRAPH_LABEL_ZOOM = 1.4;
 const GRAPH_MIN_SCALE = 0.08;
 const GRAPH_MAX_SCALE = 4;
-const GRAPH_GOLDEN_ANGLE = 2.399963;
-const CLUSTER_COLORS = ["#4d6b58", "#4a6fa5", "#a5674a", "#7a4a9c", "#4a9c8a", "#9c4a6f", "#8a9c4a", "#4a5f9c"];
-const SOLO_NODE_COLOR = "#b7bab6";
+// The most labels drawn at once when zoomed in; thousands of overlapping labels are unreadable and slow.
+const GRAPH_MAX_LABELS = 400;
+// How hot a node drag makes the simulation, so its neighbours react but the layout settles again quickly.
+const GRAPH_DRAG_ALPHA = 0.3;
 let graphAnimationFrame = null;
 let graphDrag = null; // { node, pointerId, moved, startX, startY } | { pan: true, pointerId, startX, startY, originX, originY }
 let graphHoverNode = null;
 const graphView = { offsetX: 0, offsetY: 0, scale: 1 };
 
 function graphCanvas() { return $("graph-canvas"); }
-
-/** Lightens a "#rrggbb" color toward white by `amount` (0-1), for legible labels that still carry the node's cluster hue. */
-function lightenHexColor(hex, amount) {
-  const num = parseInt(hex.slice(1), 16);
-  const r = (num >> 16) & 255, g = (num >> 8) & 255, b = num & 255;
-  const mix = (c) => Math.round(c + (255 - c) * amount);
-  return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
-}
-
-/** Union-find over edges: nodes connected (directly or transitively) belong to the same cluster. */
-function computeGraphClusters(nodes, edges) {
-  const parent = new Map(nodes.map((node) => [node.id, node.id]));
-  const find = (id) => {
-    while (parent.get(id) !== id) { parent.set(id, parent.get(parent.get(id))); id = parent.get(id); }
-    return id;
-  };
-  for (const edge of edges) {
-    if (!parent.has(edge.source) || !parent.has(edge.target)) continue;
-    const rootA = find(edge.source), rootB = find(edge.target);
-    if (rootA !== rootB) parent.set(rootA, rootB);
-  }
-  const groups = new Map();
-  for (const node of nodes) {
-    const root = find(node.id);
-    if (!groups.has(root)) groups.set(root, []);
-    groups.get(root).push(node);
-  }
-  return [...groups.values()].sort((a, b) => b.length - a.length);
-}
-
-/** Places each cluster on a sunflower spiral so distinct clusters don't start overlapping, colors them, and seeds node positions/anchors within their cluster. Anchors are gentle attractors the simulation pulls toward, keeping clusters visually distinct instead of collapsing into one blob. */
-function layoutGraphClusters(nodes, edges) {
-  const clusters = computeGraphClusters(nodes, edges);
-  clusters.forEach((cluster, index) => {
-    const color = cluster.length > 1 ? CLUSTER_COLORS[index % CLUSTER_COLORS.length] : SOLO_NODE_COLOR;
-    const spread = 26 * Math.sqrt(index);
-    const angle = index * GRAPH_GOLDEN_ANGLE;
-    const anchorX = index === 0 ? 0 : Math.cos(angle) * spread;
-    const anchorY = index === 0 ? 0 : Math.sin(angle) * spread;
-    cluster.forEach((node, i) => {
-      const localAngle = (i / Math.max(cluster.length, 1)) * Math.PI * 2;
-      const localRadius = cluster.length > 1 ? 14 + Math.sqrt(cluster.length) * 8 : 0;
-      node.anchorX = anchorX + Math.cos(localAngle) * localRadius;
-      node.anchorY = anchorY + Math.sin(localAngle) * localRadius;
-      node.x = node.anchorX + (Math.random() - 0.5) * 8;
-      node.y = node.anchorY + (Math.random() - 0.5) * 8;
-      node.vx = 0; node.vy = 0;
-      node.clusterColor = color;
-      node.labelColor = lightenHexColor(color, 0.55);
-      node.clusterSize = cluster.length;
-    });
-  });
-}
-
-function stepGraphSimulation(graph) {
-  const { nodes, edges } = graph;
-  for (const node of nodes) {
-    if (node.pinned) continue;
-    let fx = 0, fy = 0;
-    for (const other of nodes) {
-      if (other === node) continue;
-      const dx = node.x - other.x, dy = node.y - other.y;
-      const distSq = Math.max(dx * dx + dy * dy, 25);
-      const force = GRAPH_REPULSION / distSq;
-      const dist = Math.sqrt(distSq);
-      fx += (dx / dist) * force; fy += (dy / dist) * force;
-    }
-    node._fx = fx; node._fy = fy;
-  }
-  for (const edge of edges) {
-    const source = nodes.find((n) => n.id === edge.source);
-    const target = nodes.find((n) => n.id === edge.target);
-    if (!source || !target) continue;
-    const dx = target.x - source.x, dy = target.y - source.y;
-    const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-    const stretch = dist - GRAPH_SPRING_LENGTH;
-    const force = stretch * GRAPH_SPRING_STRENGTH;
-    const fx = (dx / dist) * force, fy = (dy / dist) * force;
-    if (!source.pinned) { source._fx += fx; source._fy += fy; }
-    if (!target.pinned) { target._fx -= fx; target._fy -= fy; }
-  }
-  for (const node of nodes) {
-    if (node.pinned) continue;
-    node._fx += (node.anchorX - node.x) * GRAPH_ANCHOR_STRENGTH;
-    node._fy += (node.anchorY - node.y) * GRAPH_ANCHOR_STRENGTH;
-    let vx = (node.vx + node._fx) * GRAPH_DAMPING;
-    let vy = (node.vy + node._fy) * GRAPH_DAMPING;
-    // Repulsion is inverse-square and nodes can seed close together, so the first few
-    // frames can spike velocity into the hundreds; clamp speed so energy bleeds off
-    // smoothly instead of launching nodes across the canvas.
-    const speed = Math.hypot(vx, vy);
-    if (speed > GRAPH_MAX_SPEED) { vx = (vx / speed) * GRAPH_MAX_SPEED; vy = (vy / speed) * GRAPH_MAX_SPEED; }
-    node.vx = vx; node.vy = vy;
-    node.x += node.vx; node.y += node.vy;
-  }
-}
 
 function drawGraph(graph) {
   const canvas = graphCanvas();
@@ -629,42 +531,73 @@ function drawGraph(graph) {
   ctx.translate(graphView.offsetX, graphView.offsetY);
   ctx.scale(graphView.scale, graphView.scale);
 
+  // Only what intersects the viewport is drawn, so a zoomed-in view of a large graph stays cheap.
+  const margin = 12 / graphView.scale;
+  const minX = -graphView.offsetX / graphView.scale - margin;
+  const maxX = (width - graphView.offsetX) / graphView.scale + margin;
+  const minY = -graphView.offsetY / graphView.scale - margin;
+  const maxY = (height - graphView.offsetY) / graphView.scale + margin;
+  const inView = (node) => node.x >= minX && node.x <= maxX && node.y >= minY && node.y <= maxY;
+
+  // All edges go into one path and one stroke; a path and a stroke per edge is what made this slow.
   ctx.strokeStyle = "rgba(213, 215, 211, 0.28)";
   ctx.lineWidth = 1 / graphView.scale;
-  for (const edge of graph.edges) {
-    const source = graph.nodes.find((n) => n.id === edge.source);
-    const target = graph.nodes.find((n) => n.id === edge.target);
-    if (!source || !target) continue;
-    ctx.beginPath();
+  ctx.beginPath();
+  for (const { source, target } of graph.links) {
+    if (Math.max(source.x, target.x) < minX || Math.min(source.x, target.x) > maxX) continue;
+    if (Math.max(source.y, target.y) < minY || Math.min(source.y, target.y) > maxY) continue;
     ctx.moveTo(source.x, source.y);
     ctx.lineTo(target.x, target.y);
-    ctx.stroke();
   }
+  ctx.stroke();
 
-  const showLabels = graphView.scale >= GRAPH_LABEL_ZOOM;
   // Node dots are sized in screen pixels, not graph space, so they stay visible at any zoom
   // level instead of shrinking toward invisible when the view is fit zoomed all the way out.
   const screenRadius = Math.min(3 + graphView.scale * 2, 8);
   const radius = screenRadius / graphView.scale;
-  for (const node of graph.nodes) {
+  // One path and one fill per cluster color instead of one per node.
+  for (const [color, group] of graph.colorGroups) {
+    ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.fillStyle = node.clusterColor || SOLO_NODE_COLOR;
-    ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+    for (const node of group) {
+      if (!inView(node)) continue;
+      ctx.moveTo(node.x + radius, node.y);
+      ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+    }
     ctx.fill();
-    if (showLabels || node === graphHoverNode) {
-      ctx.fillStyle = node.labelColor || "#e4e6e2";
-      ctx.font = `${11 / graphView.scale}px "IBM Plex Sans", sans-serif`;
-      ctx.fillText((node.subject || node.id).slice(0, 60), node.x + radius + 4 / graphView.scale, node.y + 4 / graphView.scale);
+  }
+
+  ctx.font = `${11 / graphView.scale}px "IBM Plex Sans", sans-serif`;
+  const drawLabel = (node) => {
+    ctx.fillStyle = node.labelColor || "#e4e6e2";
+    ctx.fillText((node.subject || node.id).slice(0, 60), node.x + radius + 4 / graphView.scale, node.y + 4 / graphView.scale);
+  };
+  if (graphView.scale >= GRAPH_LABEL_ZOOM) {
+    let labelled = 0;
+    for (const node of graph.nodes) {
+      if (!inView(node)) continue;
+      drawLabel(node);
+      if (++labelled >= GRAPH_MAX_LABELS) break;
     }
   }
+  if (graphHoverNode && inView(graphHoverNode)) drawLabel(graphHoverNode);
   ctx.restore();
 }
 
-function graphTick() {
-  if (!state.graph) return;
-  stepGraphSimulation(state.graph);
-  drawGraph(state.graph);
+/** Draws one frame on the next animation frame; calls made before it fires are coalesced into it. */
+function scheduleGraphFrame() {
+  if (graphAnimationFrame || !state.graph) return;
   graphAnimationFrame = requestAnimationFrame(graphTick);
+}
+
+function graphTick() {
+  graphAnimationFrame = null;
+  const graph = state.graph;
+  if (!graph) return;
+  if (!isGraphSettled(graph)) stepGraphSimulation(graph);
+  drawGraph(graph);
+  // Keep animating only while the layout is still moving or a node is being dragged; input wakes it again.
+  if (!isGraphSettled(graph) || graphDrag) scheduleGraphFrame();
 }
 
 function toGraphSpace(clientX, clientY) {
@@ -701,34 +634,41 @@ function fitGraphView() {
   graphView.offsetY = height / 2 - graphView.scale * (minY + maxY) / 2;
 }
 
-async function loadMemoryGraph() {
+/** `fresh` skips the server's short-lived cache, for the refresh button. */
+async function loadMemoryGraph(fresh = false) {
   $("graph-status").textContent = "Loading…";
   try {
-    const data = await request("/api/memory-graph");
-    layoutGraphClusters(data.nodes, data.edges);
-    state.graph = data;
+    const data = await request(fresh ? "/api/memory-graph?fresh=1" : "/api/memory-graph");
+    state.graph = createGraph(data);
     $("graph-empty").hidden = data.nodes.length > 0;
     $("graph-status").textContent = `${data.nodes.length} nodes · ${data.edges.length} edges`;
     fitGraphView();
-    if (!graphAnimationFrame) graphTick();
+    scheduleGraphFrame();
   } catch (error) {
     $("graph-status").textContent = error.message;
   }
 }
 
+// The graph view is opaque and covers the whole viewport, so the animated field behind it only costs frames.
+function setFieldPaused(paused) {
+  window.dispatchEvent(new CustomEvent("theoses-field-pause", { detail: { paused } }));
+}
+
 function openGraphView() {
   $("graph-view").hidden = false;
+  setFieldPaused(true);
   void loadMemoryGraph();
 }
 
 function closeGraphView() {
   $("graph-view").hidden = true;
+  setFieldPaused(false);
   if (graphAnimationFrame) { cancelAnimationFrame(graphAnimationFrame); graphAnimationFrame = null; }
 }
 
 $("graph-view-button").addEventListener("click", openGraphView);
 $("graph-close").addEventListener("click", closeGraphView);
-$("graph-refresh").addEventListener("click", () => void loadMemoryGraph());
+$("graph-refresh").addEventListener("click", () => void loadMemoryGraph(true));
 
 // The workbench panels tile edge-to-edge with only a few px of gap between them,
 // which isn't enough room to actually drag/zoom the galaxy sitting behind them.
@@ -756,6 +696,7 @@ graphCanvas().addEventListener("pointerdown", (event) => {
   if (node) {
     node.pinned = true;
     graphDrag = { node, pointerId: event.pointerId, moved: false, startX: event.clientX, startY: event.clientY };
+    scheduleGraphFrame();
   } else {
     graphDrag = { pan: true, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: graphView.offsetX, originY: graphView.offsetY };
   }
@@ -764,19 +705,29 @@ graphCanvas().addEventListener("pointerdown", (event) => {
 graphCanvas().addEventListener("pointermove", (event) => {
   if (!graphDrag || graphDrag.pointerId !== event.pointerId) {
     const point = toGraphSpace(event.clientX, event.clientY);
-    graphHoverNode = findGraphNodeAt(point.x, point.y);
-    graphCanvas().style.cursor = graphHoverNode ? "pointer" : "grab";
+    const hovered = findGraphNodeAt(point.x, point.y);
+    graphCanvas().style.cursor = hovered ? "pointer" : "grab";
+    if (hovered !== graphHoverNode) {
+      graphHoverNode = hovered;
+      scheduleGraphFrame();
+    }
     return;
   }
   if (graphDrag.pan) {
     graphView.offsetX = graphDrag.originX + (event.clientX - graphDrag.startX);
     graphView.offsetY = graphDrag.originY + (event.clientY - graphDrag.startY);
+    scheduleGraphFrame();
     return;
   }
   const point = toGraphSpace(event.clientX, event.clientY);
   graphDrag.node.x = point.x; graphDrag.node.y = point.y;
   graphDrag.node.vx = 0; graphDrag.node.vy = 0;
-  if (Math.abs(event.clientX - graphDrag.startX) > 3 || Math.abs(event.clientY - graphDrag.startY) > 3) graphDrag.moved = true;
+  if (Math.abs(event.clientX - graphDrag.startX) > 3 || Math.abs(event.clientY - graphDrag.startY) > 3) {
+    graphDrag.moved = true;
+    // The dragged node pulls its neighbours along, so keep the simulation warm while it moves.
+    if (state.graph) reheatGraph(state.graph, GRAPH_DRAG_ALPHA);
+  }
+  scheduleGraphFrame();
 });
 
 graphCanvas().addEventListener("pointerup", (event) => {
@@ -786,9 +737,12 @@ graphCanvas().addEventListener("pointerup", (event) => {
     if (!graphDrag.moved) {
       closeGraphView();
       openFile(graphDrag.node.path);
+    } else if (state.graph) {
+      reheatGraph(state.graph, GRAPH_DRAG_ALPHA);
     }
   }
   graphDrag = null;
+  scheduleGraphFrame();
 });
 
 graphCanvas().addEventListener("wheel", (event) => {
@@ -801,6 +755,7 @@ graphCanvas().addEventListener("wheel", (event) => {
   graphView.offsetX = cx - ((cx - graphView.offsetX) / graphView.scale) * nextScale;
   graphView.offsetY = cy - ((cy - graphView.offsetY) / graphView.scale) * nextScale;
   graphView.scale = nextScale;
+  scheduleGraphFrame();
 }, { passive: false });
 
 async function start() {

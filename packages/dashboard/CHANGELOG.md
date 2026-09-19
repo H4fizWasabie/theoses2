@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- fix: the memory graph view no longer lags on thousands of nodes. On a graph shaped like the real store (7,913 nodes, 5,232 edges) in headless Chrome, frames went from a 450 ms median (worst 1.1 s, never stopping) to a 17 to 33 ms median with no long tasks, and the animation stops once the layout settles.
+  - Layout and simulation moved into a pure, tested module (`graph-layout.js`). Repulsion uses a Barnes-Hut quadtree instead of comparing every node with every other node, edges hold direct node references instead of an `Array.find` per edge per frame, and a cooling schedule lets the layout settle (about 305 steps) instead of simulating forever. Input handlers now request a redraw or reheat the simulation, since the loop no longer runs constantly.
+  - Drawing batches all edges into one path and fills nodes once per cluster color, and skips anything outside the viewport. Labels are capped at 400 at a time.
+  - The animated background field (a Three.js scene rendered every frame) is paused while the graph view is open. It is fully covered there and was halving the graph's frame rate.
+  - `/api/memory-graph` caches its result for 60 seconds (the refresh button bypasses it with `?fresh=1`). Building it reads and parses every memory file synchronously, about 2.6 s for 7.9k nodes, which froze the whole dashboard on every open.
+  - The asset allowlist now checks own properties, so names like `constructor` return 404.
+
 ## [1.0.63] - 2026-09-19
 
 ## [1.0.62] - 2026-09-19
