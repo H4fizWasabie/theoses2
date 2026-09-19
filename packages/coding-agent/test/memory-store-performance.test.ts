@@ -1,11 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	buildTermMatcher,
+	clearMemoryNodeCaches,
 	EDGE_RELATIONS,
 	FileMemoryStore,
+	flushPersistedNodeCache,
 	type MemoryEdge,
 	type MemoryNode,
 	type MemoryRecord,
@@ -272,6 +274,106 @@ describe("FileMemoryStore performance changes", () => {
 			rmSync(dir, { recursive: true, force: true });
 
 			expect(store.listNodes()).toEqual([]);
+		});
+	});
+
+	describe("persisted node cache", () => {
+		const persistedPath = () => join(dirname(dir), `.${basename(dir)}.node-cache.json`);
+		const pin = new Date("2026-09-01T00:00:00.000Z");
+
+		afterEach(() => {
+			clearMemoryNodeCaches();
+			rmSync(persistedPath(), { force: true });
+		});
+
+		/** Writes a node file with a pinned mtime so a later rewrite can be made invisible to the cache. */
+		function seed(id: string, subject: string): string {
+			new FileMemoryStore(dir).createNode({ id, subject });
+			const path = join(dir, `${id}.md`);
+			utimesSync(path, pin, pin);
+			return path;
+		}
+
+		it("writes the cache after listing and a fresh process loads it instead of parsing", async () => {
+			const path = seed("kept", "Original subject");
+			const store = new FileMemoryStore(dir, { persistIndex: true });
+			expect(store.listNodes()[0].subject).toBe("Original subject");
+			await flushPersistedNodeCache(dir);
+			expect(existsSync(persistedPath())).toBe(true);
+			if (process.platform !== "win32") expect(statSync(persistedPath()).mode & 0o777).toBe(0o600);
+
+			// Simulate a restart, and rewrite the file invisibly (same length, same mtime): only a cache
+			// loaded from disk, not a re-parse, can still return the original subject.
+			clearMemoryNodeCaches();
+			writeFileSync(path, readFileSync(path, "utf8").replace("Original subject", "Replaced subject"));
+			utimesSync(path, pin, pin);
+
+			expect(new FileMemoryStore(dir, { persistIndex: true }).listNodes()[0].subject).toBe("Original subject");
+		});
+
+		it("re-parses files that changed since the cache was written and drops removed ones", async () => {
+			seed("unchanged", "Unchanged fact");
+			const changed = seed("changed", "Short");
+			seed("removed", "Removed fact");
+			const store = new FileMemoryStore(dir, { persistIndex: true });
+			store.listNodes();
+			await flushPersistedNodeCache(dir);
+			clearMemoryNodeCaches();
+
+			new FileMemoryStore(dir).createNode({ id: "changed", subject: "A much longer subject than before" });
+			unlinkSync(join(dir, "removed.md"));
+			new FileMemoryStore(dir).createNode({ id: "added", subject: "Added after the cache was written" });
+			expect(changed).toContain("changed.md");
+
+			const nodes = new FileMemoryStore(dir, { persistIndex: true }).listNodes();
+
+			expect(nodes.map((n) => n.id).sort()).toEqual(["added", "changed", "unchanged"]);
+			expect(nodes.find((n) => n.id === "changed")?.subject).toBe("A much longer subject than before");
+		});
+
+		it("ignores a corrupt file, a different version and malformed entries", async () => {
+			seed("real", "Real fact");
+			const store = new FileMemoryStore(dir, { persistIndex: true });
+			store.listNodes();
+			await flushPersistedNodeCache(dir);
+			const good = JSON.parse(readFileSync(persistedPath(), "utf8"));
+
+			for (const bad of [
+				"{ not json",
+				JSON.stringify({ ...good, version: 999 }),
+				JSON.stringify({ version: good.version, entries: { "real.md": { mtimeMs: "x", size: 1, node: {} } } }),
+				JSON.stringify({ version: good.version, entries: null }),
+			]) {
+				clearMemoryNodeCaches();
+				writeFileSync(persistedPath(), bad);
+				const nodes = new FileMemoryStore(dir, { persistIndex: true }).listNodes();
+				expect(nodes.map((n) => n.id)).toEqual(["real"]);
+			}
+		});
+
+		it("does not persist for a store built on an explicit directory unless asked", async () => {
+			seed("plain", "Plain fact");
+			const store = new FileMemoryStore(dir);
+			store.listNodes();
+
+			await flushPersistedNodeCache(dir);
+
+			expect(existsSync(persistedPath())).toBe(false);
+		});
+
+		it("persists by default for the default memory directory", async () => {
+			const previous = process.env.THEOSES_MEMORY_DIR;
+			process.env.THEOSES_MEMORY_DIR = dir;
+			try {
+				new FileMemoryStore(dir).createNode({ id: "default", subject: "Default directory fact" });
+				new FileMemoryStore().listNodes();
+				await flushPersistedNodeCache(dir);
+
+				expect(existsSync(persistedPath())).toBe(true);
+			} finally {
+				if (previous === undefined) delete process.env.THEOSES_MEMORY_DIR;
+				else process.env.THEOSES_MEMORY_DIR = previous;
+			}
 		});
 	});
 });
