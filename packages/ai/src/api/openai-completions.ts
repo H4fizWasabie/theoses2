@@ -59,6 +59,7 @@ import { getPiUserAgent } from "../utils/pi-user-agent.ts";
 import { getProviderEnvValue } from "../utils/provider-env.ts";
 import { retryProviderRequest } from "../utils/provider-retry.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
+import { logCachePrefixDiff } from "./cache-prefix-debug.ts";
 import {
 	appendGrammarToolInputJsonDelta,
 	createGrammarToolInputProperties,
@@ -335,6 +336,9 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
 				params = nextParams as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
+			}
+			if (getProviderEnvValue("THEOSES_DEBUG_CACHE_PREFIX", options?.env)) {
+				logCachePrefixDiff(options?.sessionId, params);
 			}
 			const combinedSignal = options?.signal
 				? AbortSignal.any([options.signal, streamDurationSignal])

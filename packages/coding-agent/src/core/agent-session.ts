@@ -54,18 +54,24 @@ import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { formatClockAnnotation, stripClockAnnotation } from "./clock.ts";
 import {
+	activeContextWindowTurns,
+	CACHE_WARM_WINDOW_MS,
 	type CompactionPreparation,
 	type CompactionResult,
 	calculateContextTokens,
 	collectEntriesForBranchSummary,
 	compact,
+	countUserTurnsSince,
 	distillMemory,
 	estimateContextTokens,
 	estimateTokens,
 	generateBranchSummary,
+	historyTurnHardCap,
+	lastCompactionBoundary,
 	prepareCompaction,
 	shouldCompact,
 	shouldCompactByTurns,
+	shouldDeferCompactionForCache,
 } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS } from "./defaults.ts";
 import { createExploreToolDefinition } from "./explorer.ts";
@@ -783,6 +789,18 @@ export class AgentSession {
 		return undefined;
 	}
 
+	/**
+	 * Whether the provider's prompt cache for the current system prompt is probably still warm. The system
+	 * prompt ends with dynamic sections (Working Note, artifact catalog) that grow during bash-heavy work, and
+	 * it is rebuilt before every user turn; rebuilding while warm changes message 0 and invalidates the cached
+	 * prefix of the entire conversation. While warm the previous prompt is kept, since the recent turns still
+	 * show what the new note lines and artifact paths would say; the next cold prompt picks them all up.
+	 */
+	private _isPromptCacheWarm(): boolean {
+		const lastAssistant = this._findLastAssistantMessage();
+		return lastAssistant !== undefined && Date.now() - lastAssistant.timestamp < CACHE_WARM_WINDOW_MS;
+	}
+
 	private _replaceMessageInPlace(target: AgentMessage, replacement: AgentMessage): void {
 		// Agent-core stores the finalized message object in its state before emitting message_end.
 		// SessionManager persistence happens later in _handleAgentEvent() with event.message.
@@ -1141,8 +1159,10 @@ export class AgentSession {
 	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
 		this._isAgentRunActive = true;
 		try {
-			this._baseSystemPromptOptions.artifactCatalog = this.sessionManager.getArtifactCatalog();
-			this._baseSystemPrompt = buildSystemPrompt(this._baseSystemPromptOptions);
+			if (!this._isPromptCacheWarm()) {
+				this._baseSystemPromptOptions.artifactCatalog = this.sessionManager.getArtifactCatalog();
+				this._baseSystemPrompt = buildSystemPrompt(this._baseSystemPromptOptions);
+			}
 			this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
 			await this.agent.prompt(messages);
 			while (await this._handlePostAgentRun()) {
@@ -1296,8 +1316,19 @@ export class AgentSession {
 				await this._checkCompaction(lastAssistant, false);
 			}
 
-			this.agent.state.messages = limitActiveContextMessages(this.agent.state.messages);
-			this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+			const messagesBeforeLimit = this.agent.state.messages.length;
+			this.agent.state.messages = limitActiveContextMessages(
+				this.agent.state.messages,
+				activeContextWindowTurns(this.settingsManager.getCompactionSettings()),
+			);
+			if (process.env.THEOSES_DEBUG_CACHE_PREFIX && this.agent.state.messages.length !== messagesBeforeLimit) {
+				console.error(
+					`[cache-prefix] sliding window dropped ${messagesBeforeLimit - this.agent.state.messages.length} messages`,
+				);
+			}
+			if (!this._isPromptCacheWarm()) {
+				this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+			}
 
 			// Build messages array (custom message if any, then user message)
 			messages = [];
@@ -2297,7 +2328,20 @@ export class AgentSession {
 		if (shouldCompact(contextTokens, contextWindow, settings)) {
 			return await this._runAutoCompaction("threshold", false);
 		}
-		if (shouldCompactByTurns(this.sessionManager.getBranch(), settings)) {
+		const branch = this.sessionManager.getBranch();
+		if (shouldCompactByTurns(branch, settings)) {
+			// Compaction rewrites the prompt prefix, so hold it until the provider cache has gone cold.
+			// The post-run check always sees a warm cache; the pre-prompt check of a later turn sees the
+			// real idle gap since the last response.
+			const idleMs = Date.now() - assistantMessage.timestamp;
+			const deferred = shouldDeferCompactionForCache(branch, settings, idleMs);
+			if (process.env.THEOSES_DEBUG_CACHE_PREFIX) {
+				const turns = countUserTurnsSince(branch, lastCompactionBoundary(branch));
+				console.error(
+					`[cache-prefix] turn compaction wanted: turns=${turns} cap=${historyTurnHardCap(settings)} idleMs=${idleMs} -> ${deferred ? "deferred" : "running"}`,
+				);
+			}
+			if (deferred) return false;
 			return await this._runAutoCompaction("turns", false);
 		}
 		return false;

@@ -5,6 +5,7 @@ import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
+import { activeContextWindowTurns } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type {
 	ExtensionRunner,
@@ -464,7 +465,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	// Restore messages if session has existing data
 	if (hasExistingSession) {
-		agent.state.messages = limitActiveContextMessages(existingSession.messages);
+		agent.state.messages = limitActiveContextMessages(
+			existingSession.messages,
+			activeContextWindowTurns(settingsManager.getCompactionSettings()),
+		);
 		if (!hasThinkingEntry) {
 			sessionManager.appendThinkingLevelChange(thinkingLevel);
 		}
