@@ -173,13 +173,22 @@ const HISTORY_TURN_HARD_CAP_FACTOR = 2;
 const FALLBACK_ACTIVE_TURNS = 3;
 
 /**
- * Hard ceiling on user turns kept in active context. Turn-triggered compaction fires past
- * `maxHistoryTurns` but waits for a cold cache; this ceiling bounds that wait, and is also the size of the
- * sliding window in `limitActiveContextMessages` so the window never drops turns before compaction ran.
+ * Hard ceiling on user turns since the last compaction. Turn-triggered compaction fires past
+ * `maxHistoryTurns` but waits for a cold cache; this ceiling bounds that wait.
  */
 export function historyTurnHardCap(settings: CompactionSettings): number {
 	if (settings.maxHistoryTurns <= 0) return FALLBACK_ACTIVE_TURNS;
 	return settings.maxHistoryTurns * HISTORY_TURN_HARD_CAP_FACTOR;
+}
+
+/**
+ * Size of the sliding window in `limitActiveContextMessages`. A compaction keeps `maxHistoryTurns` raw
+ * turns and the deferred wait adds up to `historyTurnHardCap` more, so a smaller window would drop turns
+ * (and rewrite the prefix) while compaction is still deliberately waiting.
+ */
+export function activeContextWindowTurns(settings: CompactionSettings): number {
+	if (settings.maxHistoryTurns <= 0) return FALLBACK_ACTIVE_TURNS;
+	return settings.maxHistoryTurns + historyTurnHardCap(settings);
 }
 
 /**

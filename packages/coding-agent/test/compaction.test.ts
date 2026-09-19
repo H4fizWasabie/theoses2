@@ -5,6 +5,7 @@ import type { AssistantMessage, Usage } from "theoses-ai/compat";
 import { getModel } from "theoses-ai/compat";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+	activeContextWindowTurns,
 	CACHE_WARM_WINDOW_MS,
 	type CompactionSettings,
 	calculateContextTokens,
@@ -243,6 +244,11 @@ describe("cache-aware compaction deferral", () => {
 	it("hard cap is twice maxHistoryTurns, falling back to 3 when turn compaction is disabled", () => {
 		expect(historyTurnHardCap(settings)).toBe(6);
 		expect(historyTurnHardCap({ ...settings, maxHistoryTurns: 0 })).toBe(3);
+	});
+
+	it("sliding window fits the turns a compaction keeps plus the whole deferral wait", () => {
+		expect(activeContextWindowTurns(settings)).toBe(9);
+		expect(activeContextWindowTurns({ ...settings, maxHistoryTurns: 0 })).toBe(3);
 	});
 
 	it("defers while the provider cache is warm and turns are under the hard cap", () => {

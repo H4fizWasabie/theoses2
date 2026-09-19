@@ -54,16 +54,19 @@ import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { formatClockAnnotation, stripClockAnnotation } from "./clock.ts";
 import {
+	activeContextWindowTurns,
 	type CompactionPreparation,
 	type CompactionResult,
 	calculateContextTokens,
 	collectEntriesForBranchSummary,
 	compact,
+	countUserTurnsSince,
 	distillMemory,
 	estimateContextTokens,
 	estimateTokens,
 	generateBranchSummary,
 	historyTurnHardCap,
+	lastCompactionBoundary,
 	prepareCompaction,
 	shouldCompact,
 	shouldCompactByTurns,
@@ -1298,10 +1301,16 @@ export class AgentSession {
 				await this._checkCompaction(lastAssistant, false);
 			}
 
+			const messagesBeforeLimit = this.agent.state.messages.length;
 			this.agent.state.messages = limitActiveContextMessages(
 				this.agent.state.messages,
-				historyTurnHardCap(this.settingsManager.getCompactionSettings()),
+				activeContextWindowTurns(this.settingsManager.getCompactionSettings()),
 			);
+			if (process.env.THEOSES_DEBUG_CACHE_PREFIX && this.agent.state.messages.length !== messagesBeforeLimit) {
+				console.error(
+					`[cache-prefix] sliding window dropped ${messagesBeforeLimit - this.agent.state.messages.length} messages`,
+				);
+			}
 			this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
 
 			// Build messages array (custom message if any, then user message)
@@ -2307,9 +2316,15 @@ export class AgentSession {
 			// Compaction rewrites the prompt prefix, so hold it until the provider cache has gone cold.
 			// The post-run check always sees a warm cache; the pre-prompt check of a later turn sees the
 			// real idle gap since the last response.
-			if (shouldDeferCompactionForCache(branch, settings, Date.now() - assistantMessage.timestamp)) {
-				return false;
+			const idleMs = Date.now() - assistantMessage.timestamp;
+			const deferred = shouldDeferCompactionForCache(branch, settings, idleMs);
+			if (process.env.THEOSES_DEBUG_CACHE_PREFIX) {
+				const turns = countUserTurnsSince(branch, lastCompactionBoundary(branch));
+				console.error(
+					`[cache-prefix] turn compaction wanted: turns=${turns} cap=${historyTurnHardCap(settings)} idleMs=${idleMs} -> ${deferred ? "deferred" : "running"}`,
+				);
 			}
+			if (deferred) return false;
 			return await this._runAutoCompaction("turns", false);
 		}
 		return false;
