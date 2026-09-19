@@ -8,9 +8,6 @@ vi.mock("theoses-coding-agent", () => ({
 		open: vi.fn(),
 	},
 	createAgentSession: vi.fn(),
-	// Intent router (issue #268): default to off in tests so no Jev path is exercised.
-	classifyUrgency: vi.fn(async () => ({ mode: "off", isUrgent: false })),
-	urgentIntakeNotice: vi.fn(() => "[URGENCY INTAKE: test notice - do not mention]"),
 	maybeRunConsolidation: vi.fn(),
 	maybeDetectTaskBoundary: vi.fn(),
 	findLastUserMessageEntryId: vi.fn(),
@@ -22,7 +19,7 @@ vi.mock("theoses-coding-agent", () => ({
 	}),
 }));
 
-import { classifyUrgency, createAgentSession, SessionManager, urgentIntakeNotice } from "theoses-coding-agent";
+import { createAgentSession, SessionManager } from "theoses-coding-agent";
 import { createTelegramBot, parseModelCommand, replyText } from "../src/index.ts";
 
 function messageUpdate(updateId: number, messageId: number, text: string): Update {
@@ -147,77 +144,11 @@ describe("Telegram update dispatch", () => {
 		// dispatches updates strictly sequentially, so a handler that blocks on the full turn
 		// (which can run for minutes on a long tool call) makes every subsequent update, including
 		// a "/stop", undeliverable until the turn ends on its own.
-		// waitFor: the queued turn now also awaits the intent-router promise (issue #268), so the
-		// prompt call lands one microtask tick later than when this test was written.
 		await vi.waitFor(() => expect(session.prompt).toHaveBeenCalledTimes(1));
 		expect(promptResolved).toBe(false);
 
 		releasePrompt?.();
 		await vi.waitFor(() => expect(promptResolved).toBe(true));
-	});
-});
-
-function botHarness(releasePrompt: { resolve: () => void } | undefined = undefined) {
-	const sessionManager = {
-		getChannelSessionKey: () => ({ channel: "telegram", channelSessionId: "1" }),
-		getCwd: () => "/tmp/telegram-test",
-	};
-	const session = {
-		isStreaming: false,
-		prompt: vi.fn(async (_text: string) => {
-			if (releasePrompt) {
-				await new Promise<void>((resolve) => {
-					releasePrompt.resolve = resolve;
-				});
-			}
-		}),
-		abort: vi.fn(async () => {}),
-		subscribe: vi.fn(() => () => {}),
-		getActiveToolNames: vi.fn(() => []),
-		setActiveToolsByName: vi.fn(),
-		sessionManager,
-		modelRuntime: {},
-	};
-	vi.mocked(SessionManager.list).mockResolvedValue([]);
-	vi.mocked(SessionManager.create).mockReturnValue(sessionManager as never);
-	vi.mocked(createAgentSession).mockResolvedValue({ session } as never);
-
-	const bot = createTelegramBot({ token: "test-token", ownerChatId: "1", cwd: "/tmp/telegram-test" });
-	bot.botInfo = {
-		id: 99,
-		is_bot: true,
-		first_name: "Test",
-		username: "test_bot",
-		can_join_groups: false,
-		can_read_all_group_messages: false,
-		supports_inline_queries: false,
-		can_connect_to_business: false,
-		can_connect_to_business_apps: false,
-		has_main_web_app: false,
-	} as never;
-	vi.spyOn(bot.api, "sendMessage").mockResolvedValue({ message_id: 100 } as never);
-	return { bot, session };
-}
-
-describe("Intent-router prompt stamping (issue #268)", () => {
-	it("appends the urgent intake notice when the classifier stamps a message", async () => {
-		const release: { resolve: () => void } = { resolve: () => {} };
-		const { bot, session } = botHarness(release);
-		vi.mocked(classifyUrgency).mockResolvedValue({ mode: "on", isUrgent: true, probability: 0.9 });
-
-		await bot.handleUpdate(messageUpdate(1, 2, "the server is down"));
-		await vi.waitFor(() => expect(session.prompt).toHaveBeenCalledTimes(1));
-		expect(String(session.prompt.mock.calls[0]?.[0])).toBe(`the server is down${urgentIntakeNotice()}`);
-		release.resolve();
-	});
-
-	it("passes normal messages through unchanged", async () => {
-		const { bot, session } = botHarness();
-		vi.mocked(classifyUrgency).mockResolvedValue({ mode: "on", isUrgent: false, probability: 0.1 });
-
-		await bot.handleUpdate(messageUpdate(1, 3, "haha good one"));
-		await vi.waitFor(() => expect(session.prompt).toHaveBeenCalledTimes(1));
-		expect(String(session.prompt.mock.calls[0]?.[0])).toBe("haha good one");
 	});
 });
 

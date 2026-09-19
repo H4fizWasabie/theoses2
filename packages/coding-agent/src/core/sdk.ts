@@ -132,13 +132,6 @@ export type {
 	ToolDefinition,
 } from "./extensions/index.ts";
 export {
-	classifyUrgency,
-	type IntentRouterMode,
-	resolveIntentRouterMode,
-	type UrgencyVerdict,
-	urgentIntakeNotice,
-} from "./intent-router.ts";
-export {
 	type BackfillOptions,
 	backfillFromSessionLog,
 	CONSOLIDATION_TURN_CEILING,

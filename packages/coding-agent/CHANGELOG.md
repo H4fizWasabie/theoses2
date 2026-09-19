@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- removed: `core/intent-router.ts` (`classifyUrgency`, `resolveIntentRouterMode`, `urgentIntakeNotice`) and its exports from `core/sdk.ts` and the package index, along with the `THEOSES_INTENT_ROUTER` env var. The urgency pre-screen (#268) is unused.
+
 - fix: structured-output JSON repair (memory consolidation, compaction distillation) now escapes double quotes the model left unescaped inside string values, as a last resort after the normal repairs fail (`escapeInnerQuotes`). A production consolidation pass failed on `"body": "The seed skill contains "You compose..." and covers..."`. The existing "hopeless JSON" test now uses truncated output, since the old input is repairable.
 
 ## [1.0.60] - 2026-09-19
