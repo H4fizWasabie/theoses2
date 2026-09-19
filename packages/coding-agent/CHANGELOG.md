@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.62] - 2026-09-19
 
 - feat: memory consolidation (which also drives compaction and task-boundary summaries) and the explorer sub-agent now use the free `deepseek/deepseek-v4-flash-0731:free` variant, pinned to OpenInference (its only endpoint) with fp8 and no fallbacks. It costs $0; accounts with $10+ of credit get 1000 free-model requests a day (20 per minute). Consolidation's Baidu-first provider order and the explorer's BaseTen/GMICloud fallbacks are gone, since neither serves the free variant.
