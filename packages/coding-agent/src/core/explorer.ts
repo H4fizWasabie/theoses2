@@ -29,7 +29,9 @@ import { createLsToolDefinition } from "./tools/ls.ts";
 import { createReadToolDefinition } from "./tools/read.ts";
 import { wrapToolDefinition } from "./tools/tool-definition-wrapper.ts";
 
-const EXPLORER_MODEL_ID = "deepseek/deepseek-v4-flash-0731";
+/** The free variant, served only through OpenInference at $0 (1000 free-model requests a day, 20 per minute,
+ * on accounts with $10+ of credit). An explore call can use up to `maxTurns` requests of that allowance. */
+const EXPLORER_MODEL_ID = "deepseek/deepseek-v4-flash-0731:free";
 
 export const MAX_CONCURRENT_EXPLORERS = 3;
 
@@ -98,10 +100,9 @@ export function resetExplorerConcurrencyForTests(): void {
 
 /**
  * Resolves the explorer model from the live-hydrated OpenRouter catalog. Same model id and
- * fp8/fail-strict shape as memory consolidation (see memory-consolidation.ts), but a *different*
- * provider chain: #254 pins OpenInference first specifically for its per-provider KV-cache hit
- * rate, then Baseten (US) and GMI Cloud as fallbacks — do not copy consolidation's Baidu-first
- * order here, the two were decided independently.
+ * fp8/fail-strict shape as memory consolidation (see memory-consolidation.ts). #254 pinned
+ * OpenInference first for its per-provider KV-cache hit rate, with Baseten (US) and GMI Cloud as
+ * paid fallbacks; the free variant only exists on OpenInference, so those fallbacks are gone.
  *
  * Provider slugs verified against the live OpenRouter endpoints listing (same method as the
  * "Baidu"/"AkashML" slug lessons from issues #180/#190: marketing labels on the pricing page
@@ -132,7 +133,8 @@ export function resolveExplorerModel(modelRuntime: ModelRuntime): Model<Api> {
 			...(model as Model<"openai-completions">).compat,
 			openRouterRouting: {
 				...(model as Model<"openai-completions">).compat?.openRouterRouting,
-				order: ["OpenInference", "BaseTen", "GMICloud"],
+				// The free variant has a single endpoint; BaseTen and GMICloud only serve the paid one.
+				order: ["OpenInference"],
 				quantizations: ["fp8"],
 				allow_fallbacks: false,
 			},
