@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.59] - 2026-09-19
 
 - docs: correct the stale "shadow mode" note in `task-boundary-detector.ts`; chain reset has been live since #186. (#274)
