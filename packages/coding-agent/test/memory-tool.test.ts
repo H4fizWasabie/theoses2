@@ -10,8 +10,8 @@ function records(count: number): MemoryRecord[] {
 	}));
 }
 
-function storeReturning(found: MemoryRecord[]): MemoryStore & { remember: ReturnType<typeof vi.fn> } {
-	return { remember: vi.fn(() => found), saveNote: vi.fn() };
+function storeReturning(found: MemoryRecord[]) {
+	return { remember: vi.fn<MemoryStore["remember"]>(() => found), saveNote: vi.fn<MemoryStore["saveNote"]>() };
 }
 
 async function runRemember(tools: ReturnType<typeof createMemoryToolDefinitions>, query: string): Promise<string> {
@@ -20,6 +20,65 @@ async function runRemember(tools: ReturnType<typeof createMemoryToolDefinitions>
 	const first = result?.content[0];
 	return first?.type === "text" ? first.text : "";
 }
+
+describe("save_note tool gate", () => {
+	const existing = {
+		id: "old",
+		type: "semantic" as const,
+		subject: "Hafiz is the creator of Theoses",
+		at: "2026-09-01T00:00:00.000Z",
+		edges: [],
+	};
+
+	async function runSave(tools: ReturnType<typeof createMemoryToolDefinitions>, note: string): Promise<string> {
+		const saveNote = tools.find((tool) => tool.name === "save_note");
+		const result = await saveNote?.execute("call", { note }, undefined, undefined, {} as never);
+		const first = result?.content[0];
+		return first?.type === "text" ? first.text : "";
+	}
+
+	it("saves as before when there is no gate", async () => {
+		const store = storeReturning([]);
+		const text = await runSave(createMemoryToolDefinitions(store), "a fact");
+
+		expect(store.saveNote).toHaveBeenCalledWith("a fact");
+		expect(text).toBe("Durable note saved.");
+	});
+
+	it("does not write a fact that is already remembered, and says what is stored", async () => {
+		const store = storeReturning([]);
+		const onSaved = vi.fn();
+		const gate = { check: vi.fn(async () => ({ action: "reuse" as const, existing })), supersede: vi.fn() };
+
+		const text = await runSave(createMemoryToolDefinitions(store, onSaved, undefined, gate), "Hafiz created Theoses");
+
+		expect(store.saveNote).not.toHaveBeenCalled();
+		expect(onSaved).not.toHaveBeenCalled();
+		expect(text).toBe("Already remembered, so nothing was saved: Hafiz is the creator of Theoses");
+	});
+
+	it("writes a richer wording and marks the old node as replaced", async () => {
+		const store = storeReturning([]);
+		store.saveNote.mockReturnValue({ id: "new", createdAt: "2026-09-20T00:00:00Z", text: "richer" });
+		const gate = { check: vi.fn(async () => ({ action: "supersede" as const, existing })), supersede: vi.fn() };
+
+		const text = await runSave(createMemoryToolDefinitions(store, undefined, undefined, gate), "richer");
+
+		expect(gate.supersede).toHaveBeenCalledWith("new", "old");
+		expect(text).toBe("Durable note saved. It replaces a less detailed note: Hafiz is the creator of Theoses");
+	});
+
+	it("saves a new fact normally", async () => {
+		const store = storeReturning([]);
+		const gate = { check: vi.fn(async () => ({ action: "store" as const })), supersede: vi.fn() };
+
+		expect(await runSave(createMemoryToolDefinitions(store, undefined, undefined, gate), "brand new")).toBe(
+			"Durable note saved.",
+		);
+		expect(store.saveNote).toHaveBeenCalledWith("brand new");
+		expect(gate.supersede).not.toHaveBeenCalled();
+	});
+});
 
 describe("remember tool", () => {
 	it("behaves as before when no relevance stage is configured", async () => {

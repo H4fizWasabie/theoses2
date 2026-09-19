@@ -6,10 +6,12 @@ import type { EpisodicStore } from "../src/core/episodic-store.ts";
 import { applyConsolidationResult, type ParsedConsolidation } from "../src/core/memory-consolidation.ts";
 import { FileMemoryStore } from "../src/core/memory-store.ts";
 
-// The edge-relation cross-check calls the Jev service; keep the test off the network.
+// The edge-relation cross-check and the write gate call the Jev service; keep the test off the network.
+// "No answer" is what an unavailable Jev looks like, and the gate then falls back to its conservative check.
 vi.mock("../src/core/jev-client.ts", () => ({
 	askJevChoice: vi.fn(async () => undefined),
 	askJevNoul: vi.fn(async () => undefined),
+	askJevNouls: vi.fn(async () => undefined),
 }));
 
 const EPISODE = {

@@ -49,7 +49,7 @@ export {
 	type LsToolInput,
 	type LsToolOptions,
 } from "./ls.ts";
-export { createMemoryToolDefinitions, type RememberRelevanceOptions } from "./memory.ts";
+export { createMemoryToolDefinitions, type RememberRelevanceOptions, type SaveNoteGateOptions } from "./memory.ts";
 export {
 	appendOperationalNote,
 	createOperationalNotesToolDefinition,
@@ -103,6 +103,7 @@ export {
 
 import type { AgentTool } from "theoses-agent-core";
 import type { ToolDefinition } from "../extensions/types.ts";
+import { createMemoryWriteGate, isMemoryGateEnabled } from "../memory-gate.ts";
 import { isRememberRelevanceEnabled, RELEVANCE_CANDIDATES, rankByRelevance } from "../memory-relevance.ts";
 import { FileMemoryStore, type MemoryStore } from "../memory-store.ts";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.ts";
@@ -181,10 +182,20 @@ export interface ToolsOptions {
 }
 
 export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): Record<ToolName, ToolDef> {
+	const memory = options?.memory ?? new FileMemoryStore();
+	// The write gate needs the real store (it reads every node and adds a supersedes edge), not a test double.
+	const saveGate =
+		memory instanceof FileMemoryStore && isMemoryGateEnabled()
+			? {
+					check: (note: string) => createMemoryWriteGate(memory.listNodes()).check(note),
+					supersede: (newId: string, oldId: string) => memory.addEdge(newId, { target: oldId, rel: "supersedes" }),
+				}
+			: undefined;
 	const [rememberTool, saveNoteTool] = createMemoryToolDefinitions(
-		options?.memory ?? new FileMemoryStore(),
+		memory,
 		options?.onMemorySaved,
 		isRememberRelevanceEnabled() ? { candidates: RELEVANCE_CANDIDATES, rank: rankByRelevance } : undefined,
+		saveGate,
 	);
 	return {
 		read: createReadToolDefinition(cwd, options?.read),

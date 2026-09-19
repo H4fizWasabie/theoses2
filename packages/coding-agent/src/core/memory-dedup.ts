@@ -21,6 +21,8 @@ const NEAR_DUPLICATE_JACCARD = 0.85;
 const MIN_WORDS_FOR_NEAR_MATCH = 4;
 /** How many of a subject's rarest words are used to look up candidates. */
 const CANDIDATE_LOOKUP_WORDS = 4;
+/** A word held by more nodes than this is not selective enough to look candidates up by. */
+const CANDIDATE_LIST_MAX = 400;
 
 const STOP_WORDS = new Set(
 	"the a an and of to in for on with is are was were be by at as it its that this from or has have had".split(" "),
@@ -127,15 +129,23 @@ export const LIKELY_RESTATEMENT_JACCARD = 0.5;
  * Showing only one of them costs a lookup one redundant result; it changes nothing that is stored.
  */
 export function areLikelyRestatements(a: string, b: string, minJaccard: number = LIKELY_RESTATEMENT_JACCARD): boolean {
-	const wordsA = subjectWords(a);
-	const wordsB = subjectWords(b);
-	if (wordsA.normalized === "" || wordsB.normalized === "") return false;
-	if (wordsA.normalized === wordsB.normalized) return true;
-	if (wordsA.significant.size < MIN_WORDS_FOR_NEAR_MATCH || wordsB.significant.size < MIN_WORDS_FOR_NEAR_MATCH) {
-		return false;
-	}
-	if (!sameSet(wordsA.digitWords, wordsB.digitWords) || !sameSet(wordsA.negations, wordsB.negations)) return false;
-	return jaccard(wordsA.significant, wordsB.significant) >= minJaccard;
+	return likelyRestatementOf(subjectWords(a), subjectWords(b), minJaccard);
+}
+
+function likelyRestatementOf(a: SubjectWords, b: SubjectWords, minJaccard: number): boolean {
+	if (a.normalized === "" || b.normalized === "") return false;
+	if (a.normalized === b.normalized) return true;
+	if (a.significant.size < MIN_WORDS_FOR_NEAR_MATCH || b.significant.size < MIN_WORDS_FOR_NEAR_MATCH) return false;
+	if (!sameSet(a.digitWords, b.digitWords) || !sameSet(a.negations, b.negations)) return false;
+	return jaccard(a.significant, b.significant) >= minJaccard;
+}
+
+/** How many significant words `subject` has that `existing` lacks: a rough measure of how much detail it adds. */
+export function significantWordsAdded(subject: string, existing: string): number {
+	const have = subjectWords(existing).significant;
+	let added = 0;
+	for (const word of subjectWords(subject).significant) if (!have.has(word)) added++;
+	return added;
 }
 
 export interface DuplicateIndex {
@@ -148,6 +158,12 @@ export interface DuplicateIndex {
 	 * landing page") is a new, more specific fact and is not matched.
 	 */
 	findRestatement(subject: string): MemoryNode | undefined;
+	/**
+	 * Stored nodes that are likely restatements of this subject under the looser ranking rule
+	 * (`areLikelyRestatements`), most similar first, at most `limit`. Too loose to merge on its own: the write
+	 * gate asks Jev to confirm before treating one of them as the same fact.
+	 */
+	findCandidates(subject: string, limit?: number): MemoryNode[];
 	/** Registers a node so later subjects (including ones in the same consolidation response) match it. */
 	add(node: MemoryNode): void;
 }
@@ -209,6 +225,29 @@ export function createDuplicateIndex(nodes: Iterable<MemoryNode> = []): Duplicat
 		},
 		findRestatement(subject) {
 			return search(subject, (words, candidate) => isSubset(words.significant, candidate.significant));
+		},
+		findCandidates(subject, limit = 5) {
+			const words = subjectWords(subject);
+			if (words.significant.size < MIN_WORDS_FOR_NEAR_MATCH) return [];
+			const rarest = [...words.significant]
+				.map((word) => byWord.get(word) ?? [])
+				.filter((nodes) => nodes.length > 0 && nodes.length <= CANDIDATE_LIST_MAX)
+				.sort((x, y) => x.length - y.length)
+				.slice(0, CANDIDATE_LOOKUP_WORDS);
+			const scored = new Map<MemoryNode, number>();
+			for (const nodes of rarest) {
+				for (const candidate of nodes) {
+					if (scored.has(candidate)) continue;
+					const candidateWords = wordsOf(candidate);
+					if (likelyRestatementOf(words, candidateWords, LIKELY_RESTATEMENT_JACCARD)) {
+						scored.set(candidate, jaccard(words.significant, candidateWords.significant));
+					}
+				}
+			}
+			return [...scored.entries()]
+				.sort((x, y) => y[1] - x[1] || (earlier(x[0], y[0]) ? -1 : 1))
+				.slice(0, limit)
+				.map(([node]) => node);
 		},
 	};
 	for (const node of nodes) index.add(node);

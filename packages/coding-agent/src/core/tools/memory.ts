@@ -2,6 +2,7 @@ import { Text } from "theoses-tui";
 import { type Static, Type } from "typebox";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
+import type { GateVerdict } from "../memory-gate.ts";
 import { type MemoryRecord, type MemoryStore, REMEMBER_RESULT_LIMIT } from "../memory-store.ts";
 
 const rememberSchema = Type.Object({ query: Type.String({ description: "What durable information to recall" }) });
@@ -20,10 +21,18 @@ export interface RememberRelevanceOptions {
 	rank: (query: string, records: MemoryRecord[]) => Promise<MemoryRecord[] | undefined>;
 }
 
+/** Optional check before `save_note` writes: skip a fact that is already stored, or replace a less detailed one. */
+export interface SaveNoteGateOptions {
+	check: (note: string) => Promise<GateVerdict>;
+	/** Marks the stored node `oldId` as replaced by the new node `newId`. */
+	supersede: (newId: string, oldId: string) => void;
+}
+
 export function createMemoryToolDefinitions(
 	store: MemoryStore,
 	onMemorySaved?: () => void,
 	relevance?: RememberRelevanceOptions,
+	saveGate?: SaveNoteGateOptions,
 ): ToolDefinition[] {
 	return [
 		{
@@ -68,9 +77,23 @@ export function createMemoryToolDefinitions(
 			promptSnippet: "Save a durable fact to memory",
 			parameters: saveNoteSchema,
 			execute: async (_id, { note }: SaveNoteInput) => {
-				store.saveNote(note);
+				const verdict: GateVerdict = saveGate ? await saveGate.check(note) : { action: "store" };
+				if (verdict.action === "reuse") {
+					return {
+						content: [
+							{ type: "text", text: `Already remembered, so nothing was saved: ${verdict.existing.subject}` },
+						],
+						details: undefined,
+					};
+				}
+				const record = store.saveNote(note);
+				let text = "Durable note saved.";
+				if (verdict.action === "supersede" && saveGate) {
+					saveGate.supersede(record.id, verdict.existing.id);
+					text = `Durable note saved. It replaces a less detailed note: ${verdict.existing.subject}`;
+				}
 				onMemorySaved?.();
-				return { content: [{ type: "text", text: "Durable note saved." }], details: undefined };
+				return { content: [{ type: "text", text }], details: undefined };
 			},
 			renderCall: (_args, theme: Theme) => new Text(theme.fg("toolTitle", theme.bold("save_note")), 0, 0),
 			renderResult: (result, _options, theme) =>
