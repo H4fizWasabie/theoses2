@@ -8,11 +8,12 @@ import {
 	capTranscript,
 	MAX_TRANSCRIPT_CHARS,
 	maybeRunConsolidation,
+	selectConsolidationWindow,
 	shouldTriggerConsolidation,
 } from "../src/core/memory-consolidation.ts";
 import type { FileMemoryStore } from "../src/core/memory-store.ts";
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
-import type { SessionManager } from "../src/core/session-manager.ts";
+import type { SessionEntry, SessionManager } from "../src/core/session-manager.ts";
 
 describe("shouldTriggerConsolidation", () => {
 	const originalFetch = global.fetch;
@@ -58,6 +59,60 @@ describe("shouldTriggerConsolidation", () => {
 		mockJevNoul(undefined);
 		expect(await shouldTriggerConsolidation("continue", CONSOLIDATION_TURN_CEILING - 1)).toBe(false);
 		expect(await shouldTriggerConsolidation("continue", CONSOLIDATION_TURN_CEILING)).toBe(true);
+	});
+});
+
+describe("selectConsolidationWindow", () => {
+	function branchOf(count: number, prefix = "e"): SessionEntry[] {
+		return Array.from(
+			{ length: count },
+			(_, i) => ({ id: `${prefix}${i}`, type: "message" }) as unknown as SessionEntry,
+		);
+	}
+
+	it("returns the messages after the checkpointed entry", () => {
+		const { window, checkpointMissing } = selectConsolidationWindow(branchOf(10), "e6");
+
+		expect(checkpointMissing).toBe(false);
+		expect(window.map((entry) => entry.id)).toEqual(["e7", "e8", "e9"]);
+	});
+
+	it("returns nothing when the checkpoint is the last entry", () => {
+		expect(selectConsolidationWindow(branchOf(5), "e4").window).toEqual([]);
+	});
+
+	it("skips entries that are not messages", () => {
+		const branch = [
+			{ id: "a", type: "message" },
+			{ id: "b", type: "custom" },
+			{ id: "c", type: "message" },
+		] as unknown as SessionEntry[];
+
+		expect(selectConsolidationWindow(branch, "a").window.map((entry) => entry.id)).toEqual(["c"]);
+	});
+
+	it("reads a session with no checkpoint in full, as before", () => {
+		const { window, checkpointMissing } = selectConsolidationWindow(branchOf(500), null);
+
+		expect(checkpointMissing).toBe(false);
+		expect(window).toHaveLength(500);
+	});
+
+	it("takes only the last chunk when the checkpoint entry is not in the branch (another bot's checkpoint)", () => {
+		// The 2026-09-19 incident: staging saw the production bot's entry id and replayed its whole history.
+		const { window, checkpointMissing } = selectConsolidationWindow(branchOf(15000), "entry-from-the-other-bot");
+
+		expect(checkpointMissing).toBe(true);
+		expect(window).toHaveLength(CONSOLIDATION_TURN_CEILING);
+		expect(window[window.length - 1].id).toBe("e14999");
+		expect(window[0].id).toBe(`e${15000 - CONSOLIDATION_TURN_CEILING}`);
+	});
+
+	it("still reads a short session in full when its checkpoint is missing", () => {
+		const { window, checkpointMissing } = selectConsolidationWindow(branchOf(12), "gone");
+
+		expect(checkpointMissing).toBe(true);
+		expect(window).toHaveLength(12);
 	});
 });
 
