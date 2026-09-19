@@ -20,6 +20,9 @@ export interface JevCallOptions {
 	timeoutMs?: number;
 }
 
+/** What Jev judges: any JSON object. Questions can point into nested fields by path, e.g. `nodes.n3`. */
+export type JevState = Record<string, unknown>;
+
 interface JevAnswer {
 	noul?: number;
 	choice?: string;
@@ -35,7 +38,7 @@ interface JevResponse {
  * body) — the single failure path shared by askJevNoul, askJevNouls and askJevChoice. Questions in
  * one request are evaluated in parallel by Jev, so several atomic questions cost one round trip. */
 async function askJev(
-	state: Record<string, string>,
+	state: JevState,
 	questions: Record<string, Record<string, unknown>>,
 	options: JevCallOptions = {},
 ): Promise<JevResponse | undefined> {
@@ -70,7 +73,7 @@ async function askJev(
  * own retry loop.
  */
 export async function askJevNoul(
-	state: Record<string, string>,
+	state: JevState,
 	instructions: string,
 	options?: JevCallOptions,
 ): Promise<number | undefined> {
@@ -87,7 +90,7 @@ export async function askJevNoul(
  * partial verdict would silently skew the caller's combination rule).
  */
 export async function askJevNouls<K extends string>(
-	state: Record<string, string>,
+	state: JevState,
 	questions: Record<K, string>,
 	options?: JevCallOptions,
 ): Promise<Record<K, number> | undefined> {
@@ -117,7 +120,7 @@ export interface JevChoiceResult {
  * "skip this decision for now" contract as askJevNoul.
  */
 export async function askJevChoice(
-	state: Record<string, string>,
+	state: JevState,
 	instructions: string,
 	criteria: Record<string, string>,
 	options?: JevCallOptions,

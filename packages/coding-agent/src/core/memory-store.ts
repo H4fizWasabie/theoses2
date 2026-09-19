@@ -54,8 +54,11 @@ export interface MemoryRecord {
 	text: string;
 }
 
+/** How many records `remember` returns to the model unless a caller asks for a wider candidate pool. */
+export const REMEMBER_RESULT_LIMIT = 8;
+
 export interface MemoryStore {
-	remember(query: string): MemoryRecord[];
+	remember(query: string, limit?: number): MemoryRecord[];
 	saveNote(text: string): MemoryRecord;
 }
 
@@ -477,8 +480,10 @@ export class FileMemoryStore implements MemoryStore {
 	 * Deterministic, zero-LLM-call floor — the graph enriches recall, never gates it.
 	 * Nodes superseded by a newer node (i.e. targeted by another node's `supersedes` edge) are
 	 * hidden by default; they stay reachable by explicit traversal, just not surfaced unprompted.
+	 * `limit` caps how many records come back (REMEMBER_RESULT_LIMIT by default); the `remember` tool asks for a
+	 * wider pool so a relevance ranker has more to choose from.
 	 */
-	remember(query: string): MemoryRecord[] {
+	remember(query: string, limit: number = REMEMBER_RESULT_LIMIT): MemoryRecord[] {
 		const nodes = this.listNodes();
 		if (nodes.length === 0) return [];
 		const byId = new Map(nodes.map((n) => [n.id, n]));
@@ -535,7 +540,7 @@ export class FileMemoryStore implements MemoryStore {
 					!!entry.node && !superseded.has(entry.node.id),
 			)
 			.sort((a, b) => a.d - b.d || b.score - a.score || b.node.at.localeCompare(a.node.at))
-			.slice(0, 8)
+			.slice(0, limit)
 			.map((entry) => nodeToRecord(entry.node));
 	}
 }

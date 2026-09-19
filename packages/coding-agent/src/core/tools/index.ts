@@ -49,7 +49,7 @@ export {
 	type LsToolInput,
 	type LsToolOptions,
 } from "./ls.ts";
-export { createMemoryToolDefinitions } from "./memory.ts";
+export { createMemoryToolDefinitions, type RememberRelevanceOptions } from "./memory.ts";
 export {
 	appendOperationalNote,
 	createOperationalNotesToolDefinition,
@@ -103,6 +103,7 @@ export {
 
 import type { AgentTool } from "theoses-agent-core";
 import type { ToolDefinition } from "../extensions/types.ts";
+import { isRememberRelevanceEnabled, RELEVANCE_CANDIDATES, rankByRelevance } from "../memory-relevance.ts";
 import { FileMemoryStore, type MemoryStore } from "../memory-store.ts";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.ts";
 import type { ConvertDocOperations } from "./convert-doc.ts";
@@ -180,6 +181,11 @@ export interface ToolsOptions {
 }
 
 export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): Record<ToolName, ToolDef> {
+	const [rememberTool, saveNoteTool] = createMemoryToolDefinitions(
+		options?.memory ?? new FileMemoryStore(),
+		options?.onMemorySaved,
+		isRememberRelevanceEnabled() ? { candidates: RELEVANCE_CANDIDATES, rank: rankByRelevance } : undefined,
+	);
 	return {
 		read: createReadToolDefinition(cwd, options?.read),
 		bash: createBashToolDefinition(cwd, options?.bash),
@@ -194,8 +200,8 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 			options?.workingNoteClear ?? (() => {}),
 		),
 		note_operations: createOperationalNotesToolDefinition(options?.operationalNotes),
-		remember: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore(), options?.onMemorySaved)[0]!,
-		save_note: createMemoryToolDefinitions(options?.memory ?? new FileMemoryStore(), options?.onMemorySaved)[1]!,
+		remember: rememberTool!,
+		save_note: saveNoteTool!,
 		recall_turns: createRecallTurnsToolDefinition(),
 		convert_doc: createConvertDocToolDefinition(cwd, options?.convertDoc),
 		web_search: createWebSearchToolDefinition(options?.webSearch),
