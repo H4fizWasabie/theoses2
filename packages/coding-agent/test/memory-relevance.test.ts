@@ -37,6 +37,61 @@ describe("rankByRelevance", () => {
 		expect(ranked?.map((r) => r.id)).toEqual(["node-2", "node-0", "node-1", "node-3"]);
 	});
 
+	describe("restatements of the same fact", () => {
+		const identityA = "The user is abah (Hafiz), creator of Theoses";
+		const identityB = "Hafiz is the creator of Theoses and should be addressed as 'abah'";
+		const identityC = "Abah's name is Hafiz, the creator of Theoses, and must always be addressed as 'abah'";
+		const caddy = "The portfolio site is served by Caddy from apps web dist";
+		const orange = "The user prefers the orange portfolio variant over the other candidates";
+
+		function withTexts(texts: string[]): MemoryRecord[] {
+			return texts.map((text, i) => ({ id: `node-${i}`, createdAt: "2026-09-19T00:00:00Z", text }));
+		}
+
+		it("shows only the best-scoring restatement and gives its slots to the next different facts", async () => {
+			askJevNouls.mockResolvedValue(scores([0.9, 0.95, 0.85, 0.8, 0.7]));
+
+			const ranked = await rankByRelevance(
+				"who is the user",
+				withTexts([identityA, identityB, identityC, caddy, orange]),
+			);
+
+			expect(ranked?.map((r) => r.text)).toEqual([identityB, caddy, orange]);
+		});
+
+		it("still fills up to the limit with different facts after collapsing", async () => {
+			askJevNouls.mockResolvedValue(scores([0.99, 0.98, 0.97, 0.6, 0.5]));
+
+			const ranked = await rankByRelevance(
+				"who is the user",
+				withTexts([identityA, identityB, identityC, caddy, orange]),
+				2,
+			);
+
+			expect(ranked?.map((r) => r.text)).toEqual([identityA, caddy]);
+		});
+
+		it("keeps two facts that differ by a number", async () => {
+			askJevNouls.mockResolvedValue(scores([0.9, 0.8]));
+			const texts = [
+				"API port 8085 is allocated for the portfolio backend",
+				"API port 8082 is allocated for the portfolio backend",
+			];
+
+			expect(await rankByRelevance("ports", withTexts(texts))).toHaveLength(2);
+		});
+
+		it("keeps two facts where one negates the other", async () => {
+			askJevNouls.mockResolvedValue(scores([0.9, 0.8]));
+			const texts = [
+				"The explorer agent uses the free model for exploration tasks",
+				"The explorer agent does not use the free model for exploration tasks",
+			];
+
+			expect(await rankByRelevance("explorer", withTexts(texts))).toHaveLength(2);
+		});
+	});
+
 	it("returns at most `limit` records", async () => {
 		askJevNouls.mockResolvedValue(scores([0.9, 0.8, 0.7, 0.6, 0.5]));
 
