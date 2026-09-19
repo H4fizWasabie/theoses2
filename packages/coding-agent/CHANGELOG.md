@@ -4,6 +4,7 @@
 
 - docs: correct the stale "shadow mode" note in `task-boundary-detector.ts`; chain reset has been live since #186. (#274)
 - fix: turn-triggered compaction (and the task-boundary chain reset it consumes) now waits until the provider prompt cache is cold (4 min since the last response) or turns pass 2x `maxHistoryTurns`, instead of rewriting the prompt prefix while the cache is warm. `limitActiveContextMessages` now uses a window of `maxHistoryTurns` plus the deferral cap (`activeContextWindowTurns`), so its sliding window no longer drops turns, and rewrites the prefix, while compaction is deliberately waiting.
+- fix: the system prompt is no longer rebuilt before a user turn while the provider cache is warm. Its trailing Working Note and `<document_artifacts>` sections grow during bash-heavy work, and rebuilding them per turn rewrote message 0 and invalidated the cached prefix of the whole conversation; they now refresh on the first cold turn.
 - feat: `THEOSES_DEBUG_CACHE_PREFIX=1` logs, per OpenRouter request, the first message that differs from the session's previous request (`[cache-prefix]` lines), to diagnose prompt-cache misses.
 
 ## [1.0.58] - 2026-09-18

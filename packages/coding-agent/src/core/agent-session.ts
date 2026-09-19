@@ -55,6 +55,7 @@ import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { formatClockAnnotation, stripClockAnnotation } from "./clock.ts";
 import {
 	activeContextWindowTurns,
+	CACHE_WARM_WINDOW_MS,
 	type CompactionPreparation,
 	type CompactionResult,
 	calculateContextTokens,
@@ -788,6 +789,18 @@ export class AgentSession {
 		return undefined;
 	}
 
+	/**
+	 * Whether the provider's prompt cache for the current system prompt is probably still warm. The system
+	 * prompt ends with dynamic sections (Working Note, artifact catalog) that grow during bash-heavy work, and
+	 * it is rebuilt before every user turn; rebuilding while warm changes message 0 and invalidates the cached
+	 * prefix of the entire conversation. While warm the previous prompt is kept, since the recent turns still
+	 * show what the new note lines and artifact paths would say; the next cold prompt picks them all up.
+	 */
+	private _isPromptCacheWarm(): boolean {
+		const lastAssistant = this._findLastAssistantMessage();
+		return lastAssistant !== undefined && Date.now() - lastAssistant.timestamp < CACHE_WARM_WINDOW_MS;
+	}
+
 	private _replaceMessageInPlace(target: AgentMessage, replacement: AgentMessage): void {
 		// Agent-core stores the finalized message object in its state before emitting message_end.
 		// SessionManager persistence happens later in _handleAgentEvent() with event.message.
@@ -1146,8 +1159,10 @@ export class AgentSession {
 	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
 		this._isAgentRunActive = true;
 		try {
-			this._baseSystemPromptOptions.artifactCatalog = this.sessionManager.getArtifactCatalog();
-			this._baseSystemPrompt = buildSystemPrompt(this._baseSystemPromptOptions);
+			if (!this._isPromptCacheWarm()) {
+				this._baseSystemPromptOptions.artifactCatalog = this.sessionManager.getArtifactCatalog();
+				this._baseSystemPrompt = buildSystemPrompt(this._baseSystemPromptOptions);
+			}
 			this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
 			await this.agent.prompt(messages);
 			while (await this._handlePostAgentRun()) {
@@ -1311,7 +1326,9 @@ export class AgentSession {
 					`[cache-prefix] sliding window dropped ${messagesBeforeLimit - this.agent.state.messages.length} messages`,
 				);
 			}
-			this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+			if (!this._isPromptCacheWarm()) {
+				this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+			}
 
 			// Build messages array (custom message if any, then user message)
 			messages = [];
