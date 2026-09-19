@@ -53,6 +53,7 @@ export { createMemoryToolDefinitions } from "./memory.ts";
 export {
 	appendOperationalNote,
 	createOperationalNotesToolDefinition,
+	makeRoomForNote,
 	OPERATIONAL_NOTES_MAX_BYTES,
 	type OperationalNoteInput,
 } from "./operational-notes.ts";
