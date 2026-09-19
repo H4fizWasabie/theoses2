@@ -126,13 +126,14 @@ function writeFailure(key: string, at: string): void {
 // Model resolution
 // ---------------------------------------------------------------------------
 
-const CONSOLIDATION_MODEL_ID = "deepseek/deepseek-v4-flash-0731";
+/** The free variant: OpenRouter serves it only through OpenInference at $0. Accounts with $10+ of credit
+ * get 1000 free-model requests a day (20 per minute), which background extraction stays well under. */
+const CONSOLIDATION_MODEL_ID = "deepseek/deepseek-v4-flash-0731:free";
 
 /**
  * Resolves the consolidation model from the live-hydrated OpenRouter catalog (rather than
- * hand-authoring cost/context-window numbers) and overlays the provider routing preference
- * (Baidu first — highest throughput of the chosen tier — then the cheaper but
- * lower-throughput OpenInference, DeepInfra, AkashML as fallbacks, fp8 quantization) plus caching:
+ * hand-authoring cost/context-window numbers) and overlays the provider routing (OpenInference,
+ * the only endpoint of the free variant, fp8 quantization, no fallbacks) plus caching:
  * `sendSessionAffinityHeaders`/`sessionAffinityFormat` are already auto-detected true for any
  * openrouter.ai baseUrl (see `packages/ai/src/api/openai-completions.ts`'s `isOpenRouter`
  * detection), so no extra wiring is needed there — a stable per-Channel-Session affinity id
@@ -161,19 +162,15 @@ export function resolveConsolidationModel(modelRuntime: ModelRuntime): Model<Api
 			...(model as Model<"openai-completions">).compat,
 			openRouterRouting: {
 				...(model as Model<"openai-completions">).compat?.openRouterRouting,
-				// "Baidu Qianfan" is the pricing page's marketing label; the API's actual provider
-				// slug is just "Baidu" — confirmed via /api/v1/models/.../endpoints, since "Baidu
-				// Qianfan" silently matched zero endpoints and fell through the whole order list.
-				// Same failure shape found again 2026-09-11 (issue #190): "AkashML" doesn't exist
-				// as an endpoint for this model at all (confirmed live against the same endpoints
-				// API) — silently dead weight in the fallback chain the whole time. Replaced with
-				// StreamLake, a real fp8-capable endpoint for this model, cost-tier-adjacent to the
-				// providers already ahead of it (OpenInference/DeepInfra).
-				order: ["Baidu", "OpenInference", "DeepInfra", "StreamLake"],
+				// Provider slugs must match the endpoints API's `provider_name`, not the pricing page's
+				// marketing label (issues #180/#190: "Baidu Qianfan" and "AkashML" silently matched
+				// nothing). The free variant has exactly one endpoint, "OpenInference" (confirmed
+				// against /api/v1/models/deepseek/deepseek-v4-flash-0731:free/endpoints).
+				order: ["OpenInference"],
 				quantizations: ["fp8"],
 				// Without this, `order` is only a preference — OpenRouter falls back to any other
-				// provider (seen in practice: Nexbit, well outside the chosen cost/uptime tier) if
-				// the ordered ones aren't suitable for a given request. Fail cost-strict instead.
+				// provider if the ordered one isn't suitable for a request. Fail cost-strict instead:
+				// a failed pass just waits out the consolidation cooldown and retries.
 				allow_fallbacks: false,
 			},
 		},
