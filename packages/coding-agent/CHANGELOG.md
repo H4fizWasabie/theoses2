@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: structured-output JSON repair (memory consolidation, compaction distillation) now escapes double quotes the model left unescaped inside string values, as a last resort after the normal repairs fail (`escapeInnerQuotes`). A production consolidation pass failed on `"body": "The seed skill contains "You compose..." and covers..."`. The existing "hopeless JSON" test now uses truncated output, since the old input is repairable.
+
 ## [1.0.60] - 2026-09-19
 
 - fix: structured-output JSON repair (memory consolidation, compaction distillation) now strips stray control and zero-width characters that appear between tokens, string-aware so string values are never edited. Production consolidation passes were failing on a U+200B before a key and an ESC before a closing bracket, stalling the checkpoint for 15 minutes each time.

@@ -10,7 +10,8 @@ import { parseJsonWithRepair } from "theoses-ai";
  *    inside string literals (parseJsonWithRepair from the-ai), stray control / zero-width
  *    characters between tokens, and trailing commas (both string-aware scanners below — a naive
  *    regex `,\s*[}\]]` would also match inside string values, e.g. `"body": "hello ,}"`,
- *    silently editing data).
+ *    silently editing data). If that still fails, a last-resort heuristic escapes double quotes the
+ *    model left unescaped inside string values (escapeInnerQuotes).
  * 3. Diagnostics: if all of that fails, log WHERE it failed and a snippet of the raw text.
  *    The pre-#250 behavior logged only V8's position ("... in JSON at position 3855") with the
  *    raw text discarded, which made the intermittent malformed-JSON production failures
@@ -79,6 +80,73 @@ export function stripStrayStructuralChars(text: string): string {
 	return out;
 }
 
+function nextNonWhitespace(text: string, from: number): number {
+	let i = from;
+	while (i < text.length && /\s/.test(text[i])) i++;
+	return i;
+}
+
+/**
+ * Decides whether the unescaped `"` at `index` (inside a string) ends that string. It does when the
+ * next token is structural: `}` `]` `:`, or a `,` followed by the start of another key or value.
+ * A quote followed by anything else (a word, punctuation) is content the model forgot to escape.
+ */
+function closesString(text: string, index: number): boolean {
+	const next = nextNonWhitespace(text, index + 1);
+	if (next >= text.length) return true;
+	const char = text[next];
+	if (char === "}" || char === "]" || char === ":") return true;
+	if (char !== ",") return false;
+	const afterComma = nextNonWhitespace(text, next + 1);
+	if (afterComma >= text.length) return true;
+	const start = text[afterComma];
+	return (
+		start === '"' ||
+		start === "{" ||
+		start === "[" ||
+		start === "-" ||
+		/[0-9]/.test(start) ||
+		/^(?:true|false|null)\b/.test(text.slice(afterComma, afterComma + 5))
+	);
+}
+
+/**
+ * Escapes double quotes that a model left unescaped inside a string value, e.g.
+ * `"body": "The skill says "be brief" first"` (seen in production, breaking a consolidation pass).
+ * A heuristic: only run after a normal parse has already failed, since a quote that looks like
+ * content can occasionally be a real terminator in text that was malformed some other way.
+ */
+export function escapeInnerQuotes(text: string): string {
+	let out = "";
+	let inString = false;
+	let escaped = false;
+	for (let i = 0; i < text.length; i++) {
+		const char = text[i];
+		if (!inString) {
+			if (char === '"') inString = true;
+			out += char;
+			continue;
+		}
+		if (escaped) {
+			escaped = false;
+			out += char;
+		} else if (char === "\\") {
+			escaped = true;
+			out += char;
+		} else if (char === '"') {
+			if (closesString(text, i)) {
+				inString = false;
+				out += char;
+			} else {
+				out += '\\"';
+			}
+		} else {
+			out += char;
+		}
+	}
+	return out;
+}
+
 export function parseStructuredJson(rawText: string, label: string): unknown {
 	const cleaned = rawText.trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
 	try {
@@ -90,6 +158,12 @@ export function parseStructuredJson(rawText: string, label: string): unknown {
 		try {
 			return parseJsonWithRepair(repaired);
 		} catch {
+			// Last resort before giving up: escape unescaped quotes inside string values.
+			try {
+				return parseJsonWithRepair(stripTrailingCommas(escapeInnerQuotes(stripStrayStructuralChars(cleaned))));
+			} catch {
+				// fall through to the diagnostics below
+			}
 			// Layer 3: keep the evidence. Position + a snippet around it, truncated hard so a
 			// multi-hundred-KB malformed response can't flood the journal.
 			const position = (firstError as { message?: string }).message?.match(/position (\d+)/)?.[1];
