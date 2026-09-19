@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.59] - 2026-09-19
 
 - docs: correct the stale "shadow mode" note in `task-boundary-detector.ts`; chain reset has been live since #186. (#274)
 - fix: turn-triggered compaction (and the task-boundary chain reset it consumes) now waits until the provider prompt cache is cold (4 min since the last response) or turns pass 2x `maxHistoryTurns`, instead of rewriting the prompt prefix while the cache is warm. `limitActiveContextMessages` now uses a window of `maxHistoryTurns` plus the deferral cap (`activeContextWindowTurns`), so its sliding window no longer drops turns, and rewrites the prefix, while compaction is deliberately waiting.
