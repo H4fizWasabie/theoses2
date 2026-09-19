@@ -152,6 +152,175 @@ describe("Telegram update dispatch", () => {
 	});
 });
 
+function typingHarness(options: { sessionGate?: Promise<void> } = {}) {
+	const listeners: Array<(event: unknown) => void> = [];
+	const prompts: Array<() => void> = [];
+	const sessionManager = {
+		getChannelSessionKey: () => ({ channel: "telegram", channelSessionId: "1" }),
+		getCwd: () => "/tmp/telegram-test",
+	};
+	const session = {
+		isStreaming: false,
+		prompt: vi.fn(
+			() =>
+				new Promise<void>((resolve) => {
+					prompts.push(resolve);
+				}),
+		),
+		abort: vi.fn(async () => {}),
+		subscribe: vi.fn((listener: (event: unknown) => void) => {
+			listeners.push(listener);
+			return () => {};
+		}),
+		getActiveToolNames: vi.fn(() => []),
+		setActiveToolsByName: vi.fn(),
+		sessionManager,
+		modelRuntime: {},
+	};
+	vi.mocked(SessionManager.list).mockResolvedValue([]);
+	vi.mocked(SessionManager.create).mockReturnValue(sessionManager as never);
+	vi.mocked(createAgentSession).mockImplementation((async () => {
+		await options.sessionGate;
+		return { session };
+	}) as never);
+
+	const bot = createTelegramBot({ token: "test-token", ownerChatId: "1", cwd: "/tmp/telegram-test" });
+	bot.botInfo = {
+		id: 99,
+		is_bot: true,
+		first_name: "Test",
+		username: "test_bot",
+		can_join_groups: false,
+		can_read_all_group_messages: false,
+		supports_inline_queries: false,
+		can_connect_to_business: false,
+		can_connect_to_business_apps: false,
+		has_main_web_app: false,
+	} as never;
+	vi.spyOn(bot.api, "sendMessage").mockResolvedValue({ message_id: 100 } as never);
+	const sendChatAction = vi.spyOn(bot.api, "sendChatAction").mockResolvedValue(true as never);
+	return { bot, session, sendChatAction, listeners, prompts };
+}
+
+describe("Telegram typing indicator", () => {
+	it("starts as soon as the message is received, before the session exists", async () => {
+		vi.useFakeTimers();
+		try {
+			let openGate: () => void = () => {};
+			const gate = new Promise<void>((resolve) => {
+				openGate = resolve;
+			});
+			const { bot, session, sendChatAction, prompts } = typingHarness({ sessionGate: gate });
+
+			await bot.handleUpdate(messageUpdate(1, 1, "hello"));
+			await vi.advanceTimersByTimeAsync(0);
+
+			expect(sendChatAction).toHaveBeenCalledWith(1, "typing");
+			expect(session.prompt).not.toHaveBeenCalled();
+
+			openGate();
+			await vi.advanceTimersByTimeAsync(0);
+			prompts[0]?.();
+			await vi.advanceTimersByTimeAsync(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("stops re-sending once the turn has finished", async () => {
+		vi.useFakeTimers();
+		try {
+			const { bot, sendChatAction, prompts } = typingHarness();
+
+			await bot.handleUpdate(messageUpdate(1, 1, "hello"));
+			await vi.advanceTimersByTimeAsync(0);
+			await vi.advanceTimersByTimeAsync(3000);
+			expect(sendChatAction).toHaveBeenCalledTimes(2);
+
+			prompts[0]?.();
+			await vi.advanceTimersByTimeAsync(0);
+			const callsAtEnd = sendChatAction.mock.calls.length;
+			await vi.advanceTimersByTimeAsync(20_000);
+			expect(sendChatAction).toHaveBeenCalledTimes(callsAtEnd);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("shares one indicator between the running turn and a queued message", async () => {
+		vi.useFakeTimers();
+		try {
+			const { bot, sendChatAction, prompts } = typingHarness();
+
+			await bot.handleUpdate(messageUpdate(1, 1, "first"));
+			await vi.advanceTimersByTimeAsync(0);
+			await bot.handleUpdate(messageUpdate(2, 2, "second"));
+			await vi.advanceTimersByTimeAsync(0);
+			await vi.advanceTimersByTimeAsync(3000);
+
+			// One at receipt plus one tick: a second timer for the queued message would make it 3.
+			expect(sendChatAction).toHaveBeenCalledTimes(2);
+
+			prompts[0]?.();
+			await vi.advanceTimersByTimeAsync(0);
+			await vi.advanceTimersByTimeAsync(3000);
+			// Still typing for the queued message after the first turn ended.
+			expect(sendChatAction.mock.calls.length).toBeGreaterThan(2);
+
+			prompts[1]?.();
+			await vi.advanceTimersByTimeAsync(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("re-sends right after the bot's first status message clears it", async () => {
+		vi.useFakeTimers();
+		try {
+			const { bot, sendChatAction, listeners, prompts } = typingHarness();
+
+			await bot.handleUpdate(messageUpdate(1, 1, "run something"));
+			await vi.advanceTimersByTimeAsync(0);
+			const before = sendChatAction.mock.calls.length;
+
+			for (const listener of listeners) {
+				listener({ type: "tool_execution_start", toolName: "bash", toolCallId: "t1", args: {} });
+			}
+			await vi.advanceTimersByTimeAsync(0);
+
+			expect(sendChatAction.mock.calls.length).toBe(before + 1);
+
+			prompts[0]?.();
+			await vi.advanceTimersByTimeAsync(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("logs a failing indicator once per interval instead of swallowing it", async () => {
+		vi.useFakeTimers();
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const { bot, sendChatAction, prompts } = typingHarness();
+			sendChatAction.mockRejectedValue(new Error("Too Many Requests"));
+
+			await bot.handleUpdate(messageUpdate(1, 1, "hello"));
+			await vi.advanceTimersByTimeAsync(0);
+			await vi.advanceTimersByTimeAsync(9000);
+
+			const typingErrors = errorSpy.mock.calls.filter((call) => String(call[0]).includes("typing indicator failed"));
+			expect(typingErrors).toHaveLength(1);
+			expect(String(typingErrors[0]?.[1])).toContain("Too Many Requests");
+
+			prompts[0]?.();
+			await vi.advanceTimersByTimeAsync(0);
+		} finally {
+			errorSpy.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+});
+
 describe("replyText", () => {
 	function replyUpdate(replyToMessage: Record<string, unknown>): { message: { reply_to_message: unknown } } {
 		return { message: { reply_to_message: replyToMessage } } as never;
