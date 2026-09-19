@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.64] - 2026-09-19
 
 - feat: images no longer live in the session log, and older images leave the live context. Every image (a Telegram photo, a screenshot the `read` tool opens, generated images) is saved once as a real file, `images/<sha256>.<ext>` in the session artifact directory (mode 0600, identical images share one file), and the log line carries a reference (`{ type: "image", data: "", ref }`) that is turned back into the image when the session loads, so nothing in memory changes shape; a missing file becomes a text note instead of breaking the load, and an image that cannot be saved stays inline. About 42 MB of the 73 MB prod session file was image data. New `contextPruning.keepRecentImages` (default 3) replaces all but the newest images from finished turns with a note naming the saved file, which the model can `read`; images cost roughly 740 tokens each on DeepSeek v4.1 flash and 1,700 on GLM 5.3 flash (measured from provider usage) and were 3-15% of a 9-turn window on DeepSeek, up to about 30% on GLM. An image that cannot be saved (for example in a session that is not persisted) is kept. Logs written before this keep working as they are; `theoses sessions externalize-images <file> [--dry-run] [--force]` converts one (refuses a file modified in the last 30 seconds, keeps a `.pre-image-externalize.bak` copy, replaces atomically). `SessionManager` writes and loads through new `session-images.ts`; `loadEntriesFromFile` still returns references unrestored.
 
