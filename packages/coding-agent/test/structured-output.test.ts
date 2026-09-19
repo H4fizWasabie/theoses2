@@ -1,5 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { parseStructuredJson, stripStrayStructuralChars, stripTrailingCommas } from "../src/core/structured-output.ts";
+import {
+	escapeInnerQuotes,
+	parseStructuredJson,
+	stripStrayStructuralChars,
+	stripTrailingCommas,
+} from "../src/core/structured-output.ts";
+
+describe("escapeInnerQuotes", () => {
+	it("escapes quotes inside a string value", () => {
+		expect(escapeInnerQuotes('{"body": "He said "hi" and left", "n": 1}')).toBe(
+			'{"body": "He said \\"hi\\" and left", "n": 1}',
+		);
+	});
+
+	it("treats a quote followed by a comma and prose as content", () => {
+		expect(escapeInnerQuotes('{"body": "He said "hi", then left", "n": 1}')).toBe(
+			'{"body": "He said \\"hi\\", then left", "n": 1}',
+		);
+	});
+
+	it("leaves valid JSON unchanged, including already-escaped quotes", () => {
+		const input = '{"a": "x \\"y\\" z", "b": [1, "two"], "c": {"d": null}}';
+		expect(escapeInnerQuotes(input)).toBe(input);
+	});
+
+	it("keeps a real terminator before the next key or array element", () => {
+		const input = '{"a": "one", "b": "two"}';
+		expect(escapeInnerQuotes(input)).toBe(input);
+	});
+});
 
 describe("stripStrayStructuralChars", () => {
 	it("removes zero-width and control characters between tokens", () => {
@@ -79,8 +108,24 @@ describe("parseStructuredJson", () => {
 		});
 	});
 
+	it("repairs unescaped quotes inside a string value (production failure, 2026-09-19 14:44)", () => {
+		const raw =
+			'{"facts":[{"id":"f1","subject":"Seed skill","body":"The seed skill contains "You compose short-form social posts for Hafiz\'s accounts" and covers craft rules like hook-first."}],"edges":[],"episode":{"summary":"s","startedAt":"a","endedAt":"b"}}';
+		expect(parseStructuredJson(raw, "test")).toEqual({
+			facts: [
+				{
+					id: "f1",
+					subject: "Seed skill",
+					body: 'The seed skill contains "You compose short-form social posts for Hafiz\'s accounts" and covers craft rules like hook-first.',
+				},
+			],
+			edges: [],
+			episode: { summary: "s", startedAt: "a", endedAt: "b" },
+		});
+	});
+
 	it("throws and includes position + raw snippet for hopeless JSON", () => {
-		const bad = '{"facts":[{"id":"f1","subject":"a " b"}]}';
+		const bad = '{"facts":[{"id":"f1","subject":';
 		expect(() => parseStructuredJson(bad, "Memory consolidation")).toThrow();
 	});
 });
