@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- removed: the Jev urgency pre-screen (`THEOSES_INTENT_ROUTER`) and its prompt stamping. It never fired an urgent verdict in production and cost one Jev call per inbound message; prompts are sent exactly as the message text again.
+
 ## [1.0.60] - 2026-09-19
 
 ## [1.0.59] - 2026-09-19
