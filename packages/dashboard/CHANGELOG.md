@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.64] - 2026-09-19
 
 - fix: the memory graph view no longer lags on thousands of nodes. On a graph shaped like the real store (7,913 nodes, 5,232 edges) in headless Chrome, frames went from a 450 ms median (worst 1.1 s, never stopping) to a 17 to 33 ms median with no long tasks, and the animation stops once the layout settles.
