@@ -10,6 +10,7 @@ import {
 } from "theoses-ai";
 import type { Context, SimpleStreamOptions } from "theoses-ai/compat";
 import { getAgentDir } from "../config.ts";
+import { type ResolvedBackgroundModelSetting, resolveBackgroundModelSetting } from "./background-models.ts";
 import { EpisodicStore } from "./episodic-store.ts";
 import { askJevChoice, askJevNoul } from "./jev-client.ts";
 import { EDGE_RELATION_DESCRIPTIONS, EDGE_RELATIONS, type EdgeRelation, FileMemoryStore } from "./memory-store.ts";
@@ -126,24 +127,37 @@ function writeFailure(key: string, at: string): void {
 // Model resolution
 // ---------------------------------------------------------------------------
 
-/** The free variant: OpenRouter serves it only through OpenInference at $0. Accounts with $10+ of credit
- * get 1000 free-model requests a day (20 per minute), which background extraction stays well under. */
-const CONSOLIDATION_MODEL_ID = "deepseek/deepseek-v4-flash-0731:free";
+/**
+ * Defaults, overridable through `backgroundModels.consolidation` in settings.json. The free variant is
+ * served by OpenRouter only through OpenInference at $0; accounts with $10+ of credit get 1000 free-model
+ * requests a day (20 per minute), which background extraction stays well under.
+ */
+const CONSOLIDATION_DEFAULTS: ResolvedBackgroundModelSetting = {
+	model: "deepseek/deepseek-v4-flash-0731:free",
+	providers: ["OpenInference"],
+	quantizations: ["fp8"],
+};
 
 /**
  * Resolves the consolidation model from the live-hydrated OpenRouter catalog (rather than
- * hand-authoring cost/context-window numbers) and overlays the provider routing (OpenInference,
- * the only endpoint of the free variant, fp8 quantization, no fallbacks) plus caching:
+ * hand-authoring cost/context-window numbers) and overlays the provider routing (by default
+ * OpenInference, the only endpoint of the free variant, fp8 quantization, no fallbacks) plus caching.
+ * The task-boundary summary call resolves through here too, so it follows the same setting:
  * `sendSessionAffinityHeaders`/`sessionAffinityFormat` are already auto-detected true for any
  * openrouter.ai baseUrl (see `packages/ai/src/api/openai-completions.ts`'s `isOpenRouter`
  * detection), so no extra wiring is needed there — a stable per-Channel-Session affinity id
  * (see `consolidationSessionAffinityId` below) is what makes that caching actually land across passes.
  */
 export function resolveConsolidationModel(modelRuntime: ModelRuntime): Model<Api> {
-	const model = modelRuntime.getModel("openrouter", CONSOLIDATION_MODEL_ID);
+	const setting = resolveBackgroundModelSetting(
+		"consolidation",
+		CONSOLIDATION_DEFAULTS,
+		modelRuntime.getBackgroundModelSetting?.("consolidation"),
+	);
+	const model = modelRuntime.getModel("openrouter", setting.model);
 	if (!model) {
 		throw new Error(
-			`Consolidation model ${CONSOLIDATION_MODEL_ID} not found in the OpenRouter catalog. ` +
+			`Consolidation model ${setting.model} not found in the OpenRouter catalog. ` +
 				"Ensure the model catalog is hydrated and OpenRouter is a configured provider.",
 		);
 	}
@@ -166,8 +180,8 @@ export function resolveConsolidationModel(modelRuntime: ModelRuntime): Model<Api
 				// marketing label (issues #180/#190: "Baidu Qianfan" and "AkashML" silently matched
 				// nothing). The free variant has exactly one endpoint, "OpenInference" (confirmed
 				// against /api/v1/models/deepseek/deepseek-v4-flash-0731:free/endpoints).
-				order: ["OpenInference"],
-				quantizations: ["fp8"],
+				order: setting.providers,
+				...(setting.quantizations.length > 0 ? { quantizations: setting.quantizations } : {}),
 				// Without this, `order` is only a preference — OpenRouter falls back to any other
 				// provider if the ordered one isn't suitable for a request. Fail cost-strict instead:
 				// a failed pass just waits out the consolidation cooldown and retries.

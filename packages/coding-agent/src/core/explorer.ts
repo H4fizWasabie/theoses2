@@ -21,6 +21,7 @@
 import { Agent, type AgentEvent, type AgentMessage } from "theoses-agent-core";
 import type { Api, Model, ModelsRequestTransforms, ProviderHeaders, SimpleStreamOptions } from "theoses-ai";
 import { type Static, Type } from "typebox";
+import { type ResolvedBackgroundModelSetting, resolveBackgroundModelSetting } from "./background-models.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { createFindToolDefinition } from "./tools/find.ts";
@@ -29,9 +30,16 @@ import { createLsToolDefinition } from "./tools/ls.ts";
 import { createReadToolDefinition } from "./tools/read.ts";
 import { wrapToolDefinition } from "./tools/tool-definition-wrapper.ts";
 
-/** The free variant, served only through OpenInference at $0 (1000 free-model requests a day, 20 per minute,
- * on accounts with $10+ of credit). An explore call can use up to `maxTurns` requests of that allowance. */
-const EXPLORER_MODEL_ID = "deepseek/deepseek-v4-flash-0731:free";
+/**
+ * Defaults, overridable through `backgroundModels.explorer` in settings.json. The free variant is served
+ * only through OpenInference at $0 (1000 free-model requests a day, 20 per minute, on accounts with $10+ of
+ * credit). An explore call can use up to `maxTurns` requests of that allowance.
+ */
+const EXPLORER_DEFAULTS: ResolvedBackgroundModelSetting = {
+	model: "deepseek/deepseek-v4-flash-0731:free",
+	providers: ["OpenInference"],
+	quantizations: ["fp8"],
+};
 
 export const MAX_CONCURRENT_EXPLORERS = 3;
 
@@ -116,10 +124,15 @@ export function resetExplorerConcurrencyForTests(): void {
  * agentic multi-turn shape.
  */
 export function resolveExplorerModel(modelRuntime: ModelRuntime): Model<Api> {
-	const model = modelRuntime.getModel("openrouter", EXPLORER_MODEL_ID);
+	const setting = resolveBackgroundModelSetting(
+		"explorer",
+		EXPLORER_DEFAULTS,
+		modelRuntime.getBackgroundModelSetting?.("explorer"),
+	);
+	const model = modelRuntime.getModel("openrouter", setting.model);
 	if (!model) {
 		throw new Error(
-			`Explorer model ${EXPLORER_MODEL_ID} not found in the OpenRouter catalog. ` +
+			`Explorer model ${setting.model} not found in the OpenRouter catalog. ` +
 				"Ensure the model catalog is hydrated and OpenRouter is a configured provider.",
 		);
 	}
@@ -134,8 +147,8 @@ export function resolveExplorerModel(modelRuntime: ModelRuntime): Model<Api> {
 			openRouterRouting: {
 				...(model as Model<"openai-completions">).compat?.openRouterRouting,
 				// The free variant has a single endpoint; BaseTen and GMICloud only serve the paid one.
-				order: ["OpenInference"],
-				quantizations: ["fp8"],
+				order: setting.providers,
+				...(setting.quantizations.length > 0 ? { quantizations: setting.quantizations } : {}),
 				allow_fallbacks: false,
 			},
 		},

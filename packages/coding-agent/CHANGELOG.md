@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: the models used by memory consolidation (also task-boundary summaries) and the explorer sub-agent are configurable through `backgroundModels.consolidation` / `backgroundModels.explorer` in `settings.json` (`model`, `providers`, `quantizations`), so swapping a model or provider is a settings edit plus a restart instead of a code change and release. Omitted fields keep the code defaults (the free `deepseek-v4-flash-0731:free` on OpenInference, fp8, no fallbacks); a malformed value fails the background call with a message naming the setting. The overrides travel on `ModelRuntime` (`setBackgroundModels`, set wherever a runtime and settings are paired in `createAgentSession` / `createAgentSessionServices`).
+
 ## [1.0.62] - 2026-09-19
 
 - feat: memory consolidation (which also drives compaction and task-boundary summaries) and the explorer sub-agent now use the free `deepseek/deepseek-v4-flash-0731:free` variant, pinned to OpenInference (its only endpoint) with fp8 and no fallbacks. It costs $0; accounts with $10+ of credit get 1000 free-model requests a day (20 per minute). Consolidation's Baidu-first provider order and the explorer's BaseTen/GMICloud fallbacks are gone, since neither serves the free variant.

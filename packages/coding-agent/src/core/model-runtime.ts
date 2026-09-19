@@ -40,6 +40,7 @@ import * as builtinProviderCatalog from "theoses-ai/providers/all";
 import { getAgentDir } from "../config.ts";
 import { operationSignal, raceWithAbortSignal } from "../utils/abort.ts";
 import { AuthStorage as DefaultAuthStorage } from "./auth-storage.ts";
+import type { BackgroundModelConfig, BackgroundModelName, BackgroundModelSetting } from "./background-models.ts";
 import { ModelConfig } from "./model-config.ts";
 import { FileModelsStore, InMemoryCodingAgentModelsStore } from "./models-store.ts";
 import {
@@ -148,6 +149,16 @@ export class ModelRuntime implements Models {
 	private readonly providerAvailabilitySeq = new Map<string, number>();
 	private availabilityError: string | undefined;
 	private readonly credentialOperations = new Map<string, Promise<unknown>>();
+	private backgroundModels: BackgroundModelConfig = {};
+
+	/** Carries `settings.json`'s `backgroundModels` to the background resolvers, which only receive a runtime. */
+	setBackgroundModels(config: BackgroundModelConfig): void {
+		this.backgroundModels = config;
+	}
+
+	getBackgroundModelSetting(name: BackgroundModelName): BackgroundModelSetting | undefined {
+		return this.backgroundModels[name];
+	}
 
 	private constructor(
 		credentials: RuntimeCredentials,
