@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { stringify } from "yaml";
 import { getMemoriesDir } from "../config.ts";
@@ -152,17 +152,32 @@ export function buildTermMatcher(query: string): TermMatcher {
 	const significantTerms = allTerms.filter((term) => !QUERY_STOPWORDS.has(term));
 	const terms = significantTerms.length > 0 ? significantTerms : allTerms;
 	// Word-boundary matches so a term like "user" doesn't also count as a hit inside unrelated words.
-	const termPatterns = terms.map((term) => new RegExp(`\\b${escapeRegExp(term)}\\b`));
+	// Built on first use: `remember` scores with token sets instead, and a transcript-sized query has
+	// thousands of terms, so compiling a regex for each of them up front was wasted work.
+	let termPatterns: RegExp[] | undefined;
 	return {
 		terms,
 		score(haystack: string): number {
-			if (termPatterns.length === 0) return 0;
+			if (terms.length === 0) return 0;
+			termPatterns ??= terms.map((term) => new RegExp(`\\b${escapeRegExp(term)}\\b`));
 			const lower = haystack.toLowerCase();
 			let score = 0;
 			for (const pattern of termPatterns) if (pattern.test(lower)) score++;
 			return score;
 		},
 	};
+}
+
+/** Lowercased word-character runs of a node's subject and body, computed once per parsed node. */
+const nodeTokenSets = new WeakMap<MemoryNode, Set<string>>();
+
+function tokensOf(node: MemoryNode): Set<string> {
+	let tokens = nodeTokenSets.get(node);
+	if (!tokens) {
+		tokens = new Set(`${node.subject} ${node.body ?? ""}`.toLowerCase().match(/[a-z0-9_]+/g) ?? []);
+		nodeTokenSets.set(node, tokens);
+	}
+	return tokens;
 }
 
 function slugify(subject: string): string {
@@ -210,6 +225,24 @@ function parseNode(raw: string): MemoryNode | undefined {
 	};
 }
 
+interface CachedNodeFile {
+	mtimeMs: number;
+	size: number;
+	/** null for a file that exists but is not a valid node, so it is not re-parsed on every listing. */
+	node: MemoryNode | null;
+}
+
+/**
+ * Parsed node files, per directory, shared by every FileMemoryStore instance (callers construct a
+ * fresh store for each use). Parsing the frontmatter YAML of every node file is what made listing
+ * slow: about 2.5 s of the 2.7 s it took for 7.9k nodes, against 180 ms to read the files. An entry is
+ * reused while the file's mtime and size are unchanged. A rewrite that keeps both identical (same
+ * length, inside one filesystem timestamp tick) would be missed; node writes change the size in
+ * practice (an added edge, a new subject), and a stat before the read means a write landing mid-read
+ * still shows up as a changed mtime on the next listing.
+ */
+const nodeFileCaches = new Map<string, Map<string, CachedNodeFile>>();
+
 export class FileMemoryStore implements MemoryStore {
 	private readonly dir: string;
 
@@ -252,15 +285,42 @@ export class FileMemoryStore implements MemoryStore {
 		return join(this.dir, `${id}.md`);
 	}
 
-	/** All nodes currently on disk, malformed files silently skipped. */
+	/**
+	 * All nodes currently on disk, malformed files silently skipped. Unchanged files come from a cache
+	 * (see `nodeFileCaches`), so the returned nodes are shared between calls: treat them as read-only.
+	 */
 	listNodes(): MemoryNode[] {
-		if (!existsSync(this.dir)) return [];
-		return readdirSync(this.dir)
-			.filter((name) => name.endsWith(".md"))
-			.flatMap((name) => {
-				const node = parseNode(readFileSync(join(this.dir, name), "utf8"));
-				return node ? [node] : [];
-			});
+		if (!existsSync(this.dir)) {
+			nodeFileCaches.delete(this.dir);
+			return [];
+		}
+		let cache = nodeFileCaches.get(this.dir);
+		if (!cache) {
+			cache = new Map();
+			nodeFileCaches.set(this.dir, cache);
+		}
+		const seen = new Set<string>();
+		const nodes: MemoryNode[] = [];
+		for (const name of readdirSync(this.dir)) {
+			if (!name.endsWith(".md")) continue;
+			const path = join(this.dir, name);
+			try {
+				// Stat before reading: a write that lands mid-read then changes the mtime we compare next time.
+				const stat = statSync(path);
+				let entry = cache.get(name);
+				if (!entry || entry.mtimeMs !== stat.mtimeMs || entry.size !== stat.size) {
+					entry = { mtimeMs: stat.mtimeMs, size: stat.size, node: parseNode(readFileSync(path, "utf8")) ?? null };
+					cache.set(name, entry);
+				}
+				seen.add(name);
+				if (entry.node) nodes.push(entry.node);
+			} catch (error) {
+				// A file removed between listing the directory and reading it is simply gone.
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			}
+		}
+		for (const name of cache.keys()) if (!seen.has(name)) cache.delete(name);
+		return nodes;
 	}
 
 	getNode(id: string): MemoryNode | undefined {
@@ -317,27 +377,44 @@ export class FileMemoryStore implements MemoryStore {
 
 		const matcher = buildTermMatcher(query);
 		if (matcher.terms.length === 0) return [];
-		const scoreOf = (n: MemoryNode): number => matcher.score(`${n.subject} ${n.body ?? ""}`);
+		// Same score as `matcher.score` over the node's text, without one regex test per query term per node:
+		// a term (letters and digits only) matches `\bterm\b` exactly when it equals a whole word-character
+		// run, and a term repeated in the query counts once per repetition, as it does there.
+		const termWeight = new Map<string, number>();
+		for (const term of matcher.terms) termWeight.set(term, (termWeight.get(term) ?? 0) + 1);
+		const scoreOf = (n: MemoryNode): number => {
+			let score = 0;
+			for (const token of tokensOf(n)) score += termWeight.get(token) ?? 0;
+			return score;
+		};
 
 		const scores = new Map(nodes.map((n) => [n.id, scoreOf(n)]));
 		const entryIds = nodes.filter((n) => (scores.get(n.id) ?? 0) > 0).map((n) => n.id);
 		if (entryIds.length === 0) return [];
 
+		// Who points at each node, in listing order. Walking edges backwards used to scan every node for
+		// every visited node, which took seconds on 7.9k nodes; this index is built once in O(edges).
+		const incoming = new Map<string, string[]>();
+		for (const n of nodes) {
+			for (const edge of n.edges) {
+				const sources = incoming.get(edge.target);
+				if (!sources) incoming.set(edge.target, [n.id]);
+				else if (sources[sources.length - 1] !== n.id) sources.push(n.id);
+			}
+		}
+
 		const depth = new Map<string, number>();
 		const queue: Array<{ id: string; d: number }> = entryIds.map((id) => ({ id, d: 0 }));
-		while (queue.length > 0) {
-			const item = queue.shift();
-			if (!item) break;
-			const { id, d } = item;
+		for (let head = 0; head < queue.length; head++) {
+			const { id, d } = queue[head];
 			if (depth.has(id)) continue;
 			depth.set(id, d);
 			if (d >= 2) continue;
 			const node = byId.get(id);
 			if (!node) continue;
 			for (const edge of node.edges) if (!depth.has(edge.target)) queue.push({ id: edge.target, d: d + 1 });
-			for (const other of nodes)
-				if (!depth.has(other.id) && other.edges.some((e) => e.target === id))
-					queue.push({ id: other.id, d: d + 1 });
+			for (const sourceId of incoming.get(id) ?? [])
+				if (!depth.has(sourceId)) queue.push({ id: sourceId, d: d + 1 });
 		}
 
 		return [...depth.entries()]
