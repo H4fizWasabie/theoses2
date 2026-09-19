@@ -159,6 +159,45 @@ export function lastCompactionBoundary(pathEntries: SessionEntry[]): number {
 	return 0;
 }
 
+/**
+ * Providers cache a prompt prefix for only a few minutes. Any request sent within this window of the
+ * previous one can still hit that cache, so rewriting the history (compaction, chain reset, window slide)
+ * inside it turns an otherwise cached request into a full-price miss.
+ */
+export const CACHE_WARM_WINDOW_MS = 4 * 60_000;
+
+/** How many multiples of `maxHistoryTurns` a turn-triggered compaction may be deferred to keep the cache warm. */
+const HISTORY_TURN_HARD_CAP_FACTOR = 2;
+
+/** Legacy fixed window used when turn-based compaction is disabled (`maxHistoryTurns <= 0`). */
+const FALLBACK_ACTIVE_TURNS = 3;
+
+/**
+ * Hard ceiling on user turns kept in active context. Turn-triggered compaction fires past
+ * `maxHistoryTurns` but waits for a cold cache; this ceiling bounds that wait, and is also the size of the
+ * sliding window in `limitActiveContextMessages` so the window never drops turns before compaction ran.
+ */
+export function historyTurnHardCap(settings: CompactionSettings): number {
+	if (settings.maxHistoryTurns <= 0) return FALLBACK_ACTIVE_TURNS;
+	return settings.maxHistoryTurns * HISTORY_TURN_HARD_CAP_FACTOR;
+}
+
+/**
+ * Whether a turn-triggered compaction should wait. A pass rewrites the prompt prefix, so it is free only
+ * when the provider cache is already cold (`msSinceLastRequest` past the warm window). A pending task
+ * boundary marker is consumed by the same pass, so it is deferred with it instead of adding a second
+ * rewrite. Once turns pass the hard cap the pass runs regardless, to keep context bounded.
+ */
+export function shouldDeferCompactionForCache(
+	pathEntries: SessionEntry[],
+	settings: CompactionSettings,
+	msSinceLastRequest: number,
+): boolean {
+	if (msSinceLastRequest >= CACHE_WARM_WINDOW_MS) return false;
+	const turns = countUserTurnsSince(pathEntries, lastCompactionBoundary(pathEntries));
+	return turns <= historyTurnHardCap(settings);
+}
+
 /** Whether enough user turns have accumulated since the last compaction to trigger another pass. */
 export function shouldCompactByTurns(pathEntries: SessionEntry[], settings: CompactionSettings): boolean {
 	if (settings.maxHistoryTurns <= 0) return false;

@@ -63,9 +63,11 @@ import {
 	estimateContextTokens,
 	estimateTokens,
 	generateBranchSummary,
+	historyTurnHardCap,
 	prepareCompaction,
 	shouldCompact,
 	shouldCompactByTurns,
+	shouldDeferCompactionForCache,
 } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS } from "./defaults.ts";
 import { createExploreToolDefinition } from "./explorer.ts";
@@ -1296,7 +1298,10 @@ export class AgentSession {
 				await this._checkCompaction(lastAssistant, false);
 			}
 
-			this.agent.state.messages = limitActiveContextMessages(this.agent.state.messages);
+			this.agent.state.messages = limitActiveContextMessages(
+				this.agent.state.messages,
+				historyTurnHardCap(this.settingsManager.getCompactionSettings()),
+			);
 			this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
 
 			// Build messages array (custom message if any, then user message)
@@ -2297,7 +2302,14 @@ export class AgentSession {
 		if (shouldCompact(contextTokens, contextWindow, settings)) {
 			return await this._runAutoCompaction("threshold", false);
 		}
-		if (shouldCompactByTurns(this.sessionManager.getBranch(), settings)) {
+		const branch = this.sessionManager.getBranch();
+		if (shouldCompactByTurns(branch, settings)) {
+			// Compaction rewrites the prompt prefix, so hold it until the provider cache has gone cold.
+			// The post-run check always sees a warm cache; the pre-prompt check of a later turn sees the
+			// real idle gap since the last response.
+			if (shouldDeferCompactionForCache(branch, settings, Date.now() - assistantMessage.timestamp)) {
+				return false;
+			}
 			return await this._runAutoCompaction("turns", false);
 		}
 		return false;

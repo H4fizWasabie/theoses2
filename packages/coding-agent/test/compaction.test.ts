@@ -5,6 +5,7 @@ import type { AssistantMessage, Usage } from "theoses-ai/compat";
 import { getModel } from "theoses-ai/compat";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+	CACHE_WARM_WINDOW_MS,
 	type CompactionSettings,
 	calculateContextTokens,
 	capSummaryLength,
@@ -17,9 +18,11 @@ import {
 	findCutPoint,
 	formatFileOperations,
 	getLastAssistantUsage,
+	historyTurnHardCap,
 	MAX_SUMMARY_CHARS,
 	prepareCompaction,
 	shouldCompact,
+	shouldDeferCompactionForCache,
 } from "../src/core/compaction/index.ts";
 import {
 	buildSessionContext,
@@ -229,6 +232,29 @@ describe("turn counting", () => {
 		const entries = [createCustomMessageEntry("injected"), createMessageEntry(createUserMessage("prompt"))];
 
 		expect(countUserTurnsSince(entries, 0)).toBe(2);
+	});
+});
+
+describe("cache-aware compaction deferral", () => {
+	const settings: CompactionSettings = { ...DEFAULT_COMPACTION_SETTINGS, maxHistoryTurns: 3 };
+	const turns = (count: number): SessionEntry[] =>
+		Array.from({ length: count }, (_, i) => createMessageEntry(createUserMessage(`turn ${i}`)));
+
+	it("hard cap is twice maxHistoryTurns, falling back to 3 when turn compaction is disabled", () => {
+		expect(historyTurnHardCap(settings)).toBe(6);
+		expect(historyTurnHardCap({ ...settings, maxHistoryTurns: 0 })).toBe(3);
+	});
+
+	it("defers while the provider cache is warm and turns are under the hard cap", () => {
+		expect(shouldDeferCompactionForCache(turns(5), settings, 10_000)).toBe(true);
+	});
+
+	it("runs once the cache has gone cold", () => {
+		expect(shouldDeferCompactionForCache(turns(5), settings, CACHE_WARM_WINDOW_MS)).toBe(false);
+	});
+
+	it("runs regardless of cache once turns pass the hard cap", () => {
+		expect(shouldDeferCompactionForCache(turns(7), settings, 10_000)).toBe(false);
 	});
 });
 
