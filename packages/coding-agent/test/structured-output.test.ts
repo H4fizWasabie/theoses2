@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { parseStructuredJson, stripTrailingCommas } from "../src/core/structured-output.ts";
+import { parseStructuredJson, stripStrayStructuralChars, stripTrailingCommas } from "../src/core/structured-output.ts";
+
+describe("stripStrayStructuralChars", () => {
+	it("removes zero-width and control characters between tokens", () => {
+		expect(stripStrayStructuralChars('{"a": 1,​"b": [2\u001b]}')).toBe('{"a": 1,"b": [2]}');
+	});
+
+	it("keeps ordinary whitespace between tokens", () => {
+		const input = '{\n\t"a": 1,\r\n "b": 2\n}';
+		expect(stripStrayStructuralChars(input)).toBe(input);
+	});
+
+	it("leaves characters inside string values untouched", () => {
+		const input = '{"body": "zero​width and \\" quote​"}';
+		expect(stripStrayStructuralChars(input)).toBe(input);
+	});
+});
 
 describe("stripTrailingCommas", () => {
 	it("removes trailing commas in objects and arrays", () => {
@@ -41,6 +57,25 @@ describe("parseStructuredJson", () => {
 	it("repairs raw control characters inside strings", () => {
 		expect(parseStructuredJson('{"episode":{"summary":"line1\nline2"}}', "test")).toEqual({
 			episode: { summary: "line1\nline2" },
+		});
+	});
+
+	it("repairs a zero-width character between array and key (production failure, 2026-09-19 10:05)", () => {
+		const raw =
+			'{"facts":[],\n  "edges": [\n    {"from": "f0", "to": "n1", "rel": "related_to"}\n  ],\n ​"episode": {"summary": "s"}\n}';
+		expect(parseStructuredJson(raw, "test")).toEqual({
+			facts: [],
+			edges: [{ from: "f0", to: "n1", rel: "related_to" }],
+			episode: { summary: "s" },
+		});
+	});
+
+	it("repairs an ESC character before a closing bracket (production failure, 2026-09-19 12:09)", () => {
+		const raw =
+			'{"edges": [\n    {"from": "f11", "to": "n2", "rel": "supersedes"}\n \u001b],\n  "episode": {"summary": "s"}\n}';
+		expect(parseStructuredJson(raw, "test")).toEqual({
+			edges: [{ from: "f11", to: "n2", rel: "supersedes" }],
+			episode: { summary: "s" },
 		});
 	});
 
