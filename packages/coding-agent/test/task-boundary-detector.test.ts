@@ -7,6 +7,7 @@ import {
 	findLatestTaskBoundary,
 	findPreviousAssistantText,
 	getTaskDescriptor,
+	isMetaSummary,
 	isTerseFollowUp,
 	TASK_BOUNDARY_CUSTOM_TYPE,
 	TASK_DESCRIPTOR_CUSTOM_TYPE,
@@ -153,6 +154,39 @@ describe("isTerseFollowUp", () => {
 
 	it("ignores empty input", () => {
 		expect(isTerseFollowUp("   ", "Deployed.")).toBe(false);
+	});
+});
+
+describe("isMetaSummary", () => {
+	it("flags summaries that describe the summarizing job (real descriptors from 2026-09-19)", () => {
+		expect(
+			isMetaSummary(
+				"The task is to refine the one-line description to reflect that the assistant must now discuss the vision.",
+			),
+		).toBe(true);
+		expect(
+			isMetaSummary(
+				'The task is now to update the one-line description so that "go" refers to the user\'s decision.',
+			),
+		).toBe(true);
+		expect(
+			isMetaSummary(
+				"The task has not substantially changed; the new message simply restates the merge and deploy portion.",
+			),
+		).toBe(true);
+		expect(isMetaSummary("The new message asks about the sitemap, so the task continues.")).toBe(true);
+		expect(isMetaSummary("Update the one line task description to mention the deploy.")).toBe(true);
+	});
+
+	it("keeps ordinary task descriptions, including ones about descriptions", () => {
+		expect(isMetaSummary("Guide the user to enter their sitemap URL in Search Console and then submit it.")).toBe(
+			false,
+		);
+		expect(isMetaSummary("Write the product description for the supplier catalogue and add it to the sheet.")).toBe(
+			false,
+		);
+		expect(isMetaSummary("Fix the npm run build script that overwrites the live homepages.")).toBe(false);
+		expect(isMetaSummary("The task has changed to deploying PR #34 after the user approved the merge.")).toBe(false);
 	});
 });
 

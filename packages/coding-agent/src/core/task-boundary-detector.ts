@@ -83,17 +83,15 @@ const TASK_BOUNDARY_RETRY_POLICY = { enabled: true, maxRetries: 1, baseDelayMs: 
  * to follow: a false "unrelated" verdict just resets the rolling descriptor early (cheap), while a
  * missed shift lets a stale Goal keep biasing the model on unrelated requests (issue #186's actual
  * context-rot problem).
+ *
+ * Measured 2026-09-19 on 80 production decisions labeled by hand (14 real task switches, 66
+ * continuations): Jev alone at 0.6 was right on 73 (4 false boundaries, 3 missed). Sweeping the threshold
+ * from 0.3 to 0.8, 0.6 was the best; 0.7 and above produced 10 or more false boundaries. A verdict inside
+ * 0.1 of the threshold used to go to a text model as a second opinion. That fallback was right on 3 of
+ * the 11 decisions it took and Jev alone on 9 (it flipped six correct "related" verdicts into false
+ * boundaries), so it was removed.
  */
 const JEV_RELATED_THRESHOLD = 0.6;
-
-/**
- * Half-width of the band around JEV_RELATED_THRESHOLD treated as "too close to call". Noul has no
- * separate confidence field (TypeSafe's own docs: the probability doubles as confidence via its
- * distance from 0.5) — inside this band Jev's verdict is barely more than a coin flip relative to
- * the threshold, so runDetection escalates to the larger text model instead of trusting the raw
- * split. Outside the band, Jev's verdict is used as-is (no extra call, no added latency/cost).
- */
-const JEV_AMBIGUOUS_BAND = 0.1;
 
 /** Independent Noul probabilities Jev returns for one message; combined in code, never by Jev. */
 export interface JevRelatedSignals {
@@ -109,8 +107,8 @@ export interface JevRelatedSignals {
 export const JEV_TOPIC_SWITCH_VETO = 0.6;
 
 /**
- * Folds the atomic signals into one related-probability so the existing threshold, escalation band
- * and logs keep their meaning. TypeSafe's guidance is to ask narrow questions and let code decide
+ * Folds the atomic signals into one related-probability so the existing threshold and logs keep
+ * their meaning. TypeSafe's guidance is to ask narrow questions and let code decide
  * how to weigh them: a message is "related" if it either continues the task or reacts to the last
  * reply (a terse "Omg, so youre claude?" only satisfies the latter), unless it explicitly announces
  * a new subject, which vetoes both.
@@ -198,57 +196,12 @@ export function findPreviousAssistantText(branch: SessionEntry[], beforeEntryId:
 	return "";
 }
 
-const ESCALATED_RELATED_INSTRUCTIONS = `Does the new message below continue or relate to the current task? Reply with ONLY the single word "true" or "false" — no quotes, no commentary, no markdown.`;
+/** Added to both summary prompts: without it the model sometimes described the act of writing the summary. */
+const TASK_SUMMARY_FOCUS = `Describe the work the user is trying to get done, and what state it is in. Never describe this instruction, the act of writing or updating a description, or "the new message".`;
 
-/**
- * Escalation path for a Jev verdict landing inside JEV_AMBIGUOUS_BAND: asks the same model
- * callSummaryModel already uses for a direct yes/no, since Jev's own probability was too close to
- * JEV_RELATED_THRESHOLD to trust on its own. Returns undefined on failure or an unparseable reply
- * — callers fall back to the raw Jev verdict in that case, never blocking the turn on escalation.
- */
-async function callEscalatedRelated(
-	modelRuntime: ModelRuntime,
-	currentDescriptor: string,
-	newUserMessage: string,
-	previousReply: string,
-	sessionAffinityId: string,
-): Promise<boolean | undefined> {
-	const model = resolveTaskBoundaryModel(modelRuntime);
-	const replyLine = previousReply ? `\n\nAssistant's previous reply: ${previousReply}` : "";
-	const promptText = `${ESCALATED_RELATED_INSTRUCTIONS}\n\nCurrent task: ${currentDescriptor || "(none tracked yet)"}${replyLine}\n\nNew message: ${newUserMessage}`;
-	const context: Context = {
-		messages: [{ role: "user", content: [{ type: "text", text: promptText }], timestamp: Date.now() }],
-	};
-	const streamOptions: SimpleStreamOptions = {
-		maxTokens: model.maxTokens,
-		toolChoice: "none",
-		sessionId: sessionAffinityId,
-	};
+const TASK_SUMMARY_INSTRUCTIONS_RELATED = `The new message below continues the current task. Write an updated one-line description of the task, refined to reflect its current state (it may have evolved, e.g. gained a sub-step); if the assistant's previous reply is given, use it to say what a short message like "go" or "check" refers to. ${TASK_SUMMARY_FOCUS} Reply with ONLY the single self-contained sentence — no quotes, no commentary, no markdown.`;
 
-	if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
-		console.error("TASK_BOUNDARY_ESCALATION_PROMPT", promptText.slice(0, 500));
-	}
-
-	try {
-		const response = await retryAssistantCall(
-			() => modelRuntime.completeSimple(model, context, streamOptions),
-			TASK_BOUNDARY_RETRY_POLICY,
-			undefined,
-		);
-		if (response.stopReason === "aborted" || response.stopReason === "error") return undefined;
-		const text = contentText(response.content).trim().toLowerCase();
-		if (text.startsWith("true")) return true;
-		if (text.startsWith("false")) return false;
-		return undefined;
-	} catch (error) {
-		console.error("Task-boundary escalation call failed:", error instanceof Error ? error.message : error);
-		return undefined;
-	}
-}
-
-const TASK_SUMMARY_INSTRUCTIONS_RELATED = `The new message below continues the current task. Write an updated one-line description of the task, refined to reflect its current state (it may have evolved, e.g. gained a sub-step); if the assistant's previous reply is given, use it to say what a short message like "go" or "check" refers to. Reply with ONLY the single self-contained sentence — no quotes, no commentary, no markdown.`;
-
-const TASK_SUMMARY_INSTRUCTIONS_NEW = `The new message below starts a task unrelated to the current one. Write a one-line description of this NEW task (the assistant's previous reply, if given, is context only). Reply with ONLY the single self-contained sentence — no quotes, no commentary, no markdown.`;
+const TASK_SUMMARY_INSTRUCTIONS_NEW = `The new message below starts a task unrelated to the current one. Write a one-line description of this NEW task (the assistant's previous reply, if given, is context only). ${TASK_SUMMARY_FOCUS} Reply with ONLY the single self-contained sentence — no quotes, no commentary, no markdown.`;
 
 /** Strips wrapping quotes a model sometimes adds despite being told not to. */
 function cleanSummary(text: string): string {
@@ -256,6 +209,21 @@ function cleanSummary(text: string): string {
 		.trim()
 		.replace(/^["'“](.*)["'”]$/s, "$1")
 		.trim();
+}
+
+/**
+ * True when a summary talks about the summarizing job instead of the user's task. The rolling descriptor is fed
+ * back into every later call, so one of these poisons the next judgments: on 2026-09-19, 10 of 82 production
+ * descriptors read like "The task is to update the one-line description to reflect ..." or "The task has not
+ * substantially changed; the new message simply restates ...". Such a summary is dropped, which leaves the
+ * previous descriptor in place and lets the next turn try again.
+ */
+export function isMetaSummary(text: string): boolean {
+	return (
+		/one[- ]?line (?:task )?description/i.test(text) ||
+		/\bthe new message\b/i.test(text) ||
+		/\bthe task has not (?:substantially )?changed\b/i.test(text)
+	);
 }
 
 /** Scans a branch for the most recent CustomEntry of the given customType. */
@@ -328,6 +296,15 @@ async function callSummaryModel(
 		);
 		if (response.stopReason === "aborted" || response.stopReason === "error") return undefined;
 		const summary = cleanSummary(contentText(response.content));
+		if (isMetaSummary(summary)) {
+			if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
+				console.error(
+					"[task-boundary] dropped a summary that describes the summarizing job:",
+					summary.slice(0, 120),
+				);
+			}
+			return undefined;
+		}
 		return summary || undefined;
 	} catch (error) {
 		console.error("Task-boundary summary call failed:", error instanceof Error ? error.message : error);
@@ -388,24 +365,6 @@ async function runDetection(options: MaybeDetectTaskBoundaryOptions): Promise<vo
 			if (signals === undefined) return; // failure: write nothing, retried naturally next turn
 			jevNoul = combineRelatedSignals(signals);
 			related = jevNoul >= JEV_RELATED_THRESHOLD;
-		}
-
-		if (jevNoul !== undefined && Math.abs(jevNoul - JEV_RELATED_THRESHOLD) < JEV_AMBIGUOUS_BAND) {
-			const escalated = await callEscalatedRelated(
-				modelRuntime,
-				currentDescriptor,
-				userMessageText,
-				previousReply,
-				key,
-			);
-			if (escalated !== undefined) {
-				if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
-					console.error(
-						`[task-boundary] jev noul=${jevNoul} ambiguous, escalated related=${escalated} for ${key}`,
-					);
-				}
-				related = escalated;
-			}
 		}
 
 		if (jevNoul !== undefined && process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
