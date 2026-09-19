@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FileMemoryStore } from "../src/core/memory-store.ts";
+import { FileMemoryStore, REMEMBER_RESULT_LIMIT } from "../src/core/memory-store.ts";
 
 describe("FileMemoryStore (semantic graph)", () => {
 	let dir: string;
@@ -57,6 +57,14 @@ describe("FileMemoryStore (semantic graph)", () => {
 		expect(ids).toContain(project.id);
 		expect(ids).toContain(convention.id);
 		expect(ids).not.toContain(unrelated.id);
+	});
+
+	it("remember returns at most 8 records by default and as many as `limit` allows", () => {
+		for (let i = 0; i < 12; i++) store.createNode({ subject: `Theoses fact number ${i}` });
+
+		expect(store.remember("theoses")).toHaveLength(REMEMBER_RESULT_LIMIT);
+		expect(store.remember("theoses", 20)).toHaveLength(12);
+		expect(store.remember("theoses", 3)).toHaveLength(3);
 	});
 
 	it("remember hides nodes superseded by a newer node", () => {

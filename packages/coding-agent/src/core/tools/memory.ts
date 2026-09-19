@@ -2,7 +2,7 @@ import { Text } from "theoses-tui";
 import { type Static, Type } from "typebox";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
-import type { MemoryStore } from "../memory-store.ts";
+import { type MemoryRecord, type MemoryStore, REMEMBER_RESULT_LIMIT } from "../memory-store.ts";
 
 const rememberSchema = Type.Object({ query: Type.String({ description: "What durable information to recall" }) });
 const saveNoteSchema = Type.Object({
@@ -12,7 +12,19 @@ const saveNoteSchema = Type.Object({
 type RememberInput = Static<typeof rememberSchema>;
 type SaveNoteInput = Static<typeof saveNoteSchema>;
 
-export function createMemoryToolDefinitions(store: MemoryStore, onMemorySaved?: () => void): ToolDefinition[] {
+/** Optional second stage for `remember`: a wider keyword pool that `rank` orders and trims (see memory-relevance.ts). */
+export interface RememberRelevanceOptions {
+	/** How many candidates to ask the store for. */
+	candidates: number;
+	/** Returns the records to show, best first, or undefined to fall back to the plain keyword results. */
+	rank: (query: string, records: MemoryRecord[]) => Promise<MemoryRecord[] | undefined>;
+}
+
+export function createMemoryToolDefinitions(
+	store: MemoryStore,
+	onMemorySaved?: () => void,
+	relevance?: RememberRelevanceOptions,
+): ToolDefinition[] {
 	return [
 		{
 			name: "remember",
@@ -22,7 +34,11 @@ export function createMemoryToolDefinitions(store: MemoryStore, onMemorySaved?: 
 			promptSnippet: "Retrieve relevant durable memory proactively",
 			parameters: rememberSchema,
 			execute: async (_id, { query }: RememberInput) => {
-				const records = store.remember(query);
+				let records = store.remember(query, relevance?.candidates);
+				if (relevance && records.length > 0) {
+					const ranked = await relevance.rank(query, records);
+					records = ranked ?? records.slice(0, REMEMBER_RESULT_LIMIT);
+				}
 				return {
 					content: [
 						{
