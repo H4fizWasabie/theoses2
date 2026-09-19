@@ -198,7 +198,12 @@ async function setupField() {
       idleUntil = performance.now() + IDLE_DELAY;
     });
 
+    // Views that fully cover the field (the memory graph) pause it: the scene renders through a
+    // post-processing composer every frame, which halved the graph's frame rate while it was hidden.
+    let paused = false;
+    let frameHandle = 0;
     const frame = () => {
+      if (paused) return;
       const now = performance.now();
       fieldGroup.rotation.y += 0.0012;
       if (!dragging && now > idleUntil) spherical.theta += 0.0009;
@@ -207,9 +212,18 @@ async function setupField() {
       const pulse = 1 + Math.sin(now * 0.0035) * 0.22;
       taskStar.scale.setScalar(pulse);
       composer.render();
-      requestAnimationFrame(frame);
+      frameHandle = requestAnimationFrame(frame);
     };
-    requestAnimationFrame(frame);
+    window.addEventListener("theoses-field-pause", (event) => {
+      const next = Boolean(event.detail?.paused);
+      if (next === paused) return;
+      paused = next;
+      if (paused) return;
+      // Cancel any frame still queued from before the pause so resuming never starts a second loop.
+      cancelAnimationFrame(frameHandle);
+      frameHandle = requestAnimationFrame(frame);
+    });
+    frameHandle = requestAnimationFrame(frame);
   } catch (error) {
     console.warn("Live field disabled:", error);
     canvas.remove();

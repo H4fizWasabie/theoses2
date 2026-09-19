@@ -499,7 +499,7 @@ async function api(
 		return true;
 	}
 	if (url.pathname === "/api/memory-graph" && request.method === "GET") {
-		json(response, 200, await readMemoryGraph());
+		json(response, 200, await readMemoryGraph({ fresh: url.searchParams.get("fresh") === "1" }));
 		return true;
 	}
 	return false;
@@ -507,16 +507,18 @@ async function api(
 
 async function asset(response: ServerResponse, pathname: string): Promise<void> {
 	const name = pathname === "/" ? "index.html" : pathname.slice(1);
-	if (name !== "index.html" && name !== "app.js" && name !== "field.js" && name !== "style.css") {
-		response.writeHead(404).end();
-		return;
-	}
 	const types: Record<string, string> = {
 		"index.html": "text/html; charset=utf-8",
 		"app.js": "text/javascript; charset=utf-8",
 		"field.js": "text/javascript; charset=utf-8",
+		"graph-layout.js": "text/javascript; charset=utf-8",
 		"style.css": "text/css; charset=utf-8",
 	};
+	// Only the files listed above are served; own-property check so names like "constructor" don't slip through.
+	if (!Object.hasOwn(types, name)) {
+		response.writeHead(404).end();
+		return;
+	}
 	response.writeHead(200, { "Content-Type": types[name] });
 	response.end(await readAsset(join(publicDirectory, name)));
 }
