@@ -151,6 +151,29 @@ Use `--offline` or `THEOSES_OFFLINE=1` to disable startup network operations.
 
 Turn counts bound how many turns are kept, not how many tokens. One turn with a long tool loop can add tens of thousands of tokens by itself, so context can still pass the size you expect from the turn count.
 
+### Context Pruning
+
+Every tool result and tool-call argument stays in the conversation, and is sent to the provider again on each later request, until compaction drops its turn. When a new user turn starts, oversized ones from turns that have already finished are cut down to a head, a marker and a tail. Small ones and the current turn are never touched.
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `contextPruning.toolResultMaxChars` | number | `1500` | Tool results with more text than this are cut. `0` turns it off. Values from 1 to 399 are raised to 400 |
+| `contextPruning.toolCallArgsMaxChars` | number | `1500` | String values inside tool-call arguments (a file being written, an edit's text) longer than this are cut. `0` turns it off. Values from 1 to 399 are raised to 400 |
+
+```json
+{
+  "contextPruning": {
+    "toolResultMaxChars": 1500,
+    "toolCallArgsMaxChars": 1500
+  }
+}
+```
+
+- The marker says how many characters were omitted and where the full text is saved (`pruned-<tool call id>` in the session's artifact directory), so the model can `read` it. These files are not added to the artifact catalog in the system prompt.
+- Only the live context changes. The session log keeps the original text, so consolidation, backfill and replays still see everything.
+- The cut is applied once, at the start of a turn, and is identical on every request in that turn, so it does not add prompt-cache misses of its own: the previous turn's messages are already being rewritten at that point, because reasoning is dropped from earlier turns.
+- `recall_turns` returns only conversational text, never tool output; the saved files and a fresh tool call are how cut output is recovered.
+
 ### Branch Summary
 
 | Setting | Type | Default | Description |

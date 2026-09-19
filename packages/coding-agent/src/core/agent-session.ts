@@ -73,6 +73,7 @@ import {
 	shouldCompactByTurns,
 	shouldDeferCompactionForCache,
 } from "./compaction/index.ts";
+import { pruneFinishedTurnOutputs } from "./context-pruning.ts";
 import { DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS } from "./defaults.ts";
 import { createExploreToolDefinition } from "./explorer.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
@@ -128,6 +129,7 @@ import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-promp
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createDeferredToolDefinitions } from "./tools/deferred-dispatch.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
+import { spillPrunedText } from "./tools/output-shaping.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
@@ -1324,6 +1326,20 @@ export class AgentSession {
 			if (process.env.THEOSES_DEBUG_CACHE_PREFIX && this.agent.state.messages.length !== messagesBeforeLimit) {
 				console.error(
 					`[cache-prefix] sliding window dropped ${messagesBeforeLimit - this.agent.state.messages.length} messages`,
+				);
+			}
+			// Everything in the list is from a finished turn: the new user message is added below. Cutting the
+			// finished turn's oversized tool output now, while its messages are being rewritten anyway (reasoning
+			// is dropped from earlier turns), does not add a prompt-cache break of its own.
+			const pruned = pruneFinishedTurnOutputs(this.agent.state.messages, {
+				...this.settingsManager.getContextPruningSettings(),
+				spill: (name, text) => spillPrunedText(this.sessionManager, name, text),
+			});
+			if (pruned.stats.toolResults > 0 || pruned.stats.toolCallArguments > 0) {
+				this.agent.state.messages = pruned.messages;
+				console.error(
+					`[context-pruning] cut ${pruned.stats.toolResults} tool results and ${pruned.stats.toolCallArguments} ` +
+						`tool-call arguments from finished turns (${pruned.stats.charsRemoved} chars)`,
 				);
 			}
 			if (!this._isPromptCacheWarm()) {
