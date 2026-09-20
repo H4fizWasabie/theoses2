@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: the Telegram bot logs one journal line per finished tool call: `[tool] procura_search ok 412ms`, or `[tool] social_metrics_sync error 88ms: <first 200 characters of the error>`. Extensions catch their own failures and return them as ordinary tool-result text, so the model and the user saw them but the journal never did (three days of production journal held no tool or extension line). One line here covers every extension without editing any of them. Journal only; nothing is added to the request, so prompt caching is unaffected.
+
 ## [1.0.72] - 2026-09-20
 
 - feat: a turn that ends with `stop`, no tool call and far more billed output tokens than visible text is now recorded. On 2026-09-20 21:54 KUL Relace billed 509 output tokens for a 145-character "Now the collector: ..." message; the tool call the model was writing never arrived, the agent loop only continues on a tool call, and the task sat idle until the user typed "Proceed" (a smaller case on 2026-09-13 was followed by "Continue"). The message now carries a `stop_without_tool_call_hidden_output` diagnostic with the last 8 stream chunks (delta keys, finish reason and sizes, never the text), the journal gets a `[stall]` line, and the same details go to `agent/failed-background-responses.jsonl`, so the next occurrence shows what the provider actually sent. Diagnostic only; it does not retry the turn yet.
