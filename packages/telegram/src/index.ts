@@ -16,6 +16,7 @@ import {
 	SessionManager,
 } from "theoses-coding-agent";
 import { chunkHtml, formatTelegramHtml, renderToolCallBlocks, splitSections, type ToolCallEntry } from "./format.ts";
+import { createToolCallLogger } from "./tool-call-log.ts";
 
 // No settings.json override plumbing here (telegram doesn't load SettingsManager);
 // this applies the shared default idle timeout globally so a stalled/looping
@@ -709,6 +710,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			const toolNames: string[] = [];
 			const toolCallEntries: ToolCallEntry[] = [];
 			const generatedImages: Buffer[] = [];
+			const toolCallLogger = createToolCallLogger();
 			const unsubscribe = session.subscribe((event) => {
 				response = assistantText(event) ?? response;
 				if (event.type === "message_end" && event.message.role === "assistant") {
@@ -718,6 +720,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 					lastError = assistantError(event);
 				}
 				if (event.type === "tool_execution_start") {
+					toolCallLogger.start(event.toolCallId);
 					runningTool.set(chat, event.toolName);
 					if (toolCallDetailEnabled) {
 						toolCallEntries.push({ id: event.toolCallId, name: event.toolName, args: event.args });
@@ -727,6 +730,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 					}
 				}
 				if (event.type === "tool_execution_end") {
+					toolCallLogger.end(event);
 					runningTool.delete(chat);
 					toolNames.push(event.toolName);
 					generatedImages.push(...extractGeneratedImages(event.result));
