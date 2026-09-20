@@ -5,6 +5,7 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { parseArgs as parseNodeArgs } from "node:util";
 
 const DEFAULT_SESSIONS_DIR = path.join(homedir(), ".theoses/agent/sessions");
 const DEFAULT_ACTIVE_READ_TOOL_PATH = path.join(process.cwd(), "packages/coding-agent/src/core/tools/read.ts");
@@ -13,43 +14,40 @@ const CHART_WIDTH = 40;
 const REPORT_TIME_ZONE = "Europe/Berlin";
 
 function parseArgs(argv) {
-	const options = {
-		sessionsDir: DEFAULT_SESSIONS_DIR,
-		json: false,
-		text: false,
-		includeRecords: false,
-		modelFilter: undefined,
-		top: DEFAULT_TOP,
-		help: false,
-		allSessions: false,
-		since: undefined,
-		autoSincePath: DEFAULT_ACTIVE_READ_TOOL_PATH,
-		bucket: "week",
+	const { values } = parseNodeArgs({
+		args: argv,
+		options: {
+			help: { type: "boolean", short: "h" },
+			json: { type: "boolean" },
+			text: { type: "boolean" },
+			"include-records": { type: "boolean" },
+			model: { type: "string" },
+			top: { type: "string" },
+			"sessions-dir": { type: "string" },
+			"all-sessions": { type: "boolean" },
+			since: { type: "string" },
+			"auto-since-path": { type: "string" },
+			bucket: { type: "string" },
+		},
+		allowPositionals: false,
+	});
+	const top = values.top === undefined ? DEFAULT_TOP : Number.parseInt(values.top, 10);
+	if (!Number.isFinite(top) || top <= 0) throw new Error("--top must be a positive integer");
+	const bucket = values.bucket ?? "week";
+	if (bucket !== "day" && bucket !== "week") throw new Error("--bucket must be day or week");
+	return {
+		sessionsDir: values["sessions-dir"] ?? DEFAULT_SESSIONS_DIR,
+		json: values.json ?? false,
+		text: values.text ?? false,
+		includeRecords: values["include-records"] ?? false,
+		modelFilter: values.model,
+		top,
+		help: values.help ?? false,
+		allSessions: values["all-sessions"] ?? false,
+		since: values.since,
+		autoSincePath: values["auto-since-path"] ?? DEFAULT_ACTIVE_READ_TOOL_PATH,
+		bucket,
 	};
-
-	for (let i = 0; i < argv.length; i++) {
-		const arg = argv[i];
-		if (arg === "--help" || arg === "-h") options.help = true;
-		else if (arg === "--json") options.json = true;
-		else if (arg === "--text") options.text = true;
-		else if (arg === "--include-records") options.includeRecords = true;
-		else if (arg === "--model") options.modelFilter = argv[++i];
-		else if (arg === "--top") {
-			const value = Number.parseInt(argv[++i] ?? "", 10);
-			if (!Number.isFinite(value) || value <= 0) throw new Error("--top must be a positive integer");
-			options.top = value;
-		} else if (arg === "--sessions-dir") options.sessionsDir = argv[++i];
-		else if (arg === "--all-sessions") options.allSessions = true;
-		else if (arg === "--since") options.since = argv[++i];
-		else if (arg === "--auto-since-path") options.autoSincePath = argv[++i];
-		else if (arg === "--bucket") {
-			const value = argv[++i];
-			if (value !== "day" && value !== "week") throw new Error("--bucket must be day or week");
-			options.bucket = value;
-		} else throw new Error(`Unknown argument: ${arg}`);
-	}
-
-	return options;
 }
 
 function printHelp() {

@@ -8,7 +8,6 @@ import {
 	type ServerSnapshot,
 } from "theoses-protocol";
 import { TheosesDisconnectedError, TheosesServerError, toDisconnectedError, toError } from "./errors.ts";
-import { createPromiseResolvers, type PromiseResolvers } from "./promise.ts";
 import type { ByteTransport, ByteTransportFactory, ByteTransportHandlers } from "./transport.ts";
 import type { ConnectionState, ConnectionStateChange } from "./types.ts";
 
@@ -22,11 +21,11 @@ type ActiveConnection = {
 
 type ConnectionLifecycle =
 	| { state: "disconnected" }
-	| ({ state: "connecting"; handshake: PromiseResolvers<ServerSnapshot> } & ActiveConnection)
+	| ({ state: "connecting"; handshake: PromiseWithResolvers<ServerSnapshot> } & ActiveConnection)
 	| ({
 			state: "connected";
 			transport: ByteTransport;
-			handshake: PromiseResolvers<ServerSnapshot> | undefined;
+			handshake: PromiseWithResolvers<ServerSnapshot> | undefined;
 	  } & ActiveConnection);
 
 interface ConnectionOptions {
@@ -68,7 +67,7 @@ export class Connection {
 			return Promise.reject(new TheosesDisconnectedError(`TheosesClient is already ${this.#lifecycle.state}`));
 		}
 		const id = ++this.#sequence;
-		const handshake = createPromiseResolvers<ServerSnapshot>();
+		const handshake = Promise.withResolvers<ServerSnapshot>();
 		this.#lifecycle = {
 			state: "connecting",
 			id,

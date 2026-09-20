@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
+import { parseArgs as parseNodeArgs } from "node:util";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
@@ -73,106 +74,40 @@ function parseMode(value) {
 }
 
 function parseArgs(argv) {
-	const options = {
-		mode: "tui",
-		bundle: false,
-		runs: 1,
-		warmup: 0,
-		profileDir: undefined,
-		label: undefined,
-		offline: true,
-		build: true,
-		runtime: "auto",
-		agentDir: undefined,
-		isolatedAgentDir: false,
-		cpuProfile: false,
+	const { values } = parseNodeArgs({
+		args: argv,
+		options: {
+			help: { type: "boolean", short: "h" },
+			mode: { type: "string" },
+			runs: { type: "string" },
+			warmup: { type: "string" },
+			"profile-dir": { type: "string" },
+			label: { type: "string" },
+			runtime: { type: "string" },
+			"agent-dir": { type: "string" },
+			"isolated-agent-dir": { type: "boolean" },
+			bundle: { type: "boolean" },
+			"no-offline": { type: "boolean" },
+			"skip-build": { type: "boolean" },
+			"cpu-profile": { type: "boolean" },
+		},
+		allowPositionals: false,
+	});
+	return {
+		mode: values.mode === undefined ? "tui" : parseMode(values.mode),
+		bundle: values.bundle ?? false,
+		runs: values.runs === undefined ? 1 : parseIntegerFlag(values.runs, "--runs"),
+		warmup: values.warmup === undefined ? 0 : parseIntegerFlag(values.warmup, "--warmup"),
+		profileDir: values["profile-dir"] === undefined ? undefined : resolve(values["profile-dir"]),
+		label: values.label,
+		offline: !(values["no-offline"] ?? false),
+		build: !(values["skip-build"] ?? false),
+		runtime: values.runtime === undefined ? "auto" : parseRuntime(values.runtime),
+		agentDir: values["agent-dir"] === undefined ? undefined : resolve(values["agent-dir"]),
+		isolatedAgentDir: values["isolated-agent-dir"] ?? false,
+		cpuProfile: values["cpu-profile"] ?? false,
+		help: values.help ?? false,
 	};
-
-	for (let index = 0; index < argv.length; index++) {
-		const arg = argv[index];
-
-		if (arg === "--help" || arg === "-h") {
-			options.help = true;
-			continue;
-		}
-
-		if (arg === "--no-offline") {
-			options.offline = false;
-			continue;
-		}
-
-		if (arg === "--isolated-agent-dir") {
-			options.isolatedAgentDir = true;
-			continue;
-		}
-
-		if (arg === "--bundle") {
-			options.bundle = true;
-			continue;
-		}
-
-		if (arg === "--skip-build") {
-			options.build = false;
-			continue;
-		}
-
-		if (arg === "--cpu-profile") {
-			options.cpuProfile = true;
-			continue;
-		}
-
-		if (
-			(arg === "--mode" ||
-				arg === "--runs" ||
-				arg === "--warmup" ||
-				arg === "--profile-dir" ||
-				arg === "--label" ||
-				arg === "--runtime" ||
-				arg === "--agent-dir") &&
-			index + 1 >= argv.length
-		) {
-			throw new Error(`Missing value for ${arg}`);
-		}
-
-		if (arg === "--mode") {
-			options.mode = parseMode(argv[++index]);
-			continue;
-		}
-
-		if (arg === "--runs") {
-			options.runs = parseIntegerFlag(argv[++index], "--runs");
-			continue;
-		}
-
-		if (arg === "--warmup") {
-			options.warmup = parseIntegerFlag(argv[++index], "--warmup");
-			continue;
-		}
-
-		if (arg === "--profile-dir") {
-			options.profileDir = resolve(argv[++index]);
-			continue;
-		}
-
-		if (arg === "--label") {
-			options.label = argv[++index];
-			continue;
-		}
-
-		if (arg === "--runtime") {
-			options.runtime = parseRuntime(argv[++index]);
-			continue;
-		}
-
-		if (arg === "--agent-dir") {
-			options.agentDir = resolve(argv[++index]);
-			continue;
-		}
-
-		throw new Error(`Unknown option: ${arg}`);
-	}
-
-	return options;
 }
 
 function detectRuntimeFromPackageManager() {

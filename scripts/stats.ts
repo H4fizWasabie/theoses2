@@ -3,6 +3,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { parseArgs as parseNodeArgs } from "node:util";
 
 interface UsageCost {
 	input?: number;
@@ -112,36 +113,36 @@ function localDayKey(date: Date): string {
 }
 
 function parseArgs(): Args {
-	const args = process.argv.slice(2);
-	let days = 7;
-	let cwd = process.cwd();
-	let sessionsBase = join(homedir(), ".theoses", "agent", "sessions");
-
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
-		if ((arg === "--days" || arg === "-n") && args[i + 1]) {
-			days = Number.parseInt(args[++i], 10);
-		} else if ((arg === "--cwd" || arg === "--dir" || arg === "-d") && args[i + 1]) {
-			cwd = resolve(args[++i]);
-		} else if (arg === "--sessions-base" && args[i + 1]) {
-			sessionsBase = resolve(args[++i]);
-		} else if (arg === "--help" || arg === "-h") {
-			console.log(`Usage: scripts/stats.ts [options]
+const usage = `Usage: scripts/stats.ts [options]
 
 Options:
   -n, --days <days>         Number of local calendar days to include (default: 7)
   -d, --dir, --cwd <path>   Project cwd to inspect (default: current cwd)
   --sessions-base <path>    Sessions base directory (default: ~/.theoses/agent/sessions)
-  -h, --help                Show this help`);
-			process.exit(0);
-		}
-	}
+	-h, --help                Show this help`;
 
+	const { values } = parseNodeArgs({
+		args: process.argv.slice(2),
+		options: {
+			days: { type: "string", short: "n" },
+			cwd: { type: "string", short: "d" },
+			dir: { type: "string" },
+			"sessions-base": { type: "string" },
+			help: { type: "boolean", short: "h" },
+		},
+		allowPositionals: false,
+	});
+	if (values.help) {
+		console.log(usage);
+		process.exit(0);
+	}
+	const days = values.days === undefined ? 7 : Number.parseInt(values.days, 10);
+	const cwd = resolve(values.cwd ?? values.dir ?? process.cwd());
+	const sessionsBase = resolve(values["sessions-base"] ?? join(homedir(), ".theoses", "agent", "sessions"));
 	if (!Number.isInteger(days) || days <= 0) {
 		throw new Error("--days must be a positive integer");
 	}
-
-	return { days, cwd: resolve(cwd), sessionsBase };
+	return { days, cwd, sessionsBase };
 }
 
 function formatInt(value: number): string {

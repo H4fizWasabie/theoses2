@@ -1,7 +1,6 @@
-import type { CredentialStore } from "theoses-ai";
+import { type CredentialStore, InMemoryModelsStore } from "theoses-ai";
 import { ModelRegistry } from "../src/core/model-registry.ts";
 import { ModelRuntime } from "../src/core/model-runtime.ts";
-import { InMemoryCodingAgentModelsStore } from "../src/core/models-store.ts";
 
 const runtimes = new WeakMap<ModelRegistry, ModelRuntime>();
 
@@ -17,7 +16,7 @@ export async function createModelRegistry(credentials: CredentialStore, modelsPa
 		await ModelRuntime.create({
 			credentials,
 			modelsPath,
-			modelsStore: new InMemoryCodingAgentModelsStore(),
+			modelsStore: new InMemoryModelsStore(),
 			allowModelNetwork: false,
 		}),
 	);

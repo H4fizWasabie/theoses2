@@ -5,60 +5,45 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { parseArgs as parseNodeArgs } from "node:util";
 
 const DEFAULT_SESSIONS_DIR = path.join(homedir(), ".theoses/agent/sessions");
 const DEFAULT_ACTIVE_EDIT_EXTENSION_PATH = path.join(homedir(), ".theoses/agent/extensions/edit.ts");
 const DEFAULT_TOP = 20;
 
 function parseArgs(argv) {
-	const options = {
-		sessionsDir: DEFAULT_SESSIONS_DIR,
-		json: false,
-		includeRecords: false,
-		failedOnly: false,
-		modelFilter: undefined,
-		extFilter: undefined,
-		top: DEFAULT_TOP,
-		help: false,
-		allSessions: false,
-		since: undefined,
-		autoSincePath: DEFAULT_ACTIVE_EDIT_EXTENSION_PATH,
+	const { values } = parseNodeArgs({
+		args: argv,
+		options: {
+			help: { type: "boolean", short: "h" },
+			json: { type: "boolean" },
+			"include-records": { type: "boolean" },
+			"failed-only": { type: "boolean" },
+			model: { type: "string" },
+			ext: { type: "string" },
+			top: { type: "string" },
+			"sessions-dir": { type: "string" },
+			"all-sessions": { type: "boolean" },
+			since: { type: "string" },
+			"auto-since-path": { type: "string" },
+		},
+		allowPositionals: false,
+	});
+	const top = values.top === undefined ? DEFAULT_TOP : Number.parseInt(values.top, 10);
+	if (!Number.isFinite(top) || top <= 0) throw new Error("--top must be a positive integer");
+	return {
+		sessionsDir: values["sessions-dir"] ?? DEFAULT_SESSIONS_DIR,
+		json: values.json ?? false,
+		includeRecords: values["include-records"] ?? false,
+		failedOnly: values["failed-only"] ?? false,
+		modelFilter: values.model,
+		extFilter: values.ext?.toLowerCase(),
+		top,
+		help: values.help ?? false,
+		allSessions: values["all-sessions"] ?? false,
+		since: values.since,
+		autoSincePath: values["auto-since-path"] ?? DEFAULT_ACTIVE_EDIT_EXTENSION_PATH,
 	};
-
-	for (let i = 0; i < argv.length; i++) {
-		const arg = argv[i];
-		if (arg === "--help" || arg === "-h") {
-			options.help = true;
-		} else if (arg === "--json") {
-			options.json = true;
-		} else if (arg === "--include-records") {
-			options.includeRecords = true;
-		} else if (arg === "--failed-only") {
-			options.failedOnly = true;
-		} else if (arg === "--model") {
-			options.modelFilter = argv[++i];
-		} else if (arg === "--ext") {
-			options.extFilter = argv[++i]?.toLowerCase();
-		} else if (arg === "--top") {
-			const value = Number.parseInt(argv[++i] ?? "", 10);
-			if (!Number.isFinite(value) || value <= 0) {
-				throw new Error("--top must be a positive integer");
-			}
-			options.top = value;
-		} else if (arg === "--sessions-dir") {
-			options.sessionsDir = argv[++i];
-		} else if (arg === "--all-sessions") {
-			options.allSessions = true;
-		} else if (arg === "--since") {
-			options.since = argv[++i];
-		} else if (arg === "--auto-since-path") {
-			options.autoSincePath = argv[++i];
-		} else {
-			throw new Error(`Unknown argument: ${arg}`);
-		}
-	}
-
-	return options;
 }
 
 function printHelp() {

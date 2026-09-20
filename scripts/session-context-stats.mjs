@@ -5,6 +5,7 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { parseArgs as parseNodeArgs } from "node:util";
 
 const DEFAULT_SESSIONS_DIR = path.join(homedir(), ".theoses/agent/sessions");
 const MODELS_GENERATED_PATH = path.join(process.cwd(), "packages/ai/src/models.generated.ts");
@@ -13,24 +14,36 @@ const REPORT_TIME_ZONE = "Europe/Berlin";
 const CHART_WIDTH = 40;
 
 function parseArgs(argv) {
-	const options = { sessionsDir: DEFAULT_SESSIONS_DIR, json: false, text: false, allSessions: false, since: undefined, modelFilter: undefined, modelPrefixes: [], bashContains: [], cwd: process.cwd(), help: false };
-	for (let i = 0; i < argv.length; i++) {
-		const arg = argv[i];
-		if (arg === "--help" || arg === "-h") options.help = true;
-		else if (arg === "--json") options.json = true;
-		else if (arg === "--text") options.text = true;
-		else if (arg === "--sessions-dir") options.sessionsDir = argv[++i];
-		else if (arg === "--since") options.since = argv[++i];
-		else if (arg === "--all-sessions") options.allSessions = true;
-		else if (arg === "--model") options.modelFilter = argv[++i];
-		else if (arg === "--model-prefix") options.modelPrefixes.push(argv[++i]);
-		else if (arg === "--bash-contains") options.bashContains.push(argv[++i]);
-		else if (arg === "--git-commit-or-push") options.bashContains.push("git commit", "git push");
-		else if (arg === "--cwd") options.cwd = argv[++i];
-		else if (arg === "--all-cwds") options.cwd = undefined;
-		else throw new Error(`Unknown argument: ${arg}`);
-	}
-	return options;
+	const { values } = parseNodeArgs({
+		args: argv,
+		options: {
+			help: { type: "boolean", short: "h" },
+			json: { type: "boolean" },
+			text: { type: "boolean" },
+			"sessions-dir": { type: "string" },
+			since: { type: "string" },
+			"all-sessions": { type: "boolean" },
+			model: { type: "string" },
+			"model-prefix": { type: "string", multiple: true },
+			"bash-contains": { type: "string", multiple: true },
+			"git-commit-or-push": { type: "boolean" },
+			cwd: { type: "string" },
+			"all-cwds": { type: "boolean" },
+		},
+		allowPositionals: false,
+	});
+	return {
+		sessionsDir: values["sessions-dir"] ?? DEFAULT_SESSIONS_DIR,
+		json: values.json ?? false,
+		text: values.text ?? false,
+		allSessions: values["all-sessions"] ?? false,
+		since: values.since,
+		modelFilter: values.model,
+		modelPrefixes: values["model-prefix"] ?? [],
+		bashContains: [...(values["bash-contains"] ?? []), ...(values["git-commit-or-push"] ? ["git commit", "git push"] : [])],
+		cwd: values["all-cwds"] ? undefined : (values.cwd ?? process.cwd()),
+		help: values.help ?? false,
+	};
 }
 
 function printHelp() {
