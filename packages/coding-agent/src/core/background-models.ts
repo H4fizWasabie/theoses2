@@ -8,7 +8,7 @@
 export type BackgroundModelName = "consolidation" | "explorer";
 
 export interface BackgroundModelSetting {
-	/** OpenRouter model id, e.g. "deepseek/deepseek-v4-flash-0731:free". */
+	/** OpenRouter model id, e.g. "deepseek/deepseek-v4-flash-0731". */
 	model?: string;
 	/**
 	 * OpenRouter provider `order`, using the endpoints API's `provider_name` (not the pricing page's

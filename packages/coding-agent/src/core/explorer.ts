@@ -31,13 +31,13 @@ import { createReadToolDefinition } from "./tools/read.ts";
 import { wrapToolDefinition } from "./tools/tool-definition-wrapper.ts";
 
 /**
- * Defaults, overridable through `backgroundModels.explorer` in settings.json. The free variant is served
- * only through OpenInference at $0 (1000 free-model requests a day, 20 per minute, on accounts with $10+ of
- * credit). An explore call can use up to `maxTurns` requests of that allowance.
+ * Defaults, overridable through `backgroundModels.explorer` in settings.json. The same paid DeepSeek V4 Flash
+ * 0731 at fp8 that memory consolidation uses, Baidu first and DeepInfra as the only fallback. The free `:free`
+ * variant this used to default to was withdrawn by OpenRouter on 2026-09-20.
  */
 const EXPLORER_DEFAULTS: ResolvedBackgroundModelSetting = {
-	model: "deepseek/deepseek-v4-flash-0731:free",
-	providers: ["OpenInference"],
+	model: "deepseek/deepseek-v4-flash-0731",
+	providers: ["Baidu", "DeepInfra"],
 	quantizations: ["fp8"],
 };
 
@@ -109,15 +109,13 @@ export function resetExplorerConcurrencyForTests(): void {
 /**
  * Resolves the explorer model from the live-hydrated OpenRouter catalog. Same model id and
  * fp8/fail-strict shape as memory consolidation (see memory-consolidation.ts). #254 pinned
- * OpenInference first for its per-provider KV-cache hit rate, with Baseten (US) and GMI Cloud as
- * paid fallbacks; the free variant only exists on OpenInference, so those fallbacks are gone.
+ * OpenInference first for its per-provider KV-cache hit rate; that only worked for the free variant,
+ * which no longer exists, so the default is now Baidu then DeepInfra like consolidation.
  *
  * Provider slugs verified against the live OpenRouter endpoints listing (same method as the
  * "Baidu"/"AkashML" slug lessons from issues #180/#190: marketing labels on the pricing page
- * don't always match the API's `provider_name`): "OpenInference", "BaseTen", "GMICloud" (no
- * space). Note the endpoints listing exposes two identical "BaseTen" entries with no
- * region-distinguishing field, so a "US"-specific slug can't be confirmed from the public API —
- * pinning plain "BaseTen" covers both until OpenRouter exposes a region tag to disambiguate.
+ * don't always match the API's `provider_name`): "Baidu" (not "Baidu Qianfan", which matches no
+ * endpoint) and "DeepInfra".
  *
  * Kept as a separate resolver rather than reusing `resolveConsolidationModel` so consolidation's
  * maxTokens/output-shape tuning (single JSON object) stays independent from the explorer's

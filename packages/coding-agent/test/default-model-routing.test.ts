@@ -3,11 +3,11 @@ import { resolveExplorerModel } from "../src/core/explorer.ts";
 import { resolveConsolidationModel } from "../src/core/memory-consolidation.ts";
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
 
-const FREE_MODEL_ID = "deepseek/deepseek-v4-flash-0731:free";
+const DEFAULT_MODEL_ID = "deepseek/deepseek-v4-flash-0731";
 
 function runtimeWithModel(): { runtime: ModelRuntime; getModel: ReturnType<typeof vi.fn> } {
 	const getModel = vi.fn(() => ({
-		id: FREE_MODEL_ID,
+		id: DEFAULT_MODEL_ID,
 		provider: "openrouter",
 		api: "openai-completions",
 		maxTokens: 393216,
@@ -20,36 +20,45 @@ function routingOf(model: unknown): Record<string, unknown> {
 	return (model as { compat: { openRouterRouting: Record<string, unknown> } }).compat.openRouterRouting;
 }
 
-describe("free DeepSeek V4 Flash 0731 routing", () => {
-	it("consolidation asks for the free variant and pins OpenInference with no fallbacks", () => {
+describe("default DeepSeek V4 Flash 0731 routing", () => {
+	it("consolidation asks for the paid variant and pins Baidu then DeepInfra with no other fallbacks", () => {
 		const { runtime, getModel } = runtimeWithModel();
 
 		const model = resolveConsolidationModel(runtime);
 
-		expect(getModel).toHaveBeenCalledWith("openrouter", FREE_MODEL_ID);
+		expect(getModel).toHaveBeenCalledWith("openrouter", DEFAULT_MODEL_ID);
 		expect(routingOf(model)).toMatchObject({
-			order: ["OpenInference"],
+			order: ["Baidu", "DeepInfra"],
 			quantizations: ["fp8"],
 			allow_fallbacks: false,
 		});
 		expect(model.maxTokens).toBe(32000);
 	});
 
-	it("the explorer asks for the free variant and pins OpenInference with no fallbacks", () => {
+	it("the explorer asks for the paid variant and pins Baidu then DeepInfra with no other fallbacks", () => {
 		const { runtime, getModel } = runtimeWithModel();
 
 		const model = resolveExplorerModel(runtime);
 
-		expect(getModel).toHaveBeenCalledWith("openrouter", FREE_MODEL_ID);
+		expect(getModel).toHaveBeenCalledWith("openrouter", DEFAULT_MODEL_ID);
 		expect(routingOf(model)).toMatchObject({
-			order: ["OpenInference"],
+			order: ["Baidu", "DeepInfra"],
 			quantizations: ["fp8"],
 			allow_fallbacks: false,
 		});
 		expect(model.maxTokens).toBe(8000);
 	});
 
-	it("fails loudly when the catalog does not contain the free variant", () => {
+	it("does not default to a free variant, which OpenRouter can withdraw", () => {
+		const { runtime, getModel } = runtimeWithModel();
+
+		resolveConsolidationModel(runtime);
+		resolveExplorerModel(runtime);
+
+		for (const call of getModel.mock.calls) expect(String(call[1])).not.toMatch(/:free$/);
+	});
+
+	it("fails loudly when the catalog does not contain the model", () => {
 		const runtime = { getModel: () => undefined } as unknown as ModelRuntime;
 
 		expect(() => resolveConsolidationModel(runtime)).toThrow(/not found in the OpenRouter catalog/);
