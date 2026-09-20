@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.73] - 2026-09-20
 
 - feat: the Telegram bot logs one journal line per finished tool call: `[tool] procura_search ok 412ms`, or `[tool] social_metrics_sync error 88ms: <first 200 characters of the error>`. Extensions catch their own failures and return them as ordinary tool-result text, so the model and the user saw them but the journal never did (three days of production journal held no tool or extension line). One line here covers every extension without editing any of them. Journal only; nothing is added to the request, so prompt caching is unaffected.
 
