@@ -108,7 +108,7 @@ describe("background model resolvers honour backgroundModels overrides", () => {
 		const model = resolveExplorerModel(runtime);
 
 		expect(routingOf(model)).not.toHaveProperty("quantizations");
-		expect(routingOf(model)).toMatchObject({ order: ["OpenInference"], allow_fallbacks: false });
+		expect(routingOf(model)).toMatchObject({ order: ["Baidu", "DeepInfra"], allow_fallbacks: false });
 	});
 
 	it("the explorer and consolidation are configured independently", () => {
@@ -118,7 +118,7 @@ describe("background model resolvers honour backgroundModels overrides", () => {
 		resolveConsolidationModel(runtime);
 
 		expect(getModel).toHaveBeenNthCalledWith(1, "openrouter", "vendor/explorer-only");
-		expect(getModel).toHaveBeenNthCalledWith(2, "openrouter", "deepseek/deepseek-v4-flash-0731:free");
+		expect(getModel).toHaveBeenNthCalledWith(2, "openrouter", "deepseek/deepseek-v4-flash-0731");
 	});
 
 	it("a malformed setting fails the resolve instead of silently using the default", () => {

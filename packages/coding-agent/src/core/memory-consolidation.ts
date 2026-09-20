@@ -129,20 +129,22 @@ function writeFailure(key: string, at: string): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Defaults, overridable through `backgroundModels.consolidation` in settings.json. The free variant is
- * served by OpenRouter only through OpenInference at $0; accounts with $10+ of credit get 1000 free-model
- * requests a day (20 per minute), which background extraction stays well under.
+ * Defaults, overridable through `backgroundModels.consolidation` in settings.json. The paid DeepSeek V4 Flash
+ * 0731 at fp8, Baidu first and DeepInfra as the only fallback (about $0.05 to $0.06 per million input tokens,
+ * a fraction of a cent per pass). The free `:free` variant this used to default to was withdrawn by OpenRouter on
+ * 2026-09-20: the API answered "This model is unavailable for free" and the next catalog hydration no longer
+ * listed it, which silently stopped consolidation and task-boundary summaries until the setting was overridden.
  */
 const CONSOLIDATION_DEFAULTS: ResolvedBackgroundModelSetting = {
-	model: "deepseek/deepseek-v4-flash-0731:free",
-	providers: ["OpenInference"],
+	model: "deepseek/deepseek-v4-flash-0731",
+	providers: ["Baidu", "DeepInfra"],
 	quantizations: ["fp8"],
 };
 
 /**
  * Resolves the consolidation model from the live-hydrated OpenRouter catalog (rather than
  * hand-authoring cost/context-window numbers) and overlays the provider routing (by default
- * OpenInference, the only endpoint of the free variant, fp8 quantization, no fallbacks) plus caching.
+ * Baidu then DeepInfra, fp8 quantization, no fallbacks outside that list) plus caching.
  * The task-boundary summary call resolves through here too, so it follows the same setting:
  * `sendSessionAffinityHeaders`/`sessionAffinityFormat` are already auto-detected true for any
  * openrouter.ai baseUrl (see `packages/ai/src/api/openai-completions.ts`'s `isOpenRouter`
@@ -179,8 +181,9 @@ export function resolveConsolidationModel(modelRuntime: ModelRuntime): Model<Api
 				...(model as Model<"openai-completions">).compat?.openRouterRouting,
 				// Provider slugs must match the endpoints API's `provider_name`, not the pricing page's
 				// marketing label (issues #180/#190: "Baidu Qianfan" and "AkashML" silently matched
-				// nothing). The free variant has exactly one endpoint, "OpenInference" (confirmed
-				// against /api/v1/models/deepseek/deepseek-v4-flash-0731:free/endpoints).
+				// nothing). Confirmed against /api/v1/models/deepseek/deepseek-v4-flash-0731/endpoints:
+				// "Baidu" (tag baidu/fp8) and "DeepInfra". Baidu can answer 429 on its shared pool, which
+				// is why DeepInfra is second.
 				order: setting.providers,
 				...(setting.quantizations.length > 0 ? { quantizations: setting.quantizations } : {}),
 				// Without this, `order` is only a preference — OpenRouter falls back to any other
