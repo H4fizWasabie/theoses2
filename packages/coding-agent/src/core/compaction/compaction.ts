@@ -9,6 +9,7 @@ import type { AgentMessage, StreamFn, ThinkingLevel } from "theoses-agent-core";
 import { contentText, type RetryCallbacks, type RetryPolicy, retryAssistantCall, uuidv7 } from "theoses-ai";
 import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "theoses-ai/compat";
 import { completeSimple } from "theoses-ai/compat";
+import { recordBackgroundFailure } from "../background-failure-log.ts";
 import { convertToLlm } from "../messages.ts";
 import {
 	buildSessionContext,
@@ -904,8 +905,9 @@ export async function distillMemory(
 		callbacks,
 	);
 	if (response.stopReason === "error" || response.stopReason === "aborted") return { facts: [] };
+	const replyText = contentText(response.content);
 	try {
-		const parsed: unknown = parseStructuredJson(contentText(response.content), "Memory distillation");
+		const parsed: unknown = parseStructuredJson(replyText, "Memory distillation");
 		const values = Array.isArray(parsed)
 			? parsed
 			: typeof parsed === "object" && parsed !== null && Array.isArray((parsed as { facts?: unknown }).facts)
@@ -929,7 +931,15 @@ export async function distillMemory(
 				? (episodeValue as { episode: string }).episode.trim()
 				: undefined;
 		return { facts, ...(episode ? { episode } : {}) };
-	} catch {
+	} catch (error) {
+		recordBackgroundFailure({
+			caller: "distillation",
+			model: response.responseModel ?? model.id,
+			provider: response.responseProvider,
+			stopReason: response.stopReason,
+			error: error instanceof Error ? error.message.slice(0, 300) : String(error),
+			reply: replyText,
+		});
 		// parseStructuredJson already logged position + raw-text snippet (issue #250). Distillation
 		// is best-effort — dropping this pass loses one window's memory candidates, so we only skip
 		// after the repair layers had their chance.

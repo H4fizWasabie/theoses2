@@ -10,6 +10,7 @@ import {
 } from "theoses-ai";
 import type { Context, SimpleStreamOptions } from "theoses-ai/compat";
 import { getAgentDir } from "../config.ts";
+import { describeResponseShape, recordBackgroundFailure } from "./background-failure-log.ts";
 import { type ResolvedBackgroundModelSetting, resolveBackgroundModelSetting } from "./background-models.ts";
 import { EpisodicStore } from "./episodic-store.ts";
 import { askJevChoice, askJevNoul } from "./jev-client.ts";
@@ -310,7 +311,7 @@ export function isEmptyConsolidationResponse(text: string): boolean {
 function parseConsolidationResponse(text: string, stopReason?: string): ParsedConsolidation {
 	const parsed: unknown = parseStructuredJson(text, "Memory consolidation");
 	if (typeof parsed !== "object" || parsed === null) {
-		throw new Error("Consolidation response was not a JSON object");
+		throw new Error(`Consolidation response was not a JSON object (${describeResponseShape(text, stopReason)})`);
 	}
 	const obj = parsed as Record<string, unknown>;
 
@@ -345,12 +346,7 @@ function parseConsolidationResponse(text: string, stopReason?: string): ParsedCo
 
 	const episodeValue = obj.episode;
 	if (typeof episodeValue !== "object" || episodeValue === null) {
-		// Keep the evidence: the bare message gave no way to tell an empty window ({"facts":[]}) from a truncated
-		// or wrongly shaped answer, so name the keys the model did return and a short slice of its text.
-		throw new Error(
-			`Consolidation response is missing an episode (stopReason=${stopReason ?? "unknown"}, keys=[${Object.keys(obj).join(",")}], ` +
-				`text=${JSON.stringify(text.slice(0, 300))})`,
-		);
+		throw new Error(`Consolidation response is missing an episode (${describeResponseShape(text, stopReason)})`);
 	}
 	const episodeObj = episodeValue as Record<string, unknown>;
 	if (
@@ -358,7 +354,9 @@ function parseConsolidationResponse(text: string, stopReason?: string): ParsedCo
 		typeof episodeObj.startedAt !== "string" ||
 		typeof episodeObj.endedAt !== "string"
 	) {
-		throw new Error("Consolidation response's episode is missing required fields");
+		throw new Error(
+			`Consolidation response's episode is missing required fields (${describeResponseShape(text, stopReason)})`,
+		);
 	}
 	const relatedFactIds = Array.isArray(episodeObj.relatedFactIds)
 		? episodeObj.relatedFactIds.filter((id): id is string => typeof id === "string")
@@ -707,7 +705,21 @@ async function runConsolidationPass(params: {
 	// Issue #315: `{}` (no episode, no facts, no edges) is the model saying there is nothing to record, not a
 	// malformed answer. Treating it as an error stalled the checkpoint and started the failure cooldown.
 	if (isEmptyConsolidationResponse(responseText)) return;
-	const parsed = parseConsolidationResponse(responseText, response.stopReason);
+	let parsed: ParsedConsolidation;
+	try {
+		parsed = parseConsolidationResponse(responseText, response.stopReason);
+	} catch (error) {
+		recordBackgroundFailure({
+			caller: "consolidation",
+			model: response.responseModel ?? model.id,
+			provider: response.responseProvider,
+			stopReason: response.stopReason,
+			error: error instanceof Error ? error.message.slice(0, 300) : String(error),
+			reply: responseText,
+			promptChars: promptText.length,
+		});
+		throw error;
+	}
 	await applyConsolidationResult(parsed, memoryStore, episodicStore);
 }
 
