@@ -2,6 +2,61 @@ import { describe, expect, test } from "vitest";
 import { buildSystemPrompt } from "../src/core/system-prompt.ts";
 
 describe("buildSystemPrompt", () => {
+	describe("persona and project context", () => {
+		const count = (haystack: string, needle: string) => haystack.split(needle).length - 1;
+
+		test("emits a THEOSES.md context file once, as persona only", () => {
+			const prompt = buildSystemPrompt({
+				contextFiles: [{ path: "/agent/THEOSES.md", content: "GLOBAL-PERSONA-BODY" }],
+				cwd: process.cwd(),
+			});
+
+			expect(count(prompt, "GLOBAL-PERSONA-BODY")).toBe(1);
+			expect(prompt).toContain("<persona>\nGLOBAL-PERSONA-BODY\n</persona>");
+			expect(prompt).not.toContain("<project_context>");
+		});
+
+		test("keeps global and workspace personas once each, in order", () => {
+			const prompt = buildSystemPrompt({
+				contextFiles: [
+					{ path: "/agent/THEOSES.md", content: "GLOBAL-PERSONA-BODY" },
+					{ path: "/ws/procura/THEOSES.md", content: "WORKSPACE-PERSONA-BODY" },
+				],
+				cwd: "/ws/procura",
+			});
+
+			expect(count(prompt, "GLOBAL-PERSONA-BODY")).toBe(1);
+			expect(count(prompt, "WORKSPACE-PERSONA-BODY")).toBe(1);
+			expect(prompt.indexOf("GLOBAL-PERSONA-BODY")).toBeLessThan(prompt.indexOf("WORKSPACE-PERSONA-BODY"));
+		});
+
+		test("still lists AGENTS.md under project_context next to a persona", () => {
+			const prompt = buildSystemPrompt({
+				contextFiles: [
+					{ path: "/agent/THEOSES.md", content: "GLOBAL-PERSONA-BODY" },
+					{ path: "/ws/daily-quote/AGENTS.md", content: "WORKSPACE-AGENTS-BODY" },
+				],
+				cwd: "/ws/daily-quote",
+			});
+
+			expect(count(prompt, "GLOBAL-PERSONA-BODY")).toBe(1);
+			expect(count(prompt, "WORKSPACE-AGENTS-BODY")).toBe(1);
+			expect(prompt).toContain('<project_instructions path="/ws/daily-quote/AGENTS.md">');
+			expect(prompt).not.toContain('<project_instructions path="/agent/THEOSES.md">');
+		});
+
+		test("applies to the custom prompt branch too", () => {
+			const prompt = buildSystemPrompt({
+				customPrompt: "CUSTOM",
+				contextFiles: [{ path: "/agent/THEOSES.md", content: "GLOBAL-PERSONA-BODY" }],
+				cwd: process.cwd(),
+			});
+
+			expect(count(prompt, "GLOBAL-PERSONA-BODY")).toBe(1);
+			expect(prompt).not.toContain("<project_context>");
+		});
+	});
+
 	describe("empty tools", () => {
 		test("shows (none) for empty tools list", () => {
 			const prompt = buildSystemPrompt({
@@ -68,9 +123,29 @@ describe("buildSystemPrompt", () => {
 			});
 
 			expect(prompt).toContain(
-				"- When reading Theoses docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory",
+				"Resolve docs/... and examples/... under these paths, not the current working directory",
 			);
-			expect(prompt).toContain("environment variables (docs/environment-variables.md)");
+			expect(prompt).toContain("environment-variables.md");
+		});
+	});
+
+	describe("structural sections", () => {
+		test("merges efficiency guidance into one section and keeps the safety sections", () => {
+			const prompt = buildSystemPrompt({ contextFiles: [], skills: [], cwd: process.cwd() });
+
+			expect(prompt).toContain("<efficiency>");
+			for (const removed of [
+				"tool_call_efficiency",
+				"plan_before_acting",
+				"proactivity_scope",
+				"no_redundant_rechecks",
+			]) {
+				expect(prompt).not.toContain(`<${removed}>`);
+			}
+			expect(prompt).toContain("<no_blocking_waits>");
+			expect(prompt).toContain("<destructive_action_caution>");
+			expect(prompt).toContain("<remember_guidance>");
+			expect(prompt).toContain("<working_note_guidance>");
 		});
 	});
 
