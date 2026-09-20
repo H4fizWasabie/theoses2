@@ -68,11 +68,30 @@ Within a single turn, trust something you've already confirmed — a file you re
 Before an action that's hard to reverse or reaches beyond this task — deleting data, force-pushing, dropping tables, killing unrelated processes, changing shared infrastructure — pause and confirm with the user first, even if a tool technically allows it.
 </destructive_action_caution>`;
 
-function getPersona(contextFiles: Array<{ path: string; content: string }>): string {
+type ContextFile = { path: string; content: string };
+
+function isPersonaFile({ path }: ContextFile): boolean {
+	return basename(path).toLowerCase() === "theoses.md";
+}
+
+function getPersona(contextFiles: ContextFile[]): string {
 	return contextFiles
-		.filter(({ path }) => basename(path).toLowerCase() === "theoses.md")
+		.filter(isPersonaFile)
 		.map(({ content }) => `<persona>\n${content}\n</persona>`)
 		.join("\n\n");
+}
+
+/** Persona files are already emitted as <persona>; only the remaining context files belong here. */
+function getProjectContext(contextFiles: ContextFile[]): string {
+	const projectFiles = contextFiles.filter((file) => !isPersonaFile(file));
+	if (projectFiles.length === 0) return "";
+	let section = "\n\n<project_context>\n\n";
+	section += "Project-specific instructions and guidelines:\n\n";
+	for (const { path: filePath, content } of projectFiles) {
+		section += `<project_instructions path="${filePath}">\n${content}\n</project_instructions>\n\n`;
+	}
+	section += "</project_context>\n";
+	return section;
 }
 
 /** Build the system prompt with tools, guidelines, and context */
@@ -116,14 +135,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		prompt += artifactSection;
 
 		// Append project context files
-		if (contextFiles.length > 0) {
-			prompt += "\n\n<project_context>\n\n";
-			prompt += "Project-specific instructions and guidelines:\n\n";
-			for (const { path: filePath, content } of contextFiles) {
-				prompt += `<project_instructions path="${filePath}">\n${content}\n</project_instructions>\n\n`;
-			}
-			prompt += "</project_context>\n";
-		}
+		prompt += getProjectContext(contextFiles);
 
 		// Append skills section (only if read tool is available)
 		const customPromptHasRead = !selectedTools || selectedTools.includes("read");
@@ -222,14 +234,7 @@ Theoses documentation (read only when the user asks about Theoses itself, its SD
 	prompt += artifactSection;
 
 	// Append project context files
-	if (contextFiles.length > 0) {
-		prompt += "\n\n<project_context>\n\n";
-		prompt += "Project-specific instructions and guidelines:\n\n";
-		for (const { path: filePath, content } of contextFiles) {
-			prompt += `<project_instructions path="${filePath}">\n${content}\n</project_instructions>\n\n`;
-		}
-		prompt += "</project_context>\n";
-	}
+	prompt += getProjectContext(contextFiles);
 
 	// Append skills section (only if read tool is available)
 	if (hasRead && skills.length > 0) {
