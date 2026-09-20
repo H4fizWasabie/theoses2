@@ -17,6 +17,7 @@ import {
 	type DeferredCancelOptions,
 	type DeferredFetchOptions,
 	type DeferredHandle,
+	InMemoryModelsStore,
 	lazyStream,
 	type Model,
 	type Models,
@@ -42,7 +43,7 @@ import { operationSignal, raceWithAbortSignal } from "../utils/abort.ts";
 import { AuthStorage as DefaultAuthStorage } from "./auth-storage.ts";
 import type { BackgroundModelConfig, BackgroundModelName, BackgroundModelSetting } from "./background-models.ts";
 import { ModelConfig } from "./model-config.ts";
-import { FileModelsStore, InMemoryCodingAgentModelsStore } from "./models-store.ts";
+import { FileModelsStore } from "./models-store.ts";
 import {
 	type AuthStatus,
 	type CompatibilityRequestConfig,
@@ -187,7 +188,7 @@ export class ModelRuntime implements Models {
 			options.modelsStore ??
 			(modelsPath
 				? new FileModelsStore(options.modelsStorePath ?? join(dirname(modelsPath), "models-store.json"))
-				: new InMemoryCodingAgentModelsStore());
+				: new InMemoryModelsStore());
 		const providers = builtinProviderCatalog.builtinProviders();
 		const runtime = new ModelRuntime(
 			credentials,

@@ -18,7 +18,7 @@ Session lists contain `SessionMetadata`, the normalized durable metadata availab
 ```ts
 import {
   PROTOCOL_VERSION,
-  createServerMessageDecoder,
+  ServerMessageDecoder,
   encodeClientMessage,
   type ClientHello,
 } from "theoses-protocol";
@@ -30,7 +30,7 @@ const hello: ClientHello = {
 
 transport.send(encodeClientMessage(hello));
 
-const decoder = createServerMessageDecoder({ maxFrameLength: 1024 * 1024 });
+const decoder = new ServerMessageDecoder({ maxFrameLength: 1024 * 1024 });
 for (const message of decoder.push(incomingChunk)) {
   handleServerMessage(message);
 }

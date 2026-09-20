@@ -4,6 +4,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symli
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { parseArgs as parseNodeArgs } from "node:util";
 
 const packages = [
 	{ directory: "packages/telemetry", name: "theoses-telemetry" },
@@ -33,55 +34,32 @@ Options:
 `);
 }
 
-function parseArgs() {
-	const options = {
-		force: false,
-		outDir: undefined,
-		skipBunInstall: false,
-		skipCheck: false,
-		skipInstall: false,
-		skipTest: false,
-	};
-	const args = process.argv.slice(2);
-
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
-		if (arg === "--help") {
-			printUsage();
-			process.exit(0);
-		}
-		if (arg === "--force") {
-			options.force = true;
-			continue;
-		}
-		if (arg === "--skip-check") {
-			options.skipCheck = true;
-			continue;
-		}
-		if (arg === "--skip-test") {
-			options.skipTest = true;
-			continue;
-		}
-		if (arg === "--skip-install") {
-			options.skipInstall = true;
-			continue;
-		}
-		if (arg === "--skip-bun-install") {
-			options.skipBunInstall = true;
-			continue;
-		}
-		if (arg === "--out") {
-			const value = args[++i];
-			if (!value) {
-				throw new Error("--out requires a directory");
-			}
-			options.outDir = value;
-			continue;
-		}
-		throw new Error(`Unknown option: ${arg}`);
+function parseArgs(argv) {
+	const { values } = parseNodeArgs({
+		args: argv,
+		options: {
+			help: { type: "boolean" },
+			force: { type: "boolean" },
+			"skip-check": { type: "boolean" },
+			"skip-test": { type: "boolean" },
+			"skip-install": { type: "boolean" },
+			"skip-bun-install": { type: "boolean" },
+			out: { type: "string" },
+		},
+		allowPositionals: false,
+	});
+	if (values.help) {
+		printUsage();
+		process.exit(0);
 	}
-
-	return options;
+	return {
+		force: values.force ?? false,
+		outDir: values.out,
+		skipBunInstall: values["skip-bun-install"] ?? false,
+		skipCheck: values["skip-check"] ?? false,
+		skipInstall: values["skip-install"] ?? false,
+		skipTest: values["skip-test"] ?? false,
+	};
 }
 
 function run(command, args, options = {}) {
@@ -200,7 +178,7 @@ function packPackage(pkg, tarballDirectory) {
 	return join(tarballDirectory, packed.filename);
 }
 
-const options = parseArgs();
+const options = parseArgs(process.argv.slice(2));
 const repoRoot = process.cwd();
 const rootPackageJson = readPackageJson(repoRoot);
 

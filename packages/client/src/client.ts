@@ -19,7 +19,6 @@ import {
 	TheosesSessionOwnershipError,
 	toError,
 } from "./errors.ts";
-import { createPromiseResolvers } from "./promise.ts";
 import {
 	type AcquireSessionOptions,
 	SessionHandle,
@@ -190,7 +189,7 @@ export class TheosesClient {
 		if (this.#disposed) return Promise.reject(new TheosesClientDisposedError());
 		if (!this.connected) return Promise.reject(new TheosesDisconnectedError());
 		const id = `request-${++this.#requestSequence}`;
-		const { promise, resolve, reject } = createPromiseResolvers<CommandResult>();
+		const { promise, resolve, reject } = Promise.withResolvers<CommandResult>();
 		this.#pendingRequests.set(id, { command, resolve, reject });
 		let frame: Uint8Array;
 		try {

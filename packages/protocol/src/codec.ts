@@ -159,14 +159,6 @@ export class ServerMessageDecoder {
 	}
 }
 
-export function createClientMessageDecoder(options?: FrameDecoderOptions): ClientMessageDecoder {
-	return new ClientMessageDecoder(options);
-}
-
-export function createServerMessageDecoder(options?: FrameDecoderOptions): ServerMessageDecoder {
-	return new ServerMessageDecoder(options);
-}
-
 export function isSupportedProtocolVersion(version: number): version is typeof PROTOCOL_VERSION {
 	return Number.isInteger(version) && version === PROTOCOL_VERSION;
 }
