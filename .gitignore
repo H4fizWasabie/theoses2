@@ -46,3 +46,6 @@ collect.sh
 # graphify skill's local knowledge-graph build output (per-machine, not for committing)
 /.codegraph/
 /graphify-out/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
