@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.70] - 2026-09-20
 
 - fix: the default model for memory consolidation, task-boundary summaries and the explorer is now the paid `deepseek/deepseek-v4-flash-0731` at fp8, routed to Baidu then DeepInfra with no other fallbacks (about $0.05 to $0.06 per million input tokens), instead of `deepseek/deepseek-v4-flash-0731:free` on OpenInference. OpenRouter withdrew the free variant on 2026-09-20 (the API answered "This model is unavailable for free" and the catalog stopped listing it), so on the production VPS consolidation and task-boundary detection failed with "not found in the OpenRouter catalog" from 12:36 KUL until `backgroundModels.consolidation` was overridden by hand. `backgroundModels.<name>` in settings.json still overrides any part of this. The provider name is `Baidu`; "Baidu Qianfan" matches no endpoint.
