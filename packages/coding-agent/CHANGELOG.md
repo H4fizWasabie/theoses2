@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.67] - 2026-09-20
 
 - fix: `tool_search` and `tool_call` are only activated when there is a deferred tool to find. Only MCP and sidecar tools are ever deferred, so in a session without one the pair was always active, found nothing new and cost about 0.75 KB of prompt and tool definitions on every request. On the production VPS across all sessions `tool_search` was called 37 times, 22 returned `[]` and the rest returned tools that were already active (Procura, `social_metrics_report`), and `tool_call` was never used. The dispatcher tools stay registered, so configuring an MCP or sidecar source brings them back with no other change.
