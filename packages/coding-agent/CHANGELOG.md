@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.72] - 2026-09-20
 
 - feat: a turn that ends with `stop`, no tool call and far more billed output tokens than visible text is now recorded. On 2026-09-20 21:54 KUL Relace billed 509 output tokens for a 145-character "Now the collector: ..." message; the tool call the model was writing never arrived, the agent loop only continues on a tool call, and the task sat idle until the user typed "Proceed" (a smaller case on 2026-09-13 was followed by "Continue"). The message now carries a `stop_without_tool_call_hidden_output` diagnostic with the last 8 stream chunks (delta keys, finish reason and sizes, never the text), the journal gets a `[stall]` line, and the same details go to `agent/failed-background-responses.jsonl`, so the next occurrence shows what the provider actually sent. Diagnostic only; it does not retry the turn yet.
 
