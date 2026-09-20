@@ -547,6 +547,8 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 				if (typeof chunk.model === "string" && chunk.model.length > 0 && chunk.model !== model.id) {
 					output.responseModel ||= chunk.model;
 				}
+				const servedBy = (chunk as { provider?: unknown }).provider;
+				if (typeof servedBy === "string" && servedBy.length > 0) output.responseProvider ||= servedBy;
 				if (chunk.usage) {
 					output.usage = parseChunkUsage(chunk.usage, model);
 				}

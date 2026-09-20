@@ -18,6 +18,9 @@ export const JEV_DEFAULT_TIMEOUT_MS = 5000;
 export interface JevCallOptions {
 	/** Aborts the underlying request (not just the caller's wait) after this many ms. */
 	timeoutMs?: number;
+	/** Names the call site in failure logs ("task-boundary", "memory-gate", ...). Without it a bare
+	 * "aborted due to timeout" cannot be traced to one of the five callers. */
+	label?: string;
 }
 
 /** What Jev judges: any JSON object. Questions can point into nested fields by path, e.g. `nodes.n3`. */
@@ -46,21 +49,26 @@ async function askJev(
 	if (!apiKey) return undefined;
 
 	const body = { model: JEV_MODEL, state, questions };
+	const timeoutMs = options.timeoutMs ?? JEV_DEFAULT_TIMEOUT_MS;
+	const startedAt = performance.now();
+	const describe = () =>
+		`[${options.label ?? "unlabeled"}] after ${Math.round(performance.now() - startedAt)}ms ` +
+		`(timeout ${timeoutMs}ms, questions=${Object.keys(questions).join(",")}, state=${JSON.stringify(state).length} chars)`;
 
 	try {
 		const response = await fetch(JEV_DECISIONS_URL, {
 			method: "POST",
 			headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
 			body: JSON.stringify(body),
-			signal: AbortSignal.timeout(options.timeoutMs ?? JEV_DEFAULT_TIMEOUT_MS),
+			signal: AbortSignal.timeout(timeoutMs),
 		});
 		if (!response.ok) {
-			console.error(`Jev call failed: ${response.status} ${(await response.text()).slice(0, 200)}`);
+			console.error(`Jev call failed ${describe()}: ${response.status} ${(await response.text()).slice(0, 200)}`);
 			return undefined;
 		}
 		return (await response.json()) as JevResponse;
 	} catch (error) {
-		console.error("Jev call failed:", error instanceof Error ? error.message : error);
+		console.error(`Jev call failed ${describe()}:`, error instanceof Error ? error.message : error);
 		return undefined;
 	}
 }

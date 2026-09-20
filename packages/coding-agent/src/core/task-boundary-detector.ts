@@ -151,17 +151,25 @@ async function callJevRelated(
 		console.error("TASK_BOUNDARY_JEV_REQUEST", JSON.stringify(state));
 	}
 	if (previousReply) {
-		const answers = await askJevNouls(state, {
-			continuesTask: JEV_CONTINUES_TASK_QUESTION,
-			reactsToReply: JEV_REACTS_TO_REPLY_QUESTION,
-			topicSwitch: JEV_TOPIC_SWITCH_QUESTION,
-		});
+		const answers = await askJevNouls(
+			state,
+			{
+				continuesTask: JEV_CONTINUES_TASK_QUESTION,
+				reactsToReply: JEV_REACTS_TO_REPLY_QUESTION,
+				topicSwitch: JEV_TOPIC_SWITCH_QUESTION,
+			},
+			{ label: "task-boundary" },
+		);
 		return answers;
 	}
-	const answers = await askJevNouls(state, {
-		continuesTask: JEV_CONTINUES_TASK_QUESTION,
-		topicSwitch: JEV_TOPIC_SWITCH_QUESTION,
-	});
+	const answers = await askJevNouls(
+		state,
+		{
+			continuesTask: JEV_CONTINUES_TASK_QUESTION,
+			topicSwitch: JEV_TOPIC_SWITCH_QUESTION,
+		},
+		{ label: "task-boundary" },
+	);
 	return answers;
 }
 

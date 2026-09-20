@@ -27,6 +27,26 @@ describe("askJevNoul timeout", () => {
 		expect(signal?.aborted).toBe(true);
 	});
 
+	it("names the call site, elapsed time, timeout and state size in the failure log", async () => {
+		vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+		vi.stubGlobal(
+			"fetch",
+			vi.fn((_url: string, init: RequestInit) => {
+				const signal = init.signal;
+				return new Promise((_resolve, reject) => {
+					signal?.addEventListener("abort", () => reject(signal?.reason));
+				});
+			}),
+		);
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		await askJevNoul({ message: "hi" }, "q", { timeoutMs: 20, label: "memory-gate" });
+
+		const logged = String(errorSpy.mock.calls.at(-1)?.[0]);
+		expect(logged).toContain("Jev call failed [memory-gate] after ");
+		expect(logged).toContain("(timeout 20ms, questions=answer, state=16 chars)");
+	});
+
 	it("passes a default timeout signal when none is given", async () => {
 		vi.stubEnv("OPENROUTER_API_KEY", "test-key");
 		const fetchMock = vi.fn(async () => new Response(JSON.stringify({ answers: { answer: { noul: 0.7 } } })));

@@ -113,6 +113,7 @@ import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
+import { logServedProvider } from "./served-provider-log.ts";
 import { exportSessionToJsonl } from "./session-export.ts";
 import { saveImageFile } from "./session-images.ts";
 import {
@@ -723,6 +724,7 @@ export class AgentSession {
 
 		// Handle session persistence
 		if (event.type === "message_end") {
+			if (event.message.role === "assistant") logServedProvider(event.message);
 			// Check if this is a custom message from extensions
 			if (event.message.role === "custom") {
 				// Persist as CustomMessageEntry
