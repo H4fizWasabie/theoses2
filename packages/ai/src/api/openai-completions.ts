@@ -36,6 +36,12 @@ import type {
 	ToolCall,
 	ToolResultMessage,
 } from "../types.ts";
+import {
+	appendAssistantMessageDiagnostic,
+	isStopWithHiddenOutput,
+	STOP_WITHOUT_TOOL_CALL_DIAGNOSTIC,
+	summarizeStreamChunk,
+} from "../utils/diagnostics.ts";
 import { formatProviderError, normalizeProviderError } from "../utils/error-body.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 
@@ -385,6 +391,8 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 			let textBlock: TextContent | null = null;
 			let thinkingBlock: ThinkingContent | null = null;
 			let hasFinishReason = false;
+			const chunkTail: string[] = [];
+			const STREAM_CHUNK_TAIL_LENGTH = 8; // trailing chunks a stop-without-tool-call diagnostic keeps
 			const toolCallBlocksByIndex = new Map<number, StreamingToolCallBlock>();
 			const toolCallBlocksById = new Map<string, StreamingToolCallBlock>();
 			const blocks = output.content as StreamingBlock[];
@@ -540,6 +548,8 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 
 			for await (const chunk of openaiStream) {
 				if (!chunk || typeof chunk !== "object") continue;
+				chunkTail.push(summarizeStreamChunk(chunk));
+				if (chunkTail.length > STREAM_CHUNK_TAIL_LENGTH) chunkTail.shift();
 
 				// OpenAI documents ChatCompletionChunk.id as the unique chat completion identifier,
 				// and each chunk in a streamed completion carries the same id.
@@ -691,6 +701,31 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 			}
 			if ((compat.supportsFinishReason && !hasFinishReason) || output.stopReason === "pending") {
 				throw new Error("Stream ended without finish_reason");
+			}
+
+			const visibleChars = output.content.reduce(
+				(n, block) => n + (block.type === "text" ? block.text.length : 0),
+				0,
+			);
+			if (
+				isStopWithHiddenOutput({
+					stopReason: output.stopReason,
+					toolCallCount: output.content.filter((block) => block.type === "toolCall").length,
+					outputTokens: output.usage.output,
+					reasoningTokens: output.usage.reasoning ?? 0,
+					visibleChars,
+				})
+			) {
+				appendAssistantMessageDiagnostic(output, {
+					type: STOP_WITHOUT_TOOL_CALL_DIAGNOSTIC,
+					timestamp: Date.now(),
+					details: {
+						rawStopReason: output.rawStopReason,
+						outputTokens: output.usage.output,
+						visibleChars,
+						chunkTail: [...chunkTail],
+					},
+				});
 			}
 
 			stream.push({ type: "done", reason: output.stopReason, message: output });
