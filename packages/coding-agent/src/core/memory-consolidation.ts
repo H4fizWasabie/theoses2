@@ -283,6 +283,29 @@ function isEdgeRelation(value: unknown): value is EdgeRelation {
  * rather than trusting the whole payload, since json_object mode is a nudge, not schema
  * enforcement (see issue #250).
  */
+/** True when every transcript line is only its `[timestamp] role:` prefix, i.e. the window carries no text. */
+export function hasConsolidationContent(transcript: string): boolean {
+	return transcript.split("\n").some((line) => line.replace(/^\[[^\]]*\]\s*\w+:/, "").trim().length > 0);
+}
+
+/**
+ * True when the model answered with a JSON object that has an empty (or absent) `facts` and `edges` and no
+ * `episode`: the `{}` DeepInfra returns for a near-empty window. A response with facts but no episode is
+ * still a real failure and is left for parseConsolidationResponse to reject.
+ */
+export function isEmptyConsolidationResponse(text: string): boolean {
+	let parsed: unknown;
+	try {
+		parsed = parseStructuredJson(text, "Memory consolidation");
+	} catch {
+		return false;
+	}
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return false;
+	const obj = parsed as Record<string, unknown>;
+	const isEmptyList = (value: unknown) => value === undefined || (Array.isArray(value) && value.length === 0);
+	return (obj.episode === undefined || obj.episode === null) && isEmptyList(obj.facts) && isEmptyList(obj.edges);
+}
+
 function parseConsolidationResponse(text: string, stopReason?: string): ParsedConsolidation {
 	const parsed: unknown = parseStructuredJson(text, "Memory consolidation");
 	if (typeof parsed !== "object" || parsed === null) {
@@ -637,6 +660,10 @@ async function runConsolidationPass(params: {
 	if (window.length === 0) return;
 
 	const transcript = capTranscript(entriesToTranscript(window));
+	// Issue #315: a chunk with no text (a stray tool result or custom entry) gives the model nothing to
+	// summarize, and DeepInfra answers it with `{}`. There is nothing to record, so skip the call; the
+	// caller still advances the checkpoint past these entries.
+	if (!hasConsolidationContent(transcript)) return;
 	const model = resolveConsolidationModel(modelRuntime);
 	const existingNodes = buildExistingNodesSection(memoryStore, transcript);
 
@@ -674,7 +701,11 @@ async function runConsolidationPass(params: {
 	if (response.stopReason === "error")
 		throw new Error(`Consolidation pass errored: ${response.errorMessage ?? "unknown error"}`);
 
-	const parsed = parseConsolidationResponse(contentText(response.content), response.stopReason);
+	const responseText = contentText(response.content);
+	// Issue #315: `{}` (no episode, no facts, no edges) is the model saying there is nothing to record, not a
+	// malformed answer. Treating it as an error stalled the checkpoint and started the failure cooldown.
+	if (isEmptyConsolidationResponse(responseText)) return;
+	const parsed = parseConsolidationResponse(responseText, response.stopReason);
 	await applyConsolidationResult(parsed, memoryStore, episodicStore);
 }
 
