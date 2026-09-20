@@ -94,7 +94,7 @@ export function createMemoryWriteGate(nodes: MemoryNode[], options: { jev?: bool
 			const questions = Object.fromEntries(
 				names.map((name) => [name, `Do \`new\` and \`existing.${name}\` state the same fact?`]),
 			);
-			const scores = await askJevNouls(state, questions, { timeoutMs: GATE_TIMEOUT_MS });
+			const scores = await askJevNouls(state, questions, { timeoutMs: GATE_TIMEOUT_MS, label: "memory-gate" });
 			if (scores === undefined) return { action: "store" };
 
 			let best = 0;

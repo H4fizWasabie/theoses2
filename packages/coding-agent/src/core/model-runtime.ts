@@ -55,6 +55,7 @@ import {
 	validateExtensionProvider,
 } from "./provider-composer.ts";
 import { RuntimeCredentials } from "./runtime-credentials.ts";
+import { logServedProvider } from "./served-provider-log.ts";
 
 interface ModelRuntimeSnapshot {
 	all: readonly Model<Api>[];
@@ -633,7 +634,12 @@ export class ModelRuntime implements Models {
 		context: Context,
 		options?: ModelsApiStreamOptions<TApi>,
 	): Promise<AssistantMessage> {
-		return this.stream(model, context, options).result();
+		return this.stream(model, context, options)
+			.result()
+			.then((message) => {
+				logServedProvider(message);
+				return message;
+			});
 	}
 
 	streamSimple(model: Model<Api>, context: Context, options?: ModelsSimpleStreamOptions): AssistantMessageEventStream {
@@ -644,7 +650,12 @@ export class ModelRuntime implements Models {
 	}
 
 	completeSimple(model: Model<Api>, context: Context, options?: ModelsSimpleStreamOptions): Promise<AssistantMessage> {
-		return this.streamSimple(model, context, options).result();
+		return this.streamSimple(model, context, options)
+			.result()
+			.then((message) => {
+				logServedProvider(message);
+				return message;
+			});
 	}
 
 	async fetchDeferred(

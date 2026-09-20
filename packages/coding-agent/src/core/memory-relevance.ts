@@ -75,7 +75,7 @@ export async function rankByRelevance(
 		names.map((name) => [name, `Is \`nodes.${name}\` about the subject of \`query\`?`]),
 	);
 
-	const scores = await askJevNouls(state, questions, { timeoutMs: RELEVANCE_TIMEOUT_MS });
+	const scores = await askJevNouls(state, questions, { timeoutMs: RELEVANCE_TIMEOUT_MS, label: "memory-relevance" });
 	if (scores === undefined) return undefined;
 
 	const ranked = records
