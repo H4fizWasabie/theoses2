@@ -283,7 +283,7 @@ function isEdgeRelation(value: unknown): value is EdgeRelation {
  * rather than trusting the whole payload, since json_object mode is a nudge, not schema
  * enforcement (see issue #250).
  */
-function parseConsolidationResponse(text: string): ParsedConsolidation {
+function parseConsolidationResponse(text: string, stopReason?: string): ParsedConsolidation {
 	const parsed: unknown = parseStructuredJson(text, "Memory consolidation");
 	if (typeof parsed !== "object" || parsed === null) {
 		throw new Error("Consolidation response was not a JSON object");
@@ -321,7 +321,12 @@ function parseConsolidationResponse(text: string): ParsedConsolidation {
 
 	const episodeValue = obj.episode;
 	if (typeof episodeValue !== "object" || episodeValue === null) {
-		throw new Error("Consolidation response is missing an episode");
+		// Keep the evidence: the bare message gave no way to tell an empty window ({"facts":[]}) from a truncated
+		// or wrongly shaped answer, so name the keys the model did return and a short slice of its text.
+		throw new Error(
+			`Consolidation response is missing an episode (stopReason=${stopReason ?? "unknown"}, keys=[${Object.keys(obj).join(",")}], ` +
+				`text=${JSON.stringify(text.slice(0, 300))})`,
+		);
 	}
 	const episodeObj = episodeValue as Record<string, unknown>;
 	if (
@@ -669,7 +674,7 @@ async function runConsolidationPass(params: {
 	if (response.stopReason === "error")
 		throw new Error(`Consolidation pass errored: ${response.errorMessage ?? "unknown error"}`);
 
-	const parsed = parseConsolidationResponse(contentText(response.content));
+	const parsed = parseConsolidationResponse(contentText(response.content), response.stopReason);
 	await applyConsolidationResult(parsed, memoryStore, episodicStore);
 }
 
