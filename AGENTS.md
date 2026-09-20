@@ -70,6 +70,18 @@ The rest of this section only applies when editing `theoses2` itself — its own
 - Never run the full vitest suite directly — it includes e2e tests gated on env vars. Run `./test.sh` from the repo root, or target a specific file: `node "$(git rev-parse --show-toplevel)/node_modules/vitest/dist/cli.js" --run test/specific.test.ts`.
 - Treat npm dep and lockfile changes as reviewed code. Direct external deps stay pinned to exact versions. Hydrate with `npm install --ignore-scripts`; don't run lifecycle scripts unless asked. Pre-commit blocks lockfile commits unless `THEOSES_ALLOW_LOCKFILE_CHANGE=1`.
 
+## Code navigation (Graft)
+
+This repo is indexed by Graft: a local, gitignored graph (`graft/`) of every symbol, its `file:line` span and who calls it. It rebuilds against the working tree before each query, so results include uncommitted edits. Use it before grepping or reading files to find or understand code:
+
+- `graft ask "<task>" --source` — locate and understand; ranked nodes with the code inlined. Keep the query short and built around identifiers.
+- `graft grep "<regex>"` — every occurrence, grouped by enclosing symbol. It takes a regex, so escape parentheses (`Stream\(`).
+- `graft skeleton <file>` — a file's full API with spans, far cheaper than reading it.
+- `graft callers <symbol> [--depth all]` — who calls it, or the full blast radius. Run it before changing or renaming a symbol.
+- `graft map` — orientation only.
+
+If `graft` is not installed or `graft/` is missing, fall back to grep and read, or run `graft build` to create the graph. Never commit `graft/`.
+
 ## Agent skills
 
 ### Issue tracker
