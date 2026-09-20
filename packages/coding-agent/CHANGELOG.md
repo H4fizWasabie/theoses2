@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: a turn that ends with `stop`, no tool call and far more billed output tokens than visible text is now recorded. On 2026-09-20 21:54 KUL Relace billed 509 output tokens for a 145-character "Now the collector: ..." message; the tool call the model was writing never arrived, the agent loop only continues on a tool call, and the task sat idle until the user typed "Proceed" (a smaller case on 2026-09-13 was followed by "Continue"). The message now carries a `stop_without_tool_call_hidden_output` diagnostic with the last 8 stream chunks (delta keys, finish reason and sizes, never the text), the journal gets a `[stall]` line, and the same details go to `agent/failed-background-responses.jsonl`, so the next occurrence shows what the provider actually sent. Diagnostic only; it does not retry the turn yet.
+
 ## [1.0.71] - 2026-09-20
 
 - fix: a consolidation chunk with no text is skipped, and a background answer of `{}` (no episode, facts or edges) is treated as an empty pass instead of the error `Consolidation response is missing an episode`. On the production VPS that error hit four times on 2026-09-20 (16:46, 17:05, 19:41, 19:58 KUL), each on the leftover chunk of a backlog straight after a successful one, and every failure started the failure cooldown and left the checkpoint stuck until a later pass. Reproduced against the paid DeepSeek V4 Flash 0731: DeepInfra, the fallback after Baidu, answers a near-empty transcript with `{}` (5 of 8 runs for one empty line), Baidu never did. Facts without an episode is still an error. Fixes #315.
