@@ -8,7 +8,13 @@ function harness() {
 		() => t,
 		(line) => lines.push(line),
 	);
-	return { logger, lines, advance: (ms: number) => (t += ms) };
+	return {
+		logger,
+		lines,
+		advance: (ms: number) => {
+			t += ms;
+		},
+	};
 }
 
 describe("createToolCallLogger", () => {
