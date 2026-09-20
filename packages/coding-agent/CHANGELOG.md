@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.69] - 2026-09-20
 
 - feat: a project extension, `.theoses/extensions/graft.ts`, runs Graft's session-start and per-prompt hooks before each agent turn and adds their output as a hidden message, the way `graft init` wires Graft into Claude Code. It only acts when the session directory holds a built `graft/` graph, so the chat bots are untouched, and it adds nothing if Graft is missing, slow or returns bad output. `AGENTS.md` now tells the agent to use the `graft` CLI (`ask`, `grep`, `skeleton`, `callers`, `map`) before grepping, and `/graft/` is gitignored.
