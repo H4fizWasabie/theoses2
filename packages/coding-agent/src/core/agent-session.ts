@@ -2953,7 +2953,10 @@ export class AgentSession {
 				}
 			}
 		}
-		for (const dispatcherName of ["tool_search", "tool_call"]) {
+		// Only external (MCP/sidecar) tools are ever deferred, so without one there is nothing for
+		// tool_search to find and the pair only invites searches for tools that are already active.
+		const hasDeferredTools = allCustomTools.some((tool) => isExternalToolSource(tool.definition.name));
+		for (const dispatcherName of hasDeferredTools ? ["tool_search", "tool_call"] : []) {
 			if (
 				isAllowedTool(dispatcherName) &&
 				options?.activeToolNames?.length !== 0 &&

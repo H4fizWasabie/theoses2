@@ -84,7 +84,7 @@ describe("defaultTools setting", () => {
 			"working_note",
 			"write",
 		]);
-		expect(session.getActiveToolNames()).toEqual(["grep", "find", "tool_search", "tool_call"]);
+		expect(session.getActiveToolNames()).toEqual(["grep", "find"]);
 		expect(session.systemPrompt).toContain("- grep:");
 		expect(session.systemPrompt).not.toContain("- read:");
 		session.dispose();
@@ -93,7 +93,7 @@ describe("defaultTools setting", () => {
 	it("can select powershell instead of bash", async () => {
 		const session = await createSession(["read", "powershell", "edit", "write"]);
 
-		expect(session.getActiveToolNames()).toEqual(["read", "powershell", "edit", "write", "tool_search", "tool_call"]);
+		expect(session.getActiveToolNames()).toEqual(["read", "powershell", "edit", "write"]);
 		expect(session.systemPrompt).toContain("- powershell: Execute PowerShell commands");
 		expect(session.systemPrompt).not.toContain("- bash:");
 		session.dispose();
@@ -136,14 +136,7 @@ describe("defaultTools setting", () => {
 		);
 		await session.bindExtensions({});
 
-		expect(session.getActiveToolNames().sort()).toEqual([
-			"dynamic_tool",
-			"grep",
-			"sdk_tool",
-			"static_tool",
-			"tool_call",
-			"tool_search",
-		]);
+		expect(session.getActiveToolNames().sort()).toEqual(["dynamic_tool", "grep", "sdk_tool", "static_tool"]);
 		expect(session.getAllTools().map((tool) => tool.name)).toEqual(
 			expect.arrayContaining(["read", "dynamic_tool", "sdk_tool", "static_tool"]),
 		);
@@ -156,7 +149,7 @@ describe("defaultTools setting", () => {
 		allowlistedSession.dispose();
 
 		const excludedSession = await createSession(["read", "grep"], { excludeTools: ["read"] });
-		expect(excludedSession.getActiveToolNames()).toEqual(["grep", "tool_search", "tool_call"]);
+		expect(excludedSession.getActiveToolNames()).toEqual(["grep"]);
 		excludedSession.dispose();
 
 		const toolLessSession = await createSession(["read"], { noTools: "all" });
@@ -200,7 +193,7 @@ describe("defaultTools setting", () => {
 			"working_note",
 			"write",
 		]);
-		expect(session.getActiveToolNames()).toEqual(["ls", "tool_search", "tool_call"]);
+		expect(session.getActiveToolNames()).toEqual(["ls"]);
 		session.dispose();
 	});
 
