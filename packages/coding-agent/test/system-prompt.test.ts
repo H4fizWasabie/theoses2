@@ -123,9 +123,29 @@ describe("buildSystemPrompt", () => {
 			});
 
 			expect(prompt).toContain(
-				"- When reading Theoses docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory",
+				"Resolve docs/... and examples/... under these paths, not the current working directory",
 			);
-			expect(prompt).toContain("environment variables (docs/environment-variables.md)");
+			expect(prompt).toContain("environment-variables.md");
+		});
+	});
+
+	describe("structural sections", () => {
+		test("merges efficiency guidance into one section and keeps the safety sections", () => {
+			const prompt = buildSystemPrompt({ contextFiles: [], skills: [], cwd: process.cwd() });
+
+			expect(prompt).toContain("<efficiency>");
+			for (const removed of [
+				"tool_call_efficiency",
+				"plan_before_acting",
+				"proactivity_scope",
+				"no_redundant_rechecks",
+			]) {
+				expect(prompt).not.toContain(`<${removed}>`);
+			}
+			expect(prompt).toContain("<no_blocking_waits>");
+			expect(prompt).toContain("<destructive_action_caution>");
+			expect(prompt).toContain("<remember_guidance>");
+			expect(prompt).toContain("<working_note_guidance>");
 		});
 	});
 

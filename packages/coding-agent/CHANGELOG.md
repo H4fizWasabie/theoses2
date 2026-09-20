@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: trim the baked-in system prompt by about 2.2 KB per request. `tool_call_efficiency`, `plan_before_acting` and `proactivity_scope` are one short `<efficiency>` section, `no_redundant_rechecks` is gone (a blanket "trust what you confirmed" rule pushes against re-verification and the batching guidance covers the real cost concern), the Theoses documentation block keeps its docs, examples and topic-file pointers in about half the space, and the filler line about other custom tools is removed. `no_blocking_waits`, `destructive_action_caution`, and the working-note and `remember` guidance are unchanged. Refs #301.
+
 - fix: `THEOSES.md` is no longer put in the system prompt twice. It was emitted as `<persona>` and then again under `<project_context>`, about 4.4 KB extra on every request and both the global and the workspace file in a workspace session (31 KB instead of 23 KB for the Procura workspace). Persona files now appear once, as `<persona>`; `AGENTS.md` and `CLAUDE.md` still appear under `<project_context>`, and the section is left out when nothing else remains. Fixes #300.
 
 ## [1.0.66] - 2026-09-19
