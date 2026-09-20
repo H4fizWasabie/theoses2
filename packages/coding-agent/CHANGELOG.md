@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.71] - 2026-09-20
 
 - fix: a consolidation chunk with no text is skipped, and a background answer of `{}` (no episode, facts or edges) is treated as an empty pass instead of the error `Consolidation response is missing an episode`. On the production VPS that error hit four times on 2026-09-20 (16:46, 17:05, 19:41, 19:58 KUL), each on the leftover chunk of a backlog straight after a successful one, and every failure started the failure cooldown and left the checkpoint stuck until a later pass. Reproduced against the paid DeepSeek V4 Flash 0731: DeepInfra, the fallback after Baidu, answers a near-empty transcript with `{}` (5 of 8 runs for one empty line), Baidu never did. Facts without an episode is still an error. Fixes #315.
 
