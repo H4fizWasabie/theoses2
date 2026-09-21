@@ -136,7 +136,6 @@ export {
 	backfillFromSessionLog,
 	CONSOLIDATION_TURN_CEILING,
 	type MaybeRunConsolidationOptions,
-	maybeRunConsolidation,
 	shouldTriggerConsolidation,
 } from "./memory-consolidation.ts";
 export {
@@ -149,9 +148,7 @@ export {
 export type { PromptTemplate } from "./prompt-templates.ts";
 export type { Skill } from "./skills.ts";
 export {
-	findLastUserMessageEntryId,
 	type MaybeDetectTaskBoundaryOptions,
-	maybeDetectTaskBoundary,
 	resolveTaskBoundaryModel,
 	type TaskBoundaryData,
 	type TaskDescriptorData,
@@ -164,6 +161,7 @@ export type {
 } from "./tool-sources.ts";
 export { HttpSidecarToolSource, McpHttpToolSource, McpStdioToolSource } from "./tool-sources.ts";
 export type { Tool } from "./tools/index.ts";
+export { settleTurn } from "./turn-settlement.ts";
 
 export {
 	withFileMutationQueue,

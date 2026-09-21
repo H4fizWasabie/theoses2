@@ -9,12 +9,10 @@ import {
 	type AgentSessionEvent,
 	configureHttpDispatcher,
 	createAgentSession,
-	findLastUserMessageEntryId,
 	getAgentDir,
-	maybeDetectTaskBoundary,
-	maybeRunConsolidation,
 	type SessionInfo,
 	SessionManager,
+	settleTurn,
 	stripClockAnnotation,
 } from "theoses-coding-agent";
 import { deletePath, FileConflictError, listDirectory, readTextFile, renamePath, writeTextFile } from "./files.ts";
@@ -374,28 +372,7 @@ async function streamChat(info: SessionInfo, request: IncomingMessage, response:
 	try {
 		await work;
 		sseSend(response, "done", {});
-		const channelSessionKey = record.session.sessionManager.getChannelSessionKey();
-		maybeRunConsolidation({
-			cwd: record.session.sessionManager.getCwd(),
-			channel: channelSessionKey.channel,
-			channelSessionId: channelSessionKey.channelSessionId,
-			userMessageText: message,
-			mainSessionManager: record.session.sessionManager,
-			modelRuntime: record.session.modelRuntime,
-		});
-		// Issue #186, shadow mode: task-closure/topic-shift detection, separate from
-		// consolidation's phrase-trigger above — see task-boundary-detector.ts.
-		const lastUserEntryId = findLastUserMessageEntryId(record.session.sessionManager.getBranch());
-		if (lastUserEntryId) {
-			maybeDetectTaskBoundary({
-				channel: channelSessionKey.channel,
-				channelSessionId: channelSessionKey.channelSessionId,
-				userMessageText: message,
-				userMessageEntryId: lastUserEntryId,
-				mainSessionManager: record.session.sessionManager,
-				modelRuntime: record.session.modelRuntime,
-			});
-		}
+		settleTurn(record.session, message);
 	} catch (error) {
 		sseSend(response, "error", { message: error instanceof Error ? error.message : String(error) });
 	} finally {
