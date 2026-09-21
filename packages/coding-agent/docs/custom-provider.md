@@ -12,7 +12,6 @@ Extensions can register custom model providers via `theoses.registerProvider()`.
 See these complete provider examples:
 
 - [`examples/extensions/custom-provider-anthropic/`](../examples/extensions/custom-provider-anthropic/)
-- [`examples/extensions/custom-provider-gitlab-duo/`](../examples/extensions/custom-provider-gitlab-duo/)
 
 ## Table of Contents
 

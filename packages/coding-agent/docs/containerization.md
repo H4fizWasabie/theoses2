@@ -4,43 +4,16 @@ Theoses runs with all permissions by default, but in some cases, you will want t
 
 There are two general options. You can either
 1. run the whole `theoses` process inside an isolated environment, or
-2. run `theoses` on the host and route tool execution into an isolated environment.
+2. run `theoses` on the host and route tool execution into an isolated environment (write an extension that overrides the built-in tools).
 
 ## Choose a pattern
 
 | Pattern | What is isolated | Best for | Notes |
 | --- | --- | --- | --- |
-| Gondolin extension | Built-in tools and `!` commands | Local micro-VM isolation while keeping auth on host | See [`examples/extensions/gondolin/`](../examples/extensions/gondolin/). |
 | Plain Docker | Whole `theoses` process in a local container | Simple local isolation | Provider API keys enter the container. |
 | OpenShell | Whole `theoses` process in a policy-controlled sandbox | Local or remote managed sandbox | Requires an OpenShell gateway |
 
 Extensions run wherever the `theoses` process runs. If you run host `theoses` with a tool-routing extension, other custom extension tools still run on the host unless they also delegate their operations.
-
-## Gondolin
-
-[Gondolin](https://github.com/earendil-works/gondolin) is a local Linux micro-VM.
-Use the [example extension](../examples/extensions/gondolin) when you want `theoses` on the host but all built-in tools routed into the VM.
-
-Setup:
-
-```bash
-cp -R packages/coding-agent/examples/extensions/gondolin ~/.theoses/agent/extensions/gondolin
-cd ~/.theoses/agent/extensions/gondolin
-npm install --ignore-scripts
-```
-
-Run from the project you want mounted:
-
-```bash
-cd /path/to/project
-theoses -e ~/.theoses/agent/extensions/gondolin
-```
-
-The extension mounts the host cwd at `/workspace` in the VM and overrides `read`, `write`, `edit`, `bash`, `grep`, `find`, and `ls`.
-User `!` commands are routed into the VM, as well.
-File changes under `/workspace` write through to the host.
-
-Requirements: Node.js >= 23.6.0 for `@earendil-works/gondolin`, plus QEMU (requires installation through your package manager).
 
 ## Plain Docker
 
@@ -72,7 +45,7 @@ docker run --rm -it \
   theoses-sandbox
 ```
 
-The `-v "$PWD:/workspace"` mounts your current directory into the container at /workspace such that reads and writes in `/workspace` inside Docker directly affect your host files, like in the Gondolin example.
+The `-v "$PWD:/workspace"` mounts your current directory into the container at /workspace such that reads and writes in `/workspace` inside Docker directly affect your host files.
 
 Use a named volume for `/root/.theoses/agent` if you want container-local settings and sessions. Mounting your host `~/.theoses/agent` exposes host auth and session files to the container.
 

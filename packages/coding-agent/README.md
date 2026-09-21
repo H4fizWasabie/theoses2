@@ -344,8 +344,6 @@ Place in `~/.theoses/agent/skills/`, `~/.agents/skills/`, `.theoses/skills/`, or
 
 ### Extensions
 
-<p align="center"><img src="docs/images/doom-extension.png" alt="Doom Extension" width="600"></p>
-
 TypeScript modules that extend theoses with custom tools, commands, keyboard shortcuts, event handlers, and UI components.
 
 ```typescript
