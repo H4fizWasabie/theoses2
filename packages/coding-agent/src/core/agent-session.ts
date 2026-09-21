@@ -377,7 +377,7 @@ export class AgentSession {
 	private _followUpMessages: string[] = [];
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
-	/** Background research job accounting; outlives runtime rebuilds so the per-session limits hold. */
+	/** Research job accounting; outlives runtime rebuilds so the per-session limits hold. */
 	private _researchJobs = new ResearchJobs();
 
 	// Compaction state
@@ -946,7 +946,6 @@ export class AgentSession {
 			this.abortCompaction();
 			this.abortBranchSummary();
 			this.abortBash();
-			this._researchJobs.abortAll();
 			this.agent.abort();
 		} catch {
 			// Dispose must succeed even if an abort hook throws.
@@ -3036,11 +3035,6 @@ export class AgentSession {
 		(baseToolDefinitions as Record<string, ToolDefinition<any>>).research = createResearchToolDefinition({
 			modelRuntime: this._modelRuntime,
 			jobs: this._researchJobs,
-			deliver: (text) =>
-				this.sendCustomMessage(
-					{ customType: "research_result", content: text, display: true, details: undefined },
-					{ triggerTurn: true, deliverAs: "followUp" },
-				),
 			onPayload: async (payload, model) => {
 				const runner = this._extensionRunner;
 				return runner?.hasHandlers("before_provider_request")

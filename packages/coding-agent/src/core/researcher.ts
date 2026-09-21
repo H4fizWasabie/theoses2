@@ -1,15 +1,15 @@
 /**
- * Background deep-research sub-agent.
+ * Deep-research sub-agent.
  *
- * Sibling of explorer.ts, but for the web instead of the codebase, and asynchronous: the `research`
- * tool starts a job and returns at once; when the job finishes its report is delivered back into the
- * session as a follow-up custom message that triggers a turn if the agent is idle. The agent loop
- * uses the same OpenRouter background-model slot machinery as the explorer (`backgroundModels.research`),
- * with Tavily search and extract as its only tools.
+ * Sibling of explorer.ts, but for the web instead of the codebase. Like the explorer it runs inline:
+ * the `research` tool call blocks until the job finishes and returns the report as its result, so the
+ * main model relays it in the same turn. (An earlier asynchronous design delivered the report later
+ * as a follow-up message; a turn started that way had no channel adapter listening, so its reply
+ * never reached the user.) The agent loop uses the same OpenRouter background-model slot machinery
+ * as the explorer (`backgroundModels.research`), with Tavily search and extract as its only tools.
  *
  * The agent decides when to call it, so safety is harness-side caps: per-job turns, input tokens,
- * Tavily calls and wall-clock time, plus per-session concurrency and job-count limits. Jobs live in
- * process memory only; a restart loses in-flight ones.
+ * Tavily calls and wall-clock time, plus per-session concurrency and job-count limits.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -34,8 +34,16 @@ export const RESEARCH_CAPS = {
 	maxPerSession: 5,
 } as const;
 
-/** Chars of the report delivered into context; the full report is always written to a file. */
-const DELIVERED_REPORT_CHARS = 6000;
+/** Chars of the report returned into context; the full report is always written to a file. */
+const DELIVERED_REPORT_CHARS = 20_000;
+
+/** The system prompt's report format opens with a "Summary" section; narration mid-job does not. */
+function looksLikeReport(text: string): boolean {
+	return /^\W*summary\b/im.test(text);
+}
+
+const FINALIZE_PROMPT =
+	'Stop researching. Write the final report now from what you have gathered, in the required format ("Summary", "Findings", "Gaps"). Do not call any tools.';
 
 const RESEARCH_SYSTEM_PROMPT = `You are Theoses's background research agent: an isolated agent that answers ONE research question from the web, then returns a written report.
 
@@ -144,12 +152,18 @@ export async function runResearch(options: RunResearchOptions): Promise<Research
 
 	try {
 		await agent.prompt(options.question);
+		// The model can end a turn with narration and no tool call ("Let me extract a few pages...");
+		// the loop then stops without a report. Give it one turn to write it up from what it has.
+		if (!stoppedByBudget && !signal.aborted && !looksLikeReport(lastAssistantText(agent.state.messages))) {
+			await agent.prompt(FINALIZE_PROMPT);
+		}
 	} finally {
 		unsubscribe();
 	}
 
 	const text = lastAssistantText(agent.state.messages);
-	const complete = !stoppedByBudget && !signal.aborted && !endedOnToolCall(agent.state.messages) && text.length > 0;
+	const complete =
+		!stoppedByBudget && !signal.aborted && !endedOnToolCall(agent.state.messages) && looksLikeReport(text);
 	const report = complete
 		? text
 		: `INCOMPLETE: the job hit its budget or timeout before finishing.${text ? `\n\nLast notes:\n${text}` : ""}`;
@@ -160,15 +174,6 @@ export async function runResearch(options: RunResearchOptions): Promise<Research
 export class ResearchJobs {
 	running = 0;
 	started = 0;
-	private controller = new AbortController();
-
-	get signal(): AbortSignal {
-		return this.controller.signal;
-	}
-
-	abortAll(): void {
-		this.controller.abort();
-	}
 }
 
 const researchSchema = Type.Object({
@@ -181,8 +186,6 @@ type ResearchInput = Static<typeof researchSchema>;
 export interface ResearchToolDeps {
 	modelRuntime: ModelRuntime;
 	jobs: ResearchJobs;
-	/** Delivers the finished report into the session as a follow-up that triggers a turn. */
-	deliver: (text: string) => Promise<void>;
 	onPayload?: SimpleStreamOptions["onPayload"];
 	onResponse?: SimpleStreamOptions["onResponse"];
 	transformHeaders?: (headers: ProviderHeaders, model?: Model<Api>) => ProviderHeaders | Promise<ProviderHeaders>;
@@ -202,14 +205,14 @@ export function createResearchToolDefinition(deps: ResearchToolDeps): ToolDefini
 		name: "research",
 		label: "research",
 		description:
-			"Start a background deep-research job on the web (searches and reads many sources, cross-checks them, writes a cited report). Returns immediately; the report arrives later as a follow-up message, so keep helping the user meanwhile. Use for open-ended, multi-source questions (comparisons, current state of a topic, market or technical surveys). Do NOT use for a single fact (use web_search) or for questions about the codebase (use explore). Each job costs real money and takes several minutes.",
-		promptSnippet: "Start an asynchronous multi-source web research job; the cited report arrives later",
+			"Run a deep web-research sub-agent (searches and reads many sources, cross-checks them, writes a cited report) and return its report. Blocks until the job finishes, typically 1-3 minutes and at most 10. Use for open-ended, multi-source questions (comparisons, current state of a topic, market or technical surveys). Do NOT use for a single fact (use web_search) or for questions about the codebase (use explore). Each job costs real money.",
+		promptSnippet: "Run a multi-source web research sub-agent and get its cited report back",
 		promptGuidelines: [
 			"Use `research` only when the question needs many sources or cross-checking. Single facts belong to `web_search`, code questions to `explore`.",
-			"`research` returns at once and delivers the report later as a message. Tell the user it is running and carry on; never poll or start a duplicate job.",
+			"`research` blocks until the report is ready. Give the user the report's findings yourself in the same reply (Summary, key findings, gaps); the saved file path is only a footnote, never the deliverable.",
 		],
 		parameters: researchSchema,
-		execute: async (_toolCallId, { question }: ResearchInput) => {
+		execute: async (_toolCallId, { question }: ResearchInput, signal) => {
 			const { jobs } = deps;
 			if (jobs.running >= RESEARCH_CAPS.maxConcurrent) {
 				return reply(
@@ -221,25 +224,18 @@ export function createResearchToolDefinition(deps: ResearchToolDeps): ToolDefini
 			}
 			const id = `r${++jobs.started}`;
 			jobs.running++;
-			void runResearch({ ...deps, question, signal: jobs.signal })
-				.then((result) => {
-					const path = saveReport(id, question, result.report);
-					const body = result.report.slice(0, DELIVERED_REPORT_CHARS);
-					const cut =
-						result.report.length > body.length ? `\n[truncated, full report: ${path}]` : `\n[saved: ${path}]`;
-					return `Research job ${id} finished (${result.turnsUsed} turns, ${Math.round(result.inputTokens / 1000)}K in). Question: ${question}\n\n${body}${cut}`;
-				})
-				.catch((error) => `Research job ${id} failed: ${error instanceof Error ? error.message : String(error)}`)
-				.then(async (text) => {
-					if (!jobs.signal.aborted) await deps.deliver(text);
-				})
-				.catch(() => {})
-				.finally(() => {
-					jobs.running--;
-				});
-			return reply(
-				`Research job ${id} started. The report arrives later as a follow-up message (typically a few minutes); it may be lost if the service restarts.`,
-			);
+			try {
+				const result = await runResearch({ ...deps, question, signal });
+				const path = saveReport(id, question, result.report);
+				const body = result.report.slice(0, DELIVERED_REPORT_CHARS);
+				const cut =
+					result.report.length > body.length ? `\n[truncated, full report: ${path}]` : `\n[saved: ${path}]`;
+				return reply(
+					`Research job ${id} finished (${result.turnsUsed} turns, ${Math.round(result.inputTokens / 1000)}K in). Question: ${question}\n\n${body}${cut}`,
+				);
+			} finally {
+				jobs.running--;
+			}
 		},
 	};
 }

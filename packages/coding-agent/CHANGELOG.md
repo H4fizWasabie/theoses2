@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: the `research` tool now runs inline like `explore`: it blocks until the report is ready and returns it as the tool result, so the main model relays it in the same turn. The asynchronous design delivered the report as a follow-up turn that no channel adapter was listening to, so on Telegram and the dashboard the reply could be written to the session but never sent (#334). The researcher also gets one extra "write the final report now" turn when it stops on narration without a tool call (job r1 ended on "Let me extract a few key pages..." after 3 of 20 turns and was saved as a complete report), and up to 20K characters of the report are returned inline instead of 6K.
+
 ## [1.0.75] - 2026-09-21
 
 - feat: added an asynchronous `research` tool. It starts a background deep-research job (Tavily search and extract driven by an OpenRouter model, configurable under `backgroundModels.research`, defaulting to the explorer's model) and returns at once; the cited report arrives later as a follow-up message and is saved under `~/.theoses/agent/research/`. Each job is capped at 20 turns, 600K input tokens, 15 Tavily calls and 10 minutes, with at most 2 running and 5 started per session.
