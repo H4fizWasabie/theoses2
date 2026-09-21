@@ -5,7 +5,7 @@
  * swapping a model or provider is a settings edit plus a restart, not a release.
  */
 
-export type BackgroundModelName = "consolidation" | "explorer";
+export type BackgroundModelName = "consolidation" | "explorer" | "research";
 
 export interface BackgroundModelSetting {
 	/** OpenRouter model id, e.g. "deepseek/deepseek-v4-flash-0731". */
