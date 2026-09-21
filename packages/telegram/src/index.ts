@@ -30,6 +30,8 @@ const TELEGRAM_STOP_REQUEST_TTL_MS = 30_000;
 // Telegram's typing indicator expires after ~5s, so it must be re-sent. 3s leaves room for a late timer
 // or a slow API call before it lapses.
 const TYPING_INTERVAL_MS = 3000;
+/** How long an album leader waits for the rest of the group; Telegram gives no "album complete" signal. */
+const ALBUM_WAIT_MS = 1000;
 const TYPING_FAILURE_LOG_INTERVAL_MS = 30_000;
 // Bot API's own documented ceiling for a rich message's text (headings/bold/tables/etc combined).
 const RICH_MESSAGE_CHAR_LIMIT = 32768;
@@ -443,6 +445,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 	const haltedByStop = new Set<string>();
 	const stopRequested = new Map<string, { messageId: number; timer: ReturnType<typeof setTimeout> }>();
 	const queuedMessageIds = new Map<string, number[]>();
+	const albums = new Map<string, Array<NonNullable<Context["message"]>>>();
 	const queueDepth = new Map<string, number>();
 	let toolCallDetailEnabled = loadToolCallDetailPreference();
 	const removeQueuedMessage = (chat: string, messageId: number): void => {
@@ -558,6 +561,21 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			return;
 		}
 
+		// Telegram delivers an album as separate messages sharing a media_group_id. The first one
+		// becomes the leader and handles them all as a single turn; the others just join its list.
+		// The leader's wait for stragglers happens inside its queued job, not here: grammy processes
+		// updates one at a time, so blocking this handler would also block the rest of the album.
+		const album = [ctx.message];
+		const albumKey = ctx.message.media_group_id ? `${chat}:${ctx.message.media_group_id}` : undefined;
+		if (albumKey) {
+			const pending = albums.get(albumKey);
+			if (pending) {
+				pending.push(ctx.message);
+				return;
+			}
+			albums.set(albumKey, album);
+		}
+
 		const messageId = ctx.message.message_id;
 		const releaseTyping = acquireTyping(chat, ctx.chat.id);
 		const queued = queuedMessageIds.get(chat) ?? [];
@@ -566,6 +584,10 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 		queueDepth.set(chat, (queueDepth.get(chat) ?? 0) + 1);
 		const previous = queues.get(chat) ?? Promise.resolve();
 		const next = previous.then(async () => {
+			if (albumKey) {
+				await new Promise((resolve) => setTimeout(resolve, ALBUM_WAIT_MS));
+				albums.delete(albumKey);
+			}
 			removeQueuedMessage(chat, messageId);
 			if (consumeStopRequest(chat, messageId)) return;
 			const session = await sessionFor(chat, cwd, sessions);
@@ -605,6 +627,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				return;
 			}
 
+			const captionText = messageText(ctx) || album.find((m) => m.caption)?.caption || "";
 			const images: string[] = [];
 			// Fallback prompt for caption-less attachments: without it, an empty string
 			// reaches the agent and the attachment is silently ignored (2026-09-08 fix).
@@ -612,48 +635,45 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			const noteFor = (name: string, mime: string, size: number, kind: string) =>
 				`User sent a ${kind} without a caption: "${name}" (mime type ${mime}, ${size} bytes). ` +
 				`It has been stored as a document artifact in this session. Use convert_doc to read it if needed, and respond about it.`;
-			if (ctx.message.photo?.length) {
-				const photo = ctx.message.photo.at(-1);
-				if (photo) {
-					const data = await downloadFile(bot, token, photo.file_id);
-					images.push(`data:image/jpeg;base64,${Buffer.from(data).toString("base64")}`);
-					if (!messageText(ctx))
-						attachmentNote = "User sent a photo without a caption. Describe or act on it as appropriate.";
-				}
-			} else if (ctx.message.document) {
-				const document = ctx.message.document;
-				const data = await downloadFile(bot, token, document.file_id);
-				if (document.mime_type?.startsWith("image/")) {
-					images.push(`data:${document.mime_type};base64,${Buffer.from(data).toString("base64")}`);
+			for (const message of album) {
+				if (message.photo?.length) {
+					const photo = message.photo.at(-1);
+					if (photo) {
+						const data = await downloadFile(bot, token, photo.file_id);
+						images.push(`data:image/jpeg;base64,${Buffer.from(data).toString("base64")}`);
+						if (!captionText)
+							attachmentNote = "User sent a photo without a caption. Describe or act on it as appropriate.";
+					}
+				} else if (message.document) {
+					const document = message.document;
+					const data = await downloadFile(bot, token, document.file_id);
+					if (document.mime_type?.startsWith("image/")) {
+						images.push(`data:${document.mime_type};base64,${Buffer.from(data).toString("base64")}`);
+					} else {
+						session.sessionManager.storeArtifact("telegram document", document.file_name ?? "document", data);
+						if (!captionText)
+							attachmentNote = noteFor(
+								document.file_name ?? "document",
+								document.mime_type ?? "unknown",
+								data.length,
+								"document",
+							);
+					}
 				} else {
-					session.sessionManager.storeArtifact("telegram document", document.file_name ?? "document", data);
-					if (!messageText(ctx))
-						attachmentNote = noteFor(
-							document.file_name ?? "document",
-							document.mime_type ?? "unknown",
-							data.length,
-							"document",
-						);
-				}
-			} else {
-				// Other media types (audio, video, voice, video note, animation) were previously
-				// dropped silently. Store what we can so the agent knows they arrived.
-				const media =
-					ctx.message.audio ??
-					ctx.message.video ??
-					ctx.message.voice ??
-					ctx.message.video_note ??
-					ctx.message.animation;
-				if (media?.file_id) {
-					try {
-						const data = await downloadFile(bot, token, media.file_id);
-						const meta = media as { file_name?: string; mime_type?: string };
-						const name = meta.file_name ?? meta.mime_type ?? "media";
-						const mime = meta.mime_type ?? "unknown";
-						session.sessionManager.storeArtifact("telegram document", name, data);
-						if (!messageText(ctx)) attachmentNote = noteFor(name, mime, data.length, "media file");
-					} catch (e) {
-						console.error("Failed to download non-document media:", e);
+					// Other media types (audio, video, voice, video note, animation) were previously
+					// dropped silently. Store what we can so the agent knows they arrived.
+					const media = message.audio ?? message.video ?? message.voice ?? message.video_note ?? message.animation;
+					if (media?.file_id) {
+						try {
+							const data = await downloadFile(bot, token, media.file_id);
+							const meta = media as { file_name?: string; mime_type?: string };
+							const name = meta.file_name ?? meta.mime_type ?? "media";
+							const mime = meta.mime_type ?? "unknown";
+							session.sessionManager.storeArtifact("telegram document", name, data);
+							if (!captionText) attachmentNote = noteFor(name, mime, data.length, "media file");
+						} catch (e) {
+							console.error("Failed to download non-document media:", e);
+						}
 					}
 				}
 			}
@@ -743,7 +763,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				}
 			});
 			try {
-				await session.prompt(messageText(ctx) || attachmentNote || "", {
+				await session.prompt(captionText || attachmentNote || "", {
 					replyContext: replyText(ctx),
 					images: images.length ? images : undefined,
 					source: "extension",
