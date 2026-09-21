@@ -16,7 +16,7 @@ import {
 	type TextContent,
 } from "theoses-ai/compat";
 import { Type } from "typebox";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
@@ -56,6 +56,45 @@ function createAssistantMessage(text: string): AssistantMessage {
 		stopReason: "stop",
 		timestamp: Date.now(),
 	};
+}
+
+/**
+ * prompt() starts its run asynchronously, so wait for the run to be active instead of guessing a delay.
+ * Aborting before it starts is a no-op, and the mock stream would then wait forever for an abort that
+ * already happened (the test hangs to its 30s timeout under a loaded full-suite run).
+ */
+async function waitForStreaming(session: AgentSession): Promise<void> {
+	await vi.waitFor(() => expect(session.isStreaming).toBe(true), { timeout: 5000, interval: 5 });
+}
+
+/**
+ * Aborts and waits for the prompt to settle. A hang here once failed a release run only as a 30s vitest
+ * timeout, with no way to tell whether abort() or the prompt never finished; fail fast with the state instead.
+ */
+async function abortAndSettle(session: AgentSession, prompt: Promise<unknown>): Promise<void> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(
+			() =>
+				reject(
+					new Error(
+						`prompt did not settle 5s after abort(): isStreaming=${session.isStreaming} isIdle=${session.isIdle} pending=${session.pendingMessageCount}`,
+					),
+				),
+			5000,
+		);
+	});
+	try {
+		await Promise.race([
+			(async () => {
+				await session.abort();
+				await prompt.catch(() => {}); // Ignore abort error
+			})(),
+			timeout,
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
 }
 
 describe("AgentSession concurrent prompt guard", () => {
@@ -133,8 +172,7 @@ describe("AgentSession concurrent prompt guard", () => {
 		// Start first prompt (don't await, it will block until abort)
 		const firstPrompt = session.prompt("First message");
 
-		// Wait a tick for isStreaming to be set
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		await waitForStreaming(session);
 
 		// Verify we're streaming
 		expect(session.isStreaming).toBe(true);
@@ -145,8 +183,7 @@ describe("AgentSession concurrent prompt guard", () => {
 		);
 
 		// Cleanup
-		await session.abort();
-		await firstPrompt.catch(() => {}); // Ignore abort error
+		await abortAndSettle(session, firstPrompt);
 	});
 
 	it("should allow steer() while streaming", async () => {
@@ -154,15 +191,14 @@ describe("AgentSession concurrent prompt guard", () => {
 
 		// Start first prompt
 		const firstPrompt = session.prompt("First message");
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		await waitForStreaming(session);
 
 		// steer should work while streaming
 		expect(() => session.steer("Steering message")).not.toThrow();
 		expect(session.pendingMessageCount).toBe(1);
 
 		// Cleanup
-		await session.abort();
-		await firstPrompt.catch(() => {});
+		await abortAndSettle(session, firstPrompt);
 	});
 
 	it("should allow followUp() while streaming", async () => {
@@ -170,15 +206,14 @@ describe("AgentSession concurrent prompt guard", () => {
 
 		// Start first prompt
 		const firstPrompt = session.prompt("First message");
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		await waitForStreaming(session);
 
 		// followUp should work while streaming
 		expect(() => session.followUp("Follow-up message")).not.toThrow();
 		expect(session.pendingMessageCount).toBe(1);
 
 		// Cleanup
-		await session.abort();
-		await firstPrompt.catch(() => {});
+		await abortAndSettle(session, firstPrompt);
 	});
 
 	it("should queue extension-origin steering messages while streaming", async () => {
@@ -265,7 +300,7 @@ describe("AgentSession concurrent prompt guard", () => {
 		});
 
 		const firstPrompt = session.prompt("First message");
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		await waitForStreaming(session);
 		expect(session.isStreaming).toBe(true);
 
 		const pi = (
@@ -287,8 +322,7 @@ describe("AgentSession concurrent prompt guard", () => {
 			true,
 		);
 
-		await session.abort();
-		await firstPrompt.catch(() => {});
+		await abortAndSettle(session, firstPrompt);
 
 		expect(sawSteeringMessage).toBe(true);
 	});
