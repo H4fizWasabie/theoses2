@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.75] - 2026-09-21
 
 - chore: removed the unused `@vitest/coverage-v8` dev dependency.
