@@ -97,7 +97,6 @@ The agent runs with the permissions of the account that launched it. It does not
 | [theoses-protocol](packages/protocol) | Validated CBOR schemas and byte-stream framing |
 | [theoses-client](packages/client) | Transport-neutral remote-session client |
 | [theoses-server](packages/server) | Experimental session server boundary |
-| [theoses-telemetry](packages/telemetry) | Vendor-neutral telemetry contracts and typed schemas |
 
 ## Documentation
 

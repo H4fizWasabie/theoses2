@@ -6,8 +6,6 @@
 		"moduleResolution": "NodeNext",
 		"paths": {
 			"*": ["./*"],
-			"theoses-telemetry": ["./packages/telemetry/src/index.ts"],
-			"theoses-telemetry/testing": ["./packages/telemetry/src/testing/index.ts"],
 			"theoses-ai": ["./packages/ai/src/index.ts"],
 			"theoses-ai/oauth": ["./packages/ai/src/oauth.ts"],
 			"theoses-ai/*": ["./packages/ai/src/*.ts", "./packages/ai/src/providers/*.ts"],

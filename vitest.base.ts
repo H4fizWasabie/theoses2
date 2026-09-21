@@ -2,8 +2,6 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export const workspaceSourcePaths = {
-	telemetryIndex: fileURLToPath(new URL("./packages/telemetry/src/index.ts", import.meta.url)),
-	telemetryTesting: fileURLToPath(new URL("./packages/telemetry/src/testing/index.ts", import.meta.url)),
 	aiIndex: fileURLToPath(new URL("./packages/ai/src/index.ts", import.meta.url)),
 	aiCompat: fileURLToPath(new URL("./packages/ai/src/compat.ts", import.meta.url)),
 	aiOAuth: fileURLToPath(new URL("./packages/ai/src/oauth.ts", import.meta.url)),
@@ -16,8 +14,6 @@ export const workspaceSourcePaths = {
 export default defineConfig({
 	resolve: {
 		alias: [
-			{ find: /^theoses-telemetry$/, replacement: workspaceSourcePaths.telemetryIndex },
-			{ find: /^theoses-telemetry\/testing$/, replacement: workspaceSourcePaths.telemetryTesting },
 			{ find: /^theoses-ai$/, replacement: workspaceSourcePaths.aiIndex },
 			{ find: /^theoses-ai\/compat$/, replacement: workspaceSourcePaths.aiCompat },
 			{ find: /^theoses-ai\/oauth$/, replacement: workspaceSourcePaths.aiOAuth },
