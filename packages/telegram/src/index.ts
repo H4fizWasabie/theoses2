@@ -8,12 +8,10 @@ import {
 	createAgentSession,
 	DefaultResourceLoader,
 	findExactModelReferenceMatch,
-	findLastUserMessageEntryId,
 	getAgentDir,
-	maybeDetectTaskBoundary,
-	maybeRunConsolidation,
 	type SessionInfo,
 	SessionManager,
+	settleTurn,
 } from "theoses-coding-agent";
 import { chunkHtml, formatTelegramHtml, renderToolCallBlocks, splitSections, type ToolCallEntry } from "./format.ts";
 import { createToolCallLogger } from "./tool-call-log.ts";
@@ -796,28 +794,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				await bot.api.sendPhoto(ctx.chat.id, new InputFile(generatedImages[0]));
 			}
 
-			const channelSessionKey = session.sessionManager.getChannelSessionKey();
-			maybeRunConsolidation({
-				cwd: session.sessionManager.getCwd(),
-				channel: channelSessionKey.channel,
-				channelSessionId: channelSessionKey.channelSessionId,
-				userMessageText: messageText(ctx),
-				mainSessionManager: session.sessionManager,
-				modelRuntime: session.modelRuntime,
-			});
-			// Issue #186, shadow mode: task-closure/topic-shift detection, separate from
-			// consolidation's phrase-trigger above — see task-boundary-detector.ts.
-			const lastUserEntryId = findLastUserMessageEntryId(session.sessionManager.getBranch());
-			if (lastUserEntryId) {
-				maybeDetectTaskBoundary({
-					channel: channelSessionKey.channel,
-					channelSessionId: channelSessionKey.channelSessionId,
-					userMessageText: messageText(ctx),
-					userMessageEntryId: lastUserEntryId,
-					mainSessionManager: session.sessionManager,
-					modelRuntime: session.modelRuntime,
-				});
-			}
+			settleTurn(session, messageText(ctx));
 		});
 		queues.set(
 			chat,
