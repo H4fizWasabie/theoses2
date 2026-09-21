@@ -1,16 +1,15 @@
 import type { AgentMessage } from "theoses-agent-core";
 import type { DistilledMemoryResult } from "./compaction/compaction.ts";
 import type { MemoryStore } from "./memory-store.ts";
+import type { SessionEntry } from "./session-manager.ts";
+import { findLastUserMessageEntryId } from "./task-boundary-detector.ts";
 
 /** The slice of SessionManager promotion needs: which entries already reached Durable Memory, and the log to mark. */
 export interface PromotionLog {
 	isEntryPromoted(entryId: string): boolean;
 	appendPromotedRange(firstEntryId: string, lastEntryId: string): string;
-	getBranch(): { id: string }[];
+	getBranch(): SessionEntry[];
 }
-
-/** How many trailing entries a `save_note` marks as promoted. */
-const SAVED_RANGE_ENTRIES = 20;
 
 /**
  * Memory promotion: how turns reach Durable Memory without being distilled twice. Compaction hands over the
@@ -26,7 +25,7 @@ export interface MemoryPromotion {
 		messageEntryIds: string[] | undefined,
 		distill: (messages: AgentMessage[]) => Promise<DistilledMemoryResult>,
 	): void;
-	/** Call after the model saved a note. */
+	/** Call after the model saved a note: marks the current turn (last user message up to now) as promoted. */
 	recordSaved(): void;
 }
 
@@ -48,10 +47,11 @@ export function createMemoryPromotion(store: MemoryStore, log: PromotionLog): Me
 		},
 		recordSaved() {
 			const entries = log.getBranch();
-			// ponytail: coarse trailing range; replace with exact source attribution when tool context exposes it.
-			const first = entries[Math.max(0, entries.length - SAVED_RANGE_ENTRIES)];
+			// The fact came from this turn's work, which the model saw but cannot attribute more precisely.
+			// ponytail: a fact taken from an earlier turn is distilled again at compaction (a harmless duplicate).
+			const first = findLastUserMessageEntryId(entries);
 			const last = entries[entries.length - 1];
-			if (first && last) log.appendPromotedRange(first.id, last.id);
+			if (first && last) log.appendPromotedRange(first, last.id);
 		},
 	};
 }

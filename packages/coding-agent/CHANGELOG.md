@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: saving a durable note now marks the current turn (from the last user message up to the save) as promoted, instead of the last 20 entries. On the production Telegram session the fixed 20-entry window missed the saving turn in 35% of saves (tool-heavy turns run past 20 entries) and marked 0.66 other user messages per save as already promoted, so compaction skipped distilling them (#332).
+
 - fix: the `research` tool now runs inline like `explore`: it blocks until the report is ready and returns it as the tool result, so the main model relays it in the same turn. The asynchronous design delivered the report as a follow-up turn that no channel adapter was listening to, so on Telegram and the dashboard the reply could be written to the session but never sent (#334). The researcher also gets one extra "write the final report now" turn when it stops on narration without a tool call (job r1 ended on "Let me extract a few key pages..." after 3 of 20 turns and was saved as a complete report), and up to 20K characters of the report are returned inline instead of 6K.
 
 ## [1.0.75] - 2026-09-21
