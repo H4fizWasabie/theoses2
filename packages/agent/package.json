@@ -27,10 +27,7 @@
 	"dependencies": {
 		"theoses-ai": "^1.0.73",
 		"theoses-telemetry": "^1.0.73",
-		"diff": "8.0.4",
-		"ignore": "7.0.5",
-		"typebox": "1.3.7",
-		"yaml": "2.9.0"
+		"typebox": "1.3.7"
 	},
 	"keywords": [
 		"ai",
