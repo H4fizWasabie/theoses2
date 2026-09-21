@@ -30,7 +30,6 @@ criteria — needs its own grilling ticket).
 | Default coding tools (bash/read/write/edit/edit-diff, image) | keep | Explicitly preserved per the map's Notes ("preserve Pi's coding-agent capabilities"). |
 | Node execution environment adapter | keep | Required to run any tool. |
 | Output truncation & shell-output capture utilities | keep | Needed wherever bash/tool output flows to an LLM context. |
-| Telemetry instrumentation hooks | keep | Channel-neutral observability. |
 | LLM streaming proxy | keep | Needed once a web UI wraps the engine (per the map's Destination). |
 
 ## packages/coding-agent
@@ -135,15 +134,6 @@ None of `packages/tui` is cut or refactored: it's entirely CLI-channel plumbing,
 | Error taxonomy | keep | No incompatibility. |
 | Unix transport convenience | keep | No incompatibility. |
 
-## packages/telemetry
-
-| Capability | Verdict | Rationale |
-|---|---|---|
-| `TelemetryContext`/`TelemetrySpan` contract | keep | Fully generic. |
-| No-op and in-memory reference implementations | keep | Fully generic. |
-| Typed schema definitions | keep | Fully generic. |
-| Adapter conformance test kit | keep | Fully generic. |
-
 ## packages/evals
 
 | Capability | Verdict | Rationale |
@@ -165,5 +155,5 @@ None of `packages/tui` is cut or refactored: it's entirely CLI-channel plumbing,
 - **Discuss**: llama.cpp router integration — spun out as its own ticket.
 - **Keep**: everything else — the large majority of the ~60 capabilities, concentrated in
   `packages/tui`, `packages/session-backends`, `packages/ai`, `packages/server`,
-  `packages/protocol`, `packages/client`, `packages/telemetry`, `packages/evals`, and most of
+  `packages/protocol`, `packages/client`, `packages/evals`, and most of
   `packages/agent` and `packages/coding-agent`.

@@ -24,7 +24,6 @@ Description (package.json): "General-purpose agent with transport abstraction, s
 | Default coding tools | `agent/src/harness/tools/{bash,read,write,edit,edit-diff}.ts`, `tools/file-mutation-queue.ts`, `tools/image.ts` | Bash shell-execution tool, file read/write/edit tools with unified-diff-based edit application (`edit-diff.ts`), an image tool, and a mutation queue to serialize concurrent file writes. | Directly coding/filesystem-centric: assumes a local filesystem workspace, a shell, and diff/patch-style file editing. |
 | Node execution environment adapter | `agent/src/harness/env/nodejs.ts`, `agent/src/node.ts` | `NodeExecutionEnv` implements `ExecutionEnv` (file I/O, process spawn, path resolution) on top of Node's `fs`/`child_process`; separates env from tool logic so tools can run against other backends. | Node/filesystem/process-specific, but cleanly abstracted behind `ExecutionEnv`. |
 | Output truncation & shell-output capture utilities | `agent/src/harness/utils/truncate.ts`, `utils/shell-output.ts` | Caps tool output size/line count for LLM context budgets; captures and formats shell stdout/stderr. | Shell-output capture assumes a subprocess/terminal execution model. |
-| Telemetry instrumentation hooks | `agent/src/harness/telemetry.ts` | Emits structured telemetry spans/attributes (turn start/end, tool timings, tokens) via the `theoses-telemetry` contract. | None. |
 | LLM streaming proxy | `agent/src/proxy.ts`, `agent/src/stream-fn.ts` | `streamProxy()` lets a browser/thin client proxy LLM calls through a backend server rather than calling providers directly. | None. |
 
 ---
@@ -154,19 +153,6 @@ Description (README): "Transport-neutral client for remote theoses sessions... T
 | Snapshot/event subscription | `client/src/client.ts`, `promise.ts` | `subscribe()` for authoritative snapshots, `onEvent()` for transient protocol events; snapshots are the source of truth, progress events are not reduced into state. | None. |
 | Error taxonomy | `client/src/errors.ts` | Structured client-side errors: `PiServerError`, `PiDisconnectedError`, `PiSessionDetachedError`, `PiSessionOwnershipError`. | None. |
 | Unix transport convenience | `client/src/unix.ts` | Pre-built `ByteTransportFactory` for connecting over a Unix domain socket (pairs with `theoses-server`'s Unix listener). | OS-specific (Unix sockets), not coding-specific. |
-
----
-
-## packages/telemetry (`theoses-telemetry`)
-
-Description (README): "Vendor-neutral telemetry contracts and typed schema utilities for theoses packages... no exporter, global current-span state, or dependency on a telemetry backend." Fully generic observability layer.
-
-| Capability | Location | Description | Coding-specific coupling |
-|---|---|---|---|
-| `TelemetryContext`/`TelemetrySpan` contract | `telemetry/src/index.ts` | Explicit, callback-based span/context interfaces that packages call into; apps supply an adapter (OpenTelemetry, Sentry, logs, etc.). | None. |
-| No-op and in-memory reference implementations | `telemetry/src/noop.ts`, `memory.ts` | `NOOP_TELEMETRY_CONTEXT` for disabling telemetry cheaply; `InMemoryTelemetryContext` reference adapter for tests/local inspection. | None. |
-| Typed schema definitions | `telemetry/src/index.ts` (schema exports referenced in README: start/completion attribute schemas) | Serializable schema definitions with inferred TypeScript types for domain-specific telemetry events (e.g., agent turns, tool calls) defined by consuming packages. | None itself; consumers (agent-core) define coding/agent-specific schemas on top. |
-| Adapter conformance test kit | `telemetry/src/testing/{conformance.ts, index.ts, types.ts}` | Shared test suite any telemetry adapter implementation can run against to verify contract compliance. | None. |
 
 ---
 
