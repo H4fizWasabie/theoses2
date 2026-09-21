@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { resolveExplorerModel } from "../src/core/explorer.ts";
-import { resolveConsolidationModel } from "../src/core/memory-consolidation.ts";
+import { type BackgroundModelName, resolveBackgroundModel } from "../src/core/background-models.ts";
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
 
 const DEFAULT_MODEL_ID = "deepseek/deepseek-v4-flash-0731";
+const MAX_TOKENS: Record<BackgroundModelName, number> = { consolidation: 32000, explorer: 8000, research: 16000 };
+const NAMES = Object.keys(MAX_TOKENS) as BackgroundModelName[];
 
 function runtimeWithModel(): { runtime: ModelRuntime; getModel: ReturnType<typeof vi.fn> } {
 	const getModel = vi.fn(() => ({
@@ -21,10 +22,10 @@ function routingOf(model: unknown): Record<string, unknown> {
 }
 
 describe("default DeepSeek V4 Flash 0731 routing", () => {
-	it("consolidation asks for the paid variant and pins Baidu then DeepInfra with no other fallbacks", () => {
+	it.each(NAMES)("%s asks for the paid variant and pins Baidu then DeepInfra with no other fallbacks", (name) => {
 		const { runtime, getModel } = runtimeWithModel();
 
-		const model = resolveConsolidationModel(runtime);
+		const model = resolveBackgroundModel(runtime, name);
 
 		expect(getModel).toHaveBeenCalledWith("openrouter", DEFAULT_MODEL_ID);
 		expect(routingOf(model)).toMatchObject({
@@ -32,36 +33,20 @@ describe("default DeepSeek V4 Flash 0731 routing", () => {
 			quantizations: ["fp8"],
 			allow_fallbacks: false,
 		});
-		expect(model.maxTokens).toBe(32000);
-	});
-
-	it("the explorer asks for the paid variant and pins Baidu then DeepInfra with no other fallbacks", () => {
-		const { runtime, getModel } = runtimeWithModel();
-
-		const model = resolveExplorerModel(runtime);
-
-		expect(getModel).toHaveBeenCalledWith("openrouter", DEFAULT_MODEL_ID);
-		expect(routingOf(model)).toMatchObject({
-			order: ["Baidu", "DeepInfra"],
-			quantizations: ["fp8"],
-			allow_fallbacks: false,
-		});
-		expect(model.maxTokens).toBe(8000);
+		expect(model.maxTokens).toBe(MAX_TOKENS[name]);
 	});
 
 	it("does not default to a free variant, which OpenRouter can withdraw", () => {
 		const { runtime, getModel } = runtimeWithModel();
 
-		resolveConsolidationModel(runtime);
-		resolveExplorerModel(runtime);
+		for (const name of NAMES) resolveBackgroundModel(runtime, name);
 
 		for (const call of getModel.mock.calls) expect(String(call[1])).not.toMatch(/:free$/);
 	});
 
-	it("fails loudly when the catalog does not contain the model", () => {
+	it.each(NAMES)("%s fails loudly when the catalog does not contain the model", (name) => {
 		const runtime = { getModel: () => undefined } as unknown as ModelRuntime;
 
-		expect(() => resolveConsolidationModel(runtime)).toThrow(/not found in the OpenRouter catalog/);
-		expect(() => resolveExplorerModel(runtime)).toThrow(/not found in the OpenRouter catalog/);
+		expect(() => resolveBackgroundModel(runtime, name)).toThrow(/not found in the OpenRouter catalog/);
 	});
 });

@@ -1,17 +1,10 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import {
-	type Api,
-	contentText,
-	type Model,
-	retryAssistantCall,
-	type ToolCall,
-	type ToolResultMessage,
-} from "theoses-ai";
+import { contentText, retryAssistantCall, type ToolCall, type ToolResultMessage } from "theoses-ai";
 import type { Context, SimpleStreamOptions } from "theoses-ai/compat";
 import { getAgentDir } from "../config.ts";
 import { describeResponseShape, recordBackgroundFailure } from "./background-failure-log.ts";
-import { type ResolvedBackgroundModelSetting, resolveBackgroundModelSetting } from "./background-models.ts";
+import { resolveBackgroundModel } from "./background-models.ts";
 import { EpisodicStore } from "./episodic-store.ts";
 import { askJevChoice, askJevNoul } from "./jev-client.ts";
 import { createMemoryWriteGate, isMemoryGateEnabled } from "./memory-gate.ts";
@@ -129,73 +122,6 @@ function writeFailure(key: string, at: string): void {
 // ---------------------------------------------------------------------------
 // Model resolution
 // ---------------------------------------------------------------------------
-
-/**
- * Defaults, overridable through `backgroundModels.consolidation` in settings.json. The paid DeepSeek V4 Flash
- * 0731 at fp8, Baidu first and DeepInfra as the only fallback (about $0.05 to $0.06 per million input tokens,
- * a fraction of a cent per pass). The free `:free` variant this used to default to was withdrawn by OpenRouter on
- * 2026-09-20: the API answered "This model is unavailable for free" and the next catalog hydration no longer
- * listed it, which silently stopped consolidation and task-boundary summaries until the setting was overridden.
- */
-const CONSOLIDATION_DEFAULTS: ResolvedBackgroundModelSetting = {
-	model: "deepseek/deepseek-v4-flash-0731",
-	providers: ["Baidu", "DeepInfra"],
-	quantizations: ["fp8"],
-};
-
-/**
- * Resolves the consolidation model from the live-hydrated OpenRouter catalog (rather than
- * hand-authoring cost/context-window numbers) and overlays the provider routing (by default
- * Baidu then DeepInfra, fp8 quantization, no fallbacks outside that list) plus caching.
- * The task-boundary summary call resolves through here too, so it follows the same setting:
- * `sendSessionAffinityHeaders`/`sessionAffinityFormat` are already auto-detected true for any
- * openrouter.ai baseUrl (see `packages/ai/src/api/openai-completions.ts`'s `isOpenRouter`
- * detection), so no extra wiring is needed there — a stable per-Channel-Session affinity id
- * (see `consolidationSessionAffinityId` below) is what makes that caching actually land across passes.
- */
-export function resolveConsolidationModel(modelRuntime: ModelRuntime): Model<Api> {
-	const setting = resolveBackgroundModelSetting(
-		"consolidation",
-		CONSOLIDATION_DEFAULTS,
-		modelRuntime.getBackgroundModelSetting?.("consolidation"),
-	);
-	const model = modelRuntime.getModel("openrouter", setting.model);
-	if (!model) {
-		throw new Error(
-			`Consolidation model ${setting.model} not found in the OpenRouter catalog. ` +
-				"Ensure the model catalog is hydrated and OpenRouter is a configured provider.",
-		);
-	}
-	return {
-		...model,
-		// Root cause of a real production failure: with no explicit per-request maxTokens, the
-		// shared default (packages/ai's simple-options.ts) falls back to the model's full declared
-		// max completion tokens (900K+ for this model) clamped to context. Cheap/shared-capacity-pool
-		// providers reject that outright — confirmed via OpenRouter's own error metadata:
-		// `provider_error_code: "queue_timeout"`, `limit_source: "upstream_provider_shared_pool"` —
-		// committing to reserve output budget that large can't fit their queue. Consolidation only
-		// emits one JSON object (facts + edges + episode) per chunk; 32K is generous headroom, not a
-		// real constraint.
-		maxTokens: 32000,
-		compat: {
-			...(model as Model<"openai-completions">).compat,
-			openRouterRouting: {
-				...(model as Model<"openai-completions">).compat?.openRouterRouting,
-				// Provider slugs must match the endpoints API's `provider_name`, not the pricing page's
-				// marketing label (issues #180/#190: "Baidu Qianfan" and "AkashML" silently matched
-				// nothing). Confirmed against /api/v1/models/deepseek/deepseek-v4-flash-0731/endpoints:
-				// "Baidu" (tag baidu/fp8) and "DeepInfra". Baidu can answer 429 on its shared pool, which
-				// is why DeepInfra is second.
-				order: setting.providers,
-				...(setting.quantizations.length > 0 ? { quantizations: setting.quantizations } : {}),
-				// Without this, `order` is only a preference — OpenRouter falls back to any other
-				// provider if the ordered one isn't suitable for a request. Fail cost-strict instead:
-				// a failed pass just waits out the consolidation cooldown and retries.
-				allow_fallbacks: false,
-			},
-		},
-	} as Model<Api>;
-}
 
 // ---------------------------------------------------------------------------
 // Orchestration
@@ -664,7 +590,7 @@ async function runConsolidationPass(params: {
 	// summarize, and DeepInfra answers it with `{}`. There is nothing to record, so skip the call; the
 	// caller still advances the checkpoint past these entries.
 	if (!hasConsolidationContent(transcript)) return;
-	const model = resolveConsolidationModel(modelRuntime);
+	const model = resolveBackgroundModel(modelRuntime, "consolidation");
 	const existingNodes = buildExistingNodesSection(memoryStore, transcript);
 
 	const promptText = `${CONSOLIDATION_INSTRUCTIONS}\n\n--- Existing memory nodes ---\n${existingNodes}\n\n--- Conversation window ---\n${transcript}`;

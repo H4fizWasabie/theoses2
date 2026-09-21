@@ -147,11 +147,10 @@ export {
 } from "./memory-store.ts";
 export type { PromptTemplate } from "./prompt-templates.ts";
 export type { Skill } from "./skills.ts";
-export {
-	type MaybeDetectTaskBoundaryOptions,
-	resolveTaskBoundaryModel,
-	type TaskBoundaryData,
-	type TaskDescriptorData,
+export type {
+	MaybeDetectTaskBoundaryOptions,
+	TaskBoundaryData,
+	TaskDescriptorData,
 } from "./task-boundary-detector.ts";
 export type {
 	HttpSidecarToolSourceOptions,

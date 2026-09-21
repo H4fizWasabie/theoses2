@@ -34,10 +34,10 @@
  * `[compaction] resetting chain` lines under THEOSES_DEBUG_TASK_BOUNDARY show what was decided and applied.
  */
 
-import { type Api, contentText, type Model, retryAssistantCall } from "theoses-ai";
+import { contentText, retryAssistantCall } from "theoses-ai";
 import type { Context, SimpleStreamOptions } from "theoses-ai/compat";
+import { resolveBackgroundModel } from "./background-models.ts";
 import { askJevNouls } from "./jev-client.ts";
-import { resolveConsolidationModel } from "./memory-consolidation.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { CustomEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 
@@ -58,17 +58,6 @@ export interface TaskDescriptorData {
 export interface TaskBoundaryData {
 	taskSummary: string;
 	beforeEntryId: string;
-}
-
-/**
- * Resolves the model used for the rolling task-summary sentence only (the related/unrelated
- * judgment itself goes to Jev — see callJevRelated). Reuses memory-consolidation's model (same
- * cheap/fast tier, same cost-strict OpenRouter provider routing) until a dedicated model is
- * chosen (tracked in issue #186 — the detection *mechanism* is model-agnostic by design; only the
- * model id is pending).
- */
-export function resolveTaskBoundaryModel(modelRuntime: ModelRuntime): Model<Api> {
-	return resolveConsolidationModel(modelRuntime);
 }
 
 /** Single-attempt: this call is fire-and-forget on every turn, so a failed attempt is
@@ -276,7 +265,9 @@ async function callSummaryModel(
 	related: boolean,
 	sessionAffinityId: string,
 ): Promise<string | undefined> {
-	const model = resolveTaskBoundaryModel(modelRuntime);
+	// Reuses the consolidation model (same cheap/fast tier and cost-strict routing) until issue #186 picks a
+	// dedicated one; the related/unrelated judgment itself goes to Jev (see callJevRelated).
+	const model = resolveBackgroundModel(modelRuntime, "consolidation");
 	const instructions = related ? TASK_SUMMARY_INSTRUCTIONS_RELATED : TASK_SUMMARY_INSTRUCTIONS_NEW;
 	// The previous reply is what lets a terse message ("Check", "Go") be described as the concrete
 	// task it refers to; without it the descriptor freezes on stale text (seen live: a "strawberry"
