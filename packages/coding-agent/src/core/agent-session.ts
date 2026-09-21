@@ -204,7 +204,6 @@ export type AgentSessionEvent =
 			reason: "manual" | "threshold" | "overflow" | "turns";
 	  }
 	| { type: "summarization_retry_finished" }
-	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
 	| { type: "bash_execution_update"; id?: string; delta: string };
 
 /** Listener function for agent session events */
@@ -1851,7 +1850,7 @@ export class AgentSession {
 	 */
 	setThinkingLevel(level: ThinkingLevel, options: ModelMutationOptions = {}): void {
 		const availableLevels = this.getAvailableThinkingLevels();
-		const effectiveLevel = availableLevels.includes(level) ? level : this._clampThinkingLevel(level, availableLevels);
+		const effectiveLevel = availableLevels.includes(level) ? level : this._clampThinkingLevel(level);
 
 		// Only persist if actually changing
 		const previousLevel = this.agent.state.thinkingLevel;
@@ -1920,7 +1919,7 @@ export class AgentSession {
 		return this.settingsManager.getDefaultThinkingLevel() ?? this.thinkingLevel ?? DEFAULT_THINKING_LEVEL;
 	}
 
-	private _clampThinkingLevel(level: ThinkingLevel, _availableLevels: ThinkingLevel[]): ThinkingLevel {
+	private _clampThinkingLevel(level: ThinkingLevel): ThinkingLevel {
 		return this.model ? (clampThinkingLevel(this.model, level) as ThinkingLevel) : "off";
 	}
 

@@ -7,7 +7,6 @@ import { spawnSync } from "node:child_process";
 import { parseArgs as parseNodeArgs } from "node:util";
 
 const packages = [
-	{ directory: "packages/telemetry", name: "theoses-telemetry" },
 	{ directory: "packages/ai", name: "theoses-ai" },
 	{ directory: "packages/tui", name: "theoses-tui" },
 	{ directory: "packages/agent", name: "theoses-agent-core" },

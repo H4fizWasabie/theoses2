@@ -72,7 +72,6 @@ runtime_packages=(
     protocol
     server
     telegram
-    telemetry
     tui
 )
 

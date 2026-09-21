@@ -235,8 +235,6 @@ async function runBuild(bundle) {
 				"--workspace",
 				"packages/tui",
 				"--workspace",
-				"packages/telemetry",
-				"--workspace",
 				"packages/ai",
 				"--workspace",
 				"packages/agent",

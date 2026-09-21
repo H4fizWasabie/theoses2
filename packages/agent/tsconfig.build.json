@@ -3,7 +3,6 @@
 	"compilerOptions": {
 		"outDir": "./dist",
 		"paths": {
-			"theoses-telemetry": ["../telemetry/dist/index.d.ts"],
 			"theoses-ai": ["../ai/dist/index.d.ts"],
 			"theoses-ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"]
 		},
