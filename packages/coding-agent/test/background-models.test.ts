@@ -7,10 +7,9 @@ import { createAgentSessionServices } from "../src/core/agent-session-services.t
 import {
 	type BackgroundModelConfig,
 	type ResolvedBackgroundModelSetting,
+	resolveBackgroundModel,
 	resolveBackgroundModelSetting,
 } from "../src/core/background-models.ts";
-import { resolveExplorerModel } from "../src/core/explorer.ts";
-import { resolveConsolidationModel } from "../src/core/memory-consolidation.ts";
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
 import { DefaultResourceLoader } from "../src/core/resource-loader.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
@@ -92,7 +91,7 @@ describe("background model resolvers honour backgroundModels overrides", () => {
 			},
 		});
 
-		const model = resolveConsolidationModel(runtime);
+		const model = resolveBackgroundModel(runtime, "consolidation");
 
 		expect(getModel).toHaveBeenCalledWith("openrouter", "deepseek/deepseek-v4-flash-0731");
 		expect(routingOf(model)).toMatchObject({
@@ -105,7 +104,7 @@ describe("background model resolvers honour backgroundModels overrides", () => {
 	it("an empty quantizations list leaves the filter out of the routing", () => {
 		const { runtime } = runtimeWith({ explorer: { quantizations: [] } });
 
-		const model = resolveExplorerModel(runtime);
+		const model = resolveBackgroundModel(runtime, "explorer");
 
 		expect(routingOf(model)).not.toHaveProperty("quantizations");
 		expect(routingOf(model)).toMatchObject({ order: ["Baidu", "DeepInfra"], allow_fallbacks: false });
@@ -114,8 +113,8 @@ describe("background model resolvers honour backgroundModels overrides", () => {
 	it("the explorer and consolidation are configured independently", () => {
 		const { runtime, getModel } = runtimeWith({ explorer: { model: "vendor/explorer-only" } });
 
-		resolveExplorerModel(runtime);
-		resolveConsolidationModel(runtime);
+		resolveBackgroundModel(runtime, "explorer");
+		resolveBackgroundModel(runtime, "consolidation");
 
 		expect(getModel).toHaveBeenNthCalledWith(1, "openrouter", "vendor/explorer-only");
 		expect(getModel).toHaveBeenNthCalledWith(2, "openrouter", "deepseek/deepseek-v4-flash-0731");
@@ -124,7 +123,9 @@ describe("background model resolvers honour backgroundModels overrides", () => {
 	it("a malformed setting fails the resolve instead of silently using the default", () => {
 		const { runtime } = runtimeWith({ consolidation: { providers: [] } });
 
-		expect(() => resolveConsolidationModel(runtime)).toThrow(/backgroundModels\.consolidation\.providers/);
+		expect(() => resolveBackgroundModel(runtime, "consolidation")).toThrow(
+			/backgroundModels\.consolidation\.providers/,
+		);
 	});
 });
 

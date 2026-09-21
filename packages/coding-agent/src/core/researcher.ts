@@ -18,7 +18,7 @@ import { Agent, type AgentEvent, type AgentMessage } from "theoses-agent-core";
 import type { Api, Model, ModelsRequestTransforms, ProviderHeaders, SimpleStreamOptions } from "theoses-ai";
 import { type Static, Type } from "typebox";
 import { getAgentDir } from "../config.ts";
-import { type ResolvedBackgroundModelSetting, resolveBackgroundModelSetting } from "./background-models.ts";
+import { resolveBackgroundModel } from "./background-models.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { wrapToolDefinition } from "./tools/tool-definition-wrapper.ts";
@@ -36,43 +36,6 @@ export const RESEARCH_CAPS = {
 
 /** Chars of the report delivered into context; the full report is always written to a file. */
 const DELIVERED_REPORT_CHARS = 6000;
-
-/** Same model and fp8/fail-strict routing as the explorer until real reports show it is too weak. */
-const RESEARCH_DEFAULTS: ResolvedBackgroundModelSetting = {
-	model: "deepseek/deepseek-v4-flash-0731",
-	providers: ["Baidu", "DeepInfra"],
-	quantizations: ["fp8"],
-};
-
-export function resolveResearchModel(modelRuntime: ModelRuntime): Model<Api> {
-	const setting = resolveBackgroundModelSetting(
-		"research",
-		RESEARCH_DEFAULTS,
-		modelRuntime.getBackgroundModelSetting?.("research"),
-	);
-	const model = modelRuntime.getModel("openrouter", setting.model);
-	if (!model) {
-		throw new Error(
-			`Research model ${setting.model} not found in the OpenRouter catalog. ` +
-				"Ensure the model catalog is hydrated and OpenRouter is a configured provider.",
-		);
-	}
-	return {
-		...model,
-		// Reports run longer than explorer answers, but a huge maxTokens still makes fp8 pool providers
-		// reject with queue_timeout (see the explorer's resolver).
-		maxTokens: 16000,
-		compat: {
-			...(model as Model<"openai-completions">).compat,
-			openRouterRouting: {
-				...(model as Model<"openai-completions">).compat?.openRouterRouting,
-				order: setting.providers,
-				...(setting.quantizations.length > 0 ? { quantizations: setting.quantizations } : {}),
-				allow_fallbacks: false,
-			},
-		},
-	} as Model<Api>;
-}
 
 const RESEARCH_SYSTEM_PROMPT = `You are Theoses's background research agent: an isolated agent that answers ONE research question from the web, then returns a written report.
 
@@ -137,7 +100,7 @@ export interface RunResearchOptions {
 }
 
 export async function runResearch(options: RunResearchOptions): Promise<ResearchResult> {
-	const model = resolveResearchModel(options.modelRuntime);
+	const model = resolveBackgroundModel(options.modelRuntime, "research");
 	const budget = { used: 0 };
 	const tools = [createWebSearchToolDefinition(), createWebExtractToolDefinition()].map((tool) =>
 		wrapToolDefinition(withCallBudget(tool, budget)),

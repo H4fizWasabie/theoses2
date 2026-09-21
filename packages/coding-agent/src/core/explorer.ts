@@ -21,7 +21,7 @@
 import { Agent, type AgentEvent, type AgentMessage } from "theoses-agent-core";
 import type { Api, Model, ModelsRequestTransforms, ProviderHeaders, SimpleStreamOptions } from "theoses-ai";
 import { type Static, Type } from "typebox";
-import { type ResolvedBackgroundModelSetting, resolveBackgroundModelSetting } from "./background-models.ts";
+import { resolveBackgroundModel } from "./background-models.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { createFindToolDefinition } from "./tools/find.ts";
@@ -29,17 +29,6 @@ import { createGrepToolDefinition } from "./tools/grep.ts";
 import { createLsToolDefinition } from "./tools/ls.ts";
 import { createReadToolDefinition } from "./tools/read.ts";
 import { wrapToolDefinition } from "./tools/tool-definition-wrapper.ts";
-
-/**
- * Defaults, overridable through `backgroundModels.explorer` in settings.json. The same paid DeepSeek V4 Flash
- * 0731 at fp8 that memory consolidation uses, Baidu first and DeepInfra as the only fallback. The free `:free`
- * variant this used to default to was withdrawn by OpenRouter on 2026-09-20.
- */
-const EXPLORER_DEFAULTS: ResolvedBackgroundModelSetting = {
-	model: "deepseek/deepseek-v4-flash-0731",
-	providers: ["Baidu", "DeepInfra"],
-	quantizations: ["fp8"],
-};
 
 export const MAX_CONCURRENT_EXPLORERS = 3;
 
@@ -105,53 +94,6 @@ export function resetExplorerConcurrencyForTests(): void {
 // ---------------------------------------------------------------------------
 // Model resolution
 // ---------------------------------------------------------------------------
-
-/**
- * Resolves the explorer model from the live-hydrated OpenRouter catalog. Same model id and
- * fp8/fail-strict shape as memory consolidation (see memory-consolidation.ts). #254 pinned
- * OpenInference first for its per-provider KV-cache hit rate; that only worked for the free variant,
- * which no longer exists, so the default is now Baidu then DeepInfra like consolidation.
- *
- * Provider slugs verified against the live OpenRouter endpoints listing (same method as the
- * "Baidu"/"AkashML" slug lessons from issues #180/#190: marketing labels on the pricing page
- * don't always match the API's `provider_name`): "Baidu" (not "Baidu Qianfan", which matches no
- * endpoint) and "DeepInfra".
- *
- * Kept as a separate resolver rather than reusing `resolveConsolidationModel` so consolidation's
- * maxTokens/output-shape tuning (single JSON object) stays independent from the explorer's
- * agentic multi-turn shape.
- */
-export function resolveExplorerModel(modelRuntime: ModelRuntime): Model<Api> {
-	const setting = resolveBackgroundModelSetting(
-		"explorer",
-		EXPLORER_DEFAULTS,
-		modelRuntime.getBackgroundModelSetting?.("explorer"),
-	);
-	const model = modelRuntime.getModel("openrouter", setting.model);
-	if (!model) {
-		throw new Error(
-			`Explorer model ${setting.model} not found in the OpenRouter catalog. ` +
-				"Ensure the model catalog is hydrated and OpenRouter is a configured provider.",
-		);
-	}
-	return {
-		...model,
-		// Same shared-capacity-pool failure shape as consolidation (see its comment): a huge
-		// default maxTokens makes fp8 pool providers reject with queue_timeout. The explorer
-		// returns ≤2K-token answers but may draft internally; 8K is headroom, not a real cap.
-		maxTokens: 8000,
-		compat: {
-			...(model as Model<"openai-completions">).compat,
-			openRouterRouting: {
-				...(model as Model<"openai-completions">).compat?.openRouterRouting,
-				// The free variant has a single endpoint; BaseTen and GMICloud only serve the paid one.
-				order: setting.providers,
-				...(setting.quantizations.length > 0 ? { quantizations: setting.quantizations } : {}),
-				allow_fallbacks: false,
-			},
-		},
-	} as Model<Api>;
-}
 
 // ---------------------------------------------------------------------------
 // System prompt — the output contract
@@ -240,7 +182,7 @@ export interface RunExplorerOptions {
 export async function runExplorer(options: RunExplorerOptions): Promise<ExplorerResult> {
 	const tier = (options.tier ?? "quick-scan") as ExplorerTier;
 	const caps = TIER_CAPS[tier];
-	const model = resolveExplorerModel(options.modelRuntime);
+	const model = resolveBackgroundModel(options.modelRuntime, "explorer");
 
 	const release = await explorerSlots.acquire();
 	try {
