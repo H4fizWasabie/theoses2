@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- refactor: moved byte-identical private copies of `resolveCacheRetention`, `hasHeader`, `getServiceTierCostMultiplier`, `applyServiceTierPricing`, `parseAuthorizationInput` and `safeJsonStringify` into one home each.
+
 ## [1.0.74] - 2026-09-21
 
 - breaking: `ProviderRequestOptions.telemetryContext` and the `theoses-telemetry` dependency are removed. Nothing in the repository emitted spans through it.

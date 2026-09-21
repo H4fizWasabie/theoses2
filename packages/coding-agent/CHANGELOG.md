@@ -4,6 +4,16 @@
 
 - feat: added an asynchronous `research` tool. It starts a background deep-research job (Tavily search and extract driven by an OpenRouter model, configurable under `backgroundModels.research`, defaulting to the explorer's model) and returns at once; the cited report arrives later as a follow-up message and is saved under `~/.theoses/agent/research/`. Each job is capped at 20 turns, 600K input tokens, 15 Tavily calls and 10 minutes, with at most 2 running and 5 started per session.
 
+- refactor: Telegram and the dashboard now trigger post-turn memory consolidation and task-boundary detection through one `settleTurn(session, userText)` (the Turn Settlement module) instead of two hand-copied call blocks. `maybeRunConsolidation`, `maybeDetectTaskBoundary`, `findLastUserMessageEntryId` and `resolveTaskBoundaryModel` are no longer exported from `theoses-coding-agent`; use `settleTurn`. Behaviour is unchanged.
+
+- refactor: consolidation, the explorer and the research agent resolve their OpenRouter model through one `resolveBackgroundModel(source, name)` in `background-models.ts`, replacing three near-identical per-path resolvers. Defaults, routing, `maxTokens` and the `backgroundModels` settings are unchanged; task-boundary summaries still follow `backgroundModels.consolidation`.
+
+- refactor: extracted memory promotion (distilling turns dropped by compaction and marking saved entries as promoted) out of `AgentSession` into `memory-promotion.ts`, with its own tests. Behaviour is unchanged, including the coarse last-20-entries promoted range (tracked in #332).
+
+- chore: removed the unused `warnDeprecation` module.
+
+- docs: added ADR-0004 (Jev thresholds stay with the questions they were tuned against) and ADR-0005 (the compat table is the seam for OpenAI-completions provider quirks); added Turn Settlement to `CONTEXT.md`.
+
 ## [1.0.74] - 2026-09-21
 
 - chore: removed the `/arminsayshi` and `/dementedelves` slash commands and the model-triggered Daxnuts easter egg, together with the `ArminComponent` export.
