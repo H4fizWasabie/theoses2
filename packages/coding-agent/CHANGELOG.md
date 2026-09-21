@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.74] - 2026-09-21
 
 - chore: removed the `/arminsayshi` and `/dementedelves` slash commands and the model-triggered Daxnuts easter egg, together with the `ArminComponent` export.
 
