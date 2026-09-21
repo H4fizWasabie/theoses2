@@ -5,7 +5,7 @@ import type { MemoryStore } from "../src/core/memory-store.ts";
 
 const message = (text: string) => ({ role: "user", content: text }) as unknown as AgentMessage;
 
-function setup(options: { promoted?: string[]; branchLength?: number } = {}) {
+function setup(options: { promoted?: string[]; branch?: unknown[] } = {}) {
 	const saved: string[] = [];
 	const store = {
 		saveNote: vi.fn((text: string) => {
@@ -13,11 +13,11 @@ function setup(options: { promoted?: string[]; branchLength?: number } = {}) {
 			return { text };
 		}),
 	} as unknown as MemoryStore;
-	const branch = Array.from({ length: options.branchLength ?? 0 }, (_, i) => ({ id: `e${i}` }));
+	const branch = options.branch ?? [];
 	const log = {
 		isEntryPromoted: (id: string) => options.promoted?.includes(id) ?? false,
 		appendPromotedRange: vi.fn(() => "p1"),
-		getBranch: () => branch,
+		getBranch: () => branch as never,
 	};
 	return { saved, log, promotion: createMemoryPromotion(store, log) };
 }
@@ -71,24 +71,30 @@ describe("distillDropped", () => {
 });
 
 describe("recordSaved", () => {
-	it("marks at most the last 20 entries as promoted", () => {
-		const { promotion, log } = setup({ branchLength: 30 });
+	const user = (id: string) => ({ id, type: "message", message: { role: "user" } });
+	const other = (id: string) => ({ id, type: "message", message: { role: "assistant" } });
+
+	it("marks the current turn: the last user message up to the save", () => {
+		const { promotion, log } = setup({
+			branch: [other("e0"), user("e1"), other("e2"), user("e3"), other("e4"), other("e5")],
+		});
 
 		promotion.recordSaved();
 
-		expect(log.appendPromotedRange).toHaveBeenCalledWith("e10", "e29");
+		expect(log.appendPromotedRange).toHaveBeenCalledWith("e3", "e5");
 	});
 
-	it("marks a short branch from its first entry", () => {
-		const { promotion, log } = setup({ branchLength: 3 });
+	it("covers a tool-heavy turn longer than 20 entries back to its user message", () => {
+		const branch = [user("u"), ...Array.from({ length: 30 }, (_, i) => other(`t${i}`))];
+		const { promotion, log } = setup({ branch });
 
 		promotion.recordSaved();
 
-		expect(log.appendPromotedRange).toHaveBeenCalledWith("e0", "e2");
+		expect(log.appendPromotedRange).toHaveBeenCalledWith("u", "t29");
 	});
 
-	it("does nothing on an empty branch", () => {
-		const { promotion, log } = setup();
+	it("does nothing when the branch has no user message", () => {
+		const { promotion, log } = setup({ branch: [other("e0")] });
 
 		promotion.recordSaved();
 
