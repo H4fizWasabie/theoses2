@@ -38,11 +38,13 @@ function assistant(text: string): AssistantMessage {
 	};
 }
 
-function fakeRuntime(text: string): ModelRuntime {
+/** Answers with each text in turn (the last one repeats), so a test can script narration then a report. */
+function fakeRuntime(...texts: string[]): ModelRuntime {
+	let call = 0;
 	return {
 		getModel: () => getModel("anthropic", "claude-sonnet-4-5")!,
 		streamSimple: () => {
-			const message = assistant(text);
+			const message = assistant(texts[Math.min(call++, texts.length - 1)]);
 			const stream = new MockStream();
 			queueMicrotask(() => {
 				stream.push({ type: "start", partial: message });
@@ -77,30 +79,42 @@ describe("researcher", () => {
 		expect(result.report).toContain("https://a.example");
 	});
 
-	it("returns at once, then delivers the report and saves it to a file", async () => {
-		const jobs = new ResearchJobs();
-		let deliver!: (text: string) => void;
-		const delivered = new Promise<string>((resolve) => {
-			deliver = resolve;
+	it("asks for the final report when the model ends on narration, not a report", async () => {
+		const result = await runResearch({
+			question: "q",
+			modelRuntime: fakeRuntime(
+				"I have substantial information. Let me extract a few pages.",
+				"Summary\nThe real answer",
+			),
 		});
-		const tool = createResearchToolDefinition({
-			modelRuntime: fakeRuntime("Summary\nAnswer"),
-			jobs,
-			deliver: async (text) => deliver(text),
-		});
-		const started = await tool.execute("id", { question: "what is x?" }, undefined, undefined, undefined as never);
-		expect(JSON.stringify(started.content)).toContain("started");
-		expect(jobs.running).toBe(1);
+		expect(result.complete).toBe(true);
+		expect(result.report).toContain("The real answer");
+		expect(result.turnsUsed).toBe(2);
+	});
 
-		const text = await delivered;
+	it("marks the job incomplete when the model still writes no report", async () => {
+		const result = await runResearch({
+			question: "q",
+			modelRuntime: fakeRuntime("Let me look at a few more pages."),
+		});
+		expect(result.complete).toBe(false);
+		expect(result.report).toContain("INCOMPLETE");
+	});
+
+	it("blocks until the job finishes and returns the report, also saved to a file", async () => {
+		const jobs = new ResearchJobs();
+		const tool = createResearchToolDefinition({ modelRuntime: fakeRuntime("Summary\nAnswer"), jobs });
+		const result = await tool.execute("id", { question: "what is x?" }, undefined, undefined, undefined as never);
+		const text = JSON.stringify(result.content);
 		expect(text).toContain("Research job r1 finished");
 		expect(text).toContain("Answer");
+		expect(jobs.running).toBe(0);
 		expect(readdirSync(join(dir, "research"))).toHaveLength(1);
 	});
 
 	it("refuses beyond the concurrency and per-session limits", async () => {
 		const jobs = new ResearchJobs();
-		const tool = createResearchToolDefinition({ modelRuntime: fakeRuntime("x"), jobs, deliver: async () => {} });
+		const tool = createResearchToolDefinition({ modelRuntime: fakeRuntime("x"), jobs });
 		const run = () => tool.execute("id", { question: "q" }, undefined, undefined, undefined as never);
 
 		jobs.running = RESEARCH_CAPS.maxConcurrent;
