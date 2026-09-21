@@ -16,3 +16,12 @@ export function providerHeadersToRecord(headers: ProviderHeaders | undefined): R
 	}
 	return Object.keys(result).length > 0 ? result : undefined;
 }
+
+export function hasHeader(headers: ProviderHeaders | undefined, name: string): boolean {
+	if (!headers) return false;
+	const expected = name.toLowerCase();
+	for (const [key, value] of Object.entries(headers)) {
+		if (key.toLowerCase() === expected && value !== null && value.trim().length > 0) return true;
+	}
+	return false;
+}

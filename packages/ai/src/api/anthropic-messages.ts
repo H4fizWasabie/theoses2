@@ -31,10 +31,10 @@ import type {
 } from "../types.ts";
 import { splitDeferredTools } from "../utils/deferred-tools.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
-import { headersToRecord } from "../utils/headers.ts";
+import { hasHeader, headersToRecord } from "../utils/headers.ts";
 import { parseCompleteJson, parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
 import { getPiUserAgent } from "../utils/pi-user-agent.ts";
-import { getProviderEnvValue } from "../utils/provider-env.ts";
+import { resolveCacheRetention } from "../utils/provider-env.ts";
 import { retryProviderRequest } from "../utils/provider-retry.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 
@@ -47,16 +47,6 @@ import { transformMessages } from "./transform-messages.ts";
  * Resolve cache retention preference.
  * Defaults to "short" and uses THEOSES_CACHE_RETENTION for backward compatibility.
  */
-function resolveCacheRetention(cacheRetention?: CacheRetention, env?: ProviderEnv): CacheRetention {
-	if (cacheRetention) {
-		return cacheRetention;
-	}
-	if (getProviderEnvValue("THEOSES_CACHE_RETENTION", env) === "long") {
-		return "long";
-	}
-	return "short";
-}
-
 function getCacheControl(
 	model: Model<"anthropic-messages">,
 	cacheRetention?: CacheRetention,
@@ -283,15 +273,6 @@ function mergeHeaders(...headerSources: (ProviderHeaders | undefined)[]): Provid
 
 function mergeClientHeaders(...headerSources: (ProviderHeaders | undefined)[]): ProviderHeaders {
 	return mergeHeaders({ "User-Agent": getPiUserAgent() }, ...headerSources);
-}
-
-function hasHeader(headers: ProviderHeaders | undefined, name: string): boolean {
-	if (!headers) return false;
-	const expected = name.toLowerCase();
-	for (const [key, value] of Object.entries(headers)) {
-		if (key.toLowerCase() === expected && value !== null && value.trim().length > 0) return true;
-	}
-	return false;
 }
 
 function assertRequestAuth(provider: string, apiKey: string | undefined, headers: ProviderHeaders | undefined): void {

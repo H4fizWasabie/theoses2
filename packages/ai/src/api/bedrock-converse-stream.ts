@@ -54,7 +54,7 @@ import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { providerHeadersToRecord } from "../utils/headers.ts";
 import { parseCompleteJson, parseStreamingJson } from "../utils/json-parse.ts";
 import { resolveHttpProxyUrlForTarget } from "../utils/node-http-proxy.ts";
-import { getProviderEnvValue } from "../utils/provider-env.ts";
+import { getProviderEnvValue, resolveCacheRetention } from "../utils/provider-env.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import { getJsonSchemaToolParameters, resolveJsonSchemaStrictSampling } from "./constrained-sampling.ts";
 import {
@@ -793,16 +793,6 @@ function mapThinkingLevelToEffort(
  * Resolve cache retention preference.
  * Defaults to "short" and uses THEOSES_CACHE_RETENTION for backward compatibility.
  */
-function resolveCacheRetention(cacheRetention?: CacheRetention, env?: ProviderEnv): CacheRetention {
-	if (cacheRetention) {
-		return cacheRetention;
-	}
-	if (getProviderEnvValue("THEOSES_CACHE_RETENTION", env) === "long") {
-		return "long";
-	}
-	return "short";
-}
-
 /**
  * Check if the model is an Anthropic Claude model on Bedrock.
  * Checks both model ID and model name to support application inference profiles

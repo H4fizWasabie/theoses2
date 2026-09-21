@@ -1,4 +1,4 @@
-import type { ProviderEnv } from "../types.ts";
+import type { CacheRetention, ProviderEnv } from "../types.ts";
 
 let procEnvCache: Map<string, string> | null = null;
 
@@ -49,4 +49,14 @@ export function getProviderEnvValue(name: string, env?: ProviderEnv): string | u
 		getBunSandboxEnvValue(name) ||
 		undefined
 	);
+}
+
+export function resolveCacheRetention(cacheRetention?: CacheRetention, env?: ProviderEnv): CacheRetention {
+	if (cacheRetention) {
+		return cacheRetention;
+	}
+	if (getProviderEnvValue("THEOSES_CACHE_RETENTION", env) === "long") {
+		return "long";
+	}
+	return "short";
 }

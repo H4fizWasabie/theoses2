@@ -21,7 +21,7 @@ import { getProviderEnvValue } from "../../utils/provider-env.ts";
 import type { OAuthAuth, OAuthCredential, ProviderAuthInteraction } from "../types.ts";
 import { pollOAuthDeviceCodeFlow } from "./device-code.ts";
 import { oauthErrorHtml, oauthSuccessHtml } from "./oauth-page.ts";
-import { generatePKCE } from "./pkce.ts";
+import { generatePKCE, parseAuthorizationInput } from "./pkce.ts";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const AUTH_BASE_URL = "https://auth.openai.com";
@@ -68,36 +68,6 @@ function createState(): string {
 		throw new Error("OpenAI Codex OAuth is only available in Node.js environments");
 	}
 	return _randomBytes(16).toString("hex");
-}
-
-function parseAuthorizationInput(input: string): { code?: string; state?: string } {
-	const value = input.trim();
-	if (!value) return {};
-
-	try {
-		const url = new URL(value);
-		return {
-			code: url.searchParams.get("code") ?? undefined,
-			state: url.searchParams.get("state") ?? undefined,
-		};
-	} catch {
-		// not a URL
-	}
-
-	if (value.includes("#")) {
-		const [code, state] = value.split("#", 2);
-		return { code, state };
-	}
-
-	if (value.includes("code=")) {
-		const params = new URLSearchParams(value);
-		return {
-			code: params.get("code") ?? undefined,
-			state: params.get("state") ?? undefined,
-		};
-	}
-
-	return { code: value };
 }
 
 function decodeJwt(token: string): JwtPayload | null {
