@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- chore: removed the `/arminsayshi` and `/dementedelves` slash commands and the model-triggered Daxnuts easter egg, together with the `ArminComponent` export.
+
+- chore: trimmed the bundled examples. Removed the snake, space-invaders, tic-tac-toe, doom-overlay, pirate, rainbow-editor, overlay-qa-tests, overlay-test, working-message-test, titlebar-spinner and mac-system-theme extensions, and the gondolin, sandbox and custom-provider-gitlab-duo example packages. The Gondolin section of `docs/containerization.md` is gone with them.
+
+- chore: dropped the unused `hosted-git-info` and `semver` dependencies and the root `@anthropic-ai/sandbox-runtime` dev dependency, so installs pull about 25 fewer packages.
+
 ## [1.0.73] - 2026-09-20
 
 - feat: the Telegram bot logs one journal line per finished tool call: `[tool] procura_search ok 412ms`, or `[tool] social_metrics_sync error 88ms: <first 200 characters of the error>`. Extensions catch their own failures and return them as ordinary tool-result text, so the model and the user saw them but the journal never did (three days of production journal held no tool or extension line). One line here covers every extension without editing any of them. Journal only; nothing is added to the request, so prompt caching is unaffected.

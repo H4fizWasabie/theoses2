@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- breaking: `ProviderRequestOptions.telemetryContext` and the `theoses-telemetry` dependency are removed. Nothing in the repository emitted spans through it.
+
 ## [1.0.73] - 2026-09-20
 
 ## [1.0.72] - 2026-09-20
