@@ -112,6 +112,7 @@ import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
+import { createResearchToolDefinition, ResearchJobs } from "./researcher.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import { logServedProvider } from "./served-provider-log.ts";
 import { exportSessionToJsonl } from "./session-export.ts";
@@ -375,6 +376,8 @@ export class AgentSession {
 	private _followUpMessages: string[] = [];
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
+	/** Background research job accounting; outlives runtime rebuilds so the per-session limits hold. */
+	private _researchJobs = new ResearchJobs();
 
 	// Compaction state
 	private _compactionAbortController: AbortController | undefined = undefined;
@@ -940,6 +943,7 @@ export class AgentSession {
 			this.abortCompaction();
 			this.abortBranchSummary();
 			this.abortBash();
+			this._researchJobs.abortAll();
 			this.agent.abort();
 		} catch {
 			// Dispose must succeed even if an abort hook throws.
@@ -3040,6 +3044,36 @@ export class AgentSession {
 			},
 		});
 
+		// Same reason as `explore` above for living here rather than in tools/index.ts. Provider hooks
+		// are wired like the explorer's so cost-watch sees research traffic under its own model.
+		(baseToolDefinitions as Record<string, ToolDefinition<any>>).research = createResearchToolDefinition({
+			modelRuntime: this._modelRuntime,
+			jobs: this._researchJobs,
+			deliver: (text) =>
+				this.sendCustomMessage(
+					{ customType: "research_result", content: text, display: true, details: undefined },
+					{ triggerTurn: true, deliverAs: "followUp" },
+				),
+			onPayload: async (payload, model) => {
+				const runner = this._extensionRunner;
+				return runner?.hasHandlers("before_provider_request")
+					? runner.emitBeforeProviderRequest(payload, model)
+					: payload;
+			},
+			onResponse: async (response, model) => {
+				const runner = this._extensionRunner;
+				if (runner?.hasHandlers("after_provider_response")) {
+					await runner.emitAfterProviderResponse({ status: response.status, headers: response.headers }, model);
+				}
+			},
+			transformHeaders: async (requestHeaders, model) => {
+				const runner = this._extensionRunner;
+				return runner?.hasHandlers("before_provider_headers")
+					? runner.emitBeforeProviderHeaders(requestHeaders ?? {}, model)
+					: (requestHeaders ?? {});
+			},
+		});
+
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
@@ -3080,6 +3114,7 @@ export class AgentSession {
 					"web_search",
 					"generate_image",
 					"explore",
+					"research",
 				];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({

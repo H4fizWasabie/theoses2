@@ -38,32 +38,65 @@ export interface WebSearchOperations {
 
 const TAVILY_ENDPOINT = "https://api.tavily.com/search";
 
-async function tavilySearch(apiKey: string, query: string, signal?: AbortSignal): Promise<TavilyResponse> {
-	const response = await fetch(TAVILY_ENDPOINT, {
-		method: "POST",
-		headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-		body: JSON.stringify({ query, max_results: 5 }),
-		signal,
-	});
-	if (!response.ok) {
-		throw new Error(`Tavily request failed: ${response.status} ${response.statusText}`);
-	}
-	return (await response.json()) as TavilyResponse;
-}
+const TAVILY_EXTRACT_ENDPOINT = "https://api.tavily.com/extract";
 
 /** Tries each key in order, falling back to the next on failure (rate limit, exhausted credits, outage). */
+async function tavilyPost<T>(apiKeys: string[], endpoint: string, body: object, signal?: AbortSignal): Promise<T> {
+	let lastError: unknown;
+	for (const apiKey of apiKeys) {
+		try {
+			const response = await fetch(endpoint, {
+				method: "POST",
+				headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+				body: JSON.stringify(body),
+				signal,
+			});
+			if (!response.ok) {
+				throw new Error(`Tavily request failed: ${response.status} ${response.statusText}`);
+			}
+			return (await response.json()) as T;
+		} catch (error) {
+			lastError = error;
+		}
+	}
+	throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 function createTavilyOperations(apiKeys: string[]): WebSearchOperations {
 	return {
-		search: async (query, signal) => {
-			let lastError: unknown;
-			for (const apiKey of apiKeys) {
-				try {
-					return await tavilySearch(apiKey, query, signal);
-				} catch (error) {
-					lastError = error;
-				}
-			}
-			throw lastError instanceof Error ? lastError : new Error(String(lastError));
+		search: (query, signal) =>
+			tavilyPost<TavilyResponse>(apiKeys, TAVILY_ENDPOINT, { query, max_results: 5 }, signal),
+	};
+}
+
+const webExtractSchema = Type.Object({
+	url: Type.String({ description: "The page URL to read in full" }),
+});
+
+const EXTRACT_MAX_CHARS = 20_000;
+
+/** Full-page text via Tavily /extract. Not in the default tool set: only the background researcher uses it. */
+export function createWebExtractToolDefinition(options?: {
+	apiKeys?: string[];
+}): ToolDefinition<typeof webExtractSchema, undefined> {
+	const apiKeys = (options?.apiKeys ?? [process.env.TAVILY_API_KEY, process.env.TAVILY_API_KEY_2]).filter(
+		(key): key is string => !!key,
+	);
+	return {
+		name: "web_extract",
+		label: "web_extract",
+		description: "Read the full text of one web page via Tavily. Use on the most relevant search results.",
+		parameters: webExtractSchema,
+		execute: async (_id, { url }, signal): Promise<{ content: TextContent[]; details: undefined }> => {
+			if (apiKeys.length === 0) throw new Error("web_extract requires TAVILY_API_KEY to be set");
+			const response = await tavilyPost<{ results: { raw_content: string }[] }>(
+				apiKeys,
+				TAVILY_EXTRACT_ENDPOINT,
+				{ urls: [url] },
+				signal ? AbortSignal.any([signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000),
+			);
+			const text = response.results[0]?.raw_content ?? "Could not extract this page.";
+			return { content: [{ type: "text", text: text.slice(0, EXTRACT_MAX_CHARS) }], details: undefined };
 		},
 	};
 }

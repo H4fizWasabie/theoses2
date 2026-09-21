@@ -344,6 +344,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		// session (Telegram channel, CLI one-shot/print mode, SDK consumers) starts without the
 		// explorer sub-agent even though it is registered — the model sees no `explore` tool.
 		"explore",
+		"research",
 	];
 	const configuredDefaultToolNames = settingsManager.getDefaultTools();
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
