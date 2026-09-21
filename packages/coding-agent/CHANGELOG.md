@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.76] - 2026-09-21
 
 - fix: saving a durable note now marks the current turn (from the last user message up to the save) as promoted, instead of the last 20 entries. On the production Telegram session the fixed 20-entry window missed the saving turn in 35% of saves (tool-heavy turns run past 20 entries) and marked 0.66 other user messages per save as already promoted, so compaction skipped distilling them (#332).
