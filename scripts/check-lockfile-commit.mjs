@@ -48,11 +48,38 @@ function getLockfilePackageChanges() {
 }
 
 function isWorkspacePackagePath(lockPath) {
-	return lockPath.startsWith("packages/");
+	return lockPath.startsWith("packages/") && !lockPath.includes("node_modules/");
 }
 
-function hasOnlyWorkspacePackageChanges(changes) {
-	return changes.length > 0 && changes.every((change) => isWorkspacePackagePath(change.lockPath));
+const INSTALL_FLAGS = new Set(["dev", "optional", "peer", "devOptional", "extraneous"]);
+
+function withoutInstallFlags(entry) {
+	return JSON.stringify(Object.entries(entry).filter(([key]) => !INSTALL_FLAGS.has(key)));
+}
+
+// Workspace metadata, removals, and flag-only edits (same version, source, and integrity)
+// cannot bring in code that was not already locked, so they need no review.
+function isSafeChange({ lockPath, oldEntry, newEntry }) {
+	if (isWorkspacePackagePath(lockPath) || !newEntry) return true;
+	if (lockPath === "") return oldEntry !== undefined && isSafeRootChange(oldEntry, newEntry);
+	return oldEntry !== undefined && withoutInstallFlags(oldEntry) === withoutInstallFlags(newEntry);
+}
+
+const DEPENDENCY_FIELDS = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];
+
+// The root entry mirrors package.json. Dropping dependencies or workspaces is safe;
+// adding a dependency or changing its range is not.
+function isSafeRootChange(oldEntry, newEntry) {
+	const ignored = new Set(["workspaces", ...DEPENDENCY_FIELDS]);
+	const rest = (entry) => JSON.stringify(Object.entries(entry).filter(([key]) => !ignored.has(key)));
+	if (rest(oldEntry) !== rest(newEntry)) return false;
+	return DEPENDENCY_FIELDS.every((field) =>
+		Object.entries(newEntry[field] ?? {}).every(([name, range]) => oldEntry[field]?.[name] === range),
+	);
+}
+
+function hasOnlySafeChanges(changes) {
+	return changes.length > 0 && changes.every(isSafeChange);
 }
 
 function summarizeLockfileChange(changes) {
@@ -89,8 +116,8 @@ if (allowed) {
 }
 
 const changes = getLockfilePackageChanges();
-if (changes && hasOnlyWorkspacePackageChanges(changes)) {
-	console.error("package-lock.json only updates workspace package metadata; allowing commit.");
+if (changes && hasOnlySafeChanges(changes)) {
+	console.error("package-lock.json only removes packages, changes install flags, or updates workspace metadata; allowing commit.");
 	process.exit(0);
 }
 
