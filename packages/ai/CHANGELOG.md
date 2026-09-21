@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.75] - 2026-09-21
 
 - refactor: moved byte-identical private copies of `resolveCacheRetention`, `hasHeader`, `getServiceTierCostMultiplier`, `applyServiceTierPricing`, `parseAuthorizationInput` and `safeJsonStringify` into one home each.
 

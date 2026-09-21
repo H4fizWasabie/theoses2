@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.75] - 2026-09-21
 
 - feat: added an asynchronous `research` tool. It starts a background deep-research job (Tavily search and extract driven by an OpenRouter model, configurable under `backgroundModels.research`, defaulting to the explorer's model) and returns at once; the cited report arrives later as a follow-up message and is saved under `~/.theoses/agent/research/`. Each job is capped at 20 turns, 600K input tokens, 15 Tavily calls and 10 minutes, with at most 2 running and 5 started per session.
 
