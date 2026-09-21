@@ -107,6 +107,7 @@ import {
 	wrapRegisteredTools,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
+import { createMemoryPromotion, type MemoryPromotion } from "./memory-promotion.ts";
 import { FileMemoryStore } from "./memory-store.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
@@ -420,6 +421,7 @@ export class AgentSession {
 
 	private _modelRuntime: ModelRuntime;
 	private readonly _memoryStore = new FileMemoryStore();
+	private readonly _memoryPromotion: MemoryPromotion;
 
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
@@ -436,6 +438,7 @@ export class AgentSession {
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
+		this._memoryPromotion = createMemoryPromotion(this._memoryStore, this.sessionManager);
 		this.settingsManager = config.settingsManager;
 		this._scopedModels = config.scopedModels ?? [];
 		this._resourceLoader = config.resourceLoader;
@@ -2012,31 +2015,21 @@ export class AgentSession {
 		signal: AbortSignal,
 		env: Record<string, string> | undefined,
 	): void {
-		const unpromotedMessages = messageEntryIds
-			? messages.filter((_message, index) => !this.sessionManager.isEntryPromoted(messageEntryIds[index]!))
-			: messages;
-		if (unpromotedMessages.length === 0) return;
-		void distillMemory(
-			unpromotedMessages,
-			requestModel,
-			this.settingsManager.getCompactionSettings().reserveTokens,
-			apiKey,
-			headers,
-			signal,
-			this.thinkingLevel,
-			this.agent.streamFunction,
-			env,
-			this.settingsManager.getRetrySettings(),
-			this._summarizationRetryCallbacks({ source: "compaction", reason: "manual" }),
-		)
-			.then(({ facts, episode }) => {
-				for (const fact of facts) this._memoryStore.saveNote(fact.fact);
-				if (episode) this._memoryStore.saveNote(`Episode: ${episode}`);
-			})
-			.catch((error: unknown) => {
-				console.warn("Memory distillation failed; continuing compaction.", error);
-				// Distillation is a safety net; a failed pass must not fail compaction.
-			});
+		this._memoryPromotion.distillDropped(messages, messageEntryIds, (unpromoted) =>
+			distillMemory(
+				unpromoted,
+				requestModel,
+				this.settingsManager.getCompactionSettings().reserveTokens,
+				apiKey,
+				headers,
+				signal,
+				this.thinkingLevel,
+				this.agent.streamFunction,
+				env,
+				this.settingsManager.getRetrySettings(),
+				this._summarizationRetryCallbacks({ source: "compaction", reason: "manual" }),
+			),
+		);
 	}
 
 	/**
@@ -2995,13 +2988,7 @@ export class AgentSession {
 					workingNote: (note) => this.sessionManager.appendWorkingNote(note),
 					workingNoteClear: () => this.sessionManager.clearWorkingNote(),
 					memory: this._memoryStore,
-					onMemorySaved: () => {
-						const entries = this.sessionManager.getBranch();
-						// ponytail: coarse last-20 range; replace with exact source attribution when tool context exposes it.
-						const first = entries[Math.max(0, entries.length - 20)];
-						const last = entries[entries.length - 1];
-						if (first && last) this.sessionManager.appendPromotedRange(first.id, last.id);
-					},
+					onMemorySaved: () => this._memoryPromotion.recordSaved(),
 				});
 
 		// Explorer sub-agent tool (issue #254). Merged into the base definitions here rather than
