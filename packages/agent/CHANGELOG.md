@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.74] - 2026-09-21
 
 - breaking: the `theoses-telemetry` package is removed, so `theoses-agent-core` no longer re-exports the telemetry types and helpers (`TelemetryContext`, `defineTelemetrySchema`, `InMemoryTelemetryContext`, `NOOP_TELEMETRY_CONTEXT` and related). Also dropped the unused `diff`, `ignore` and `yaml` dependencies and the telemetry docs generator.
