@@ -416,3 +416,41 @@ describe("parseModelCommand", () => {
 		expect(parseModelCommand("/model   z-ai/glm-5.3-flash  ")).toBe("z-ai/glm-5.3-flash");
 	});
 });
+
+describe("Telegram photo albums", () => {
+	it("handles every photo in an album as one turn, using the album caption", async () => {
+		const { bot, session, prompts } = typingHarness();
+		vi.spyOn(bot.api, "getFile").mockResolvedValue({ file_id: "f", file_unique_id: "u", file_path: "p.jpg" });
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => new Response(new Uint8Array([1, 2, 3]))),
+		);
+		const photoUpdate = (id: number, caption?: string): Update =>
+			({
+				update_id: id,
+				message: {
+					message_id: id,
+					date: 1,
+					chat: { id: 1, type: "private" },
+					from: { id: 1, is_bot: false, first_name: "Owner" },
+					media_group_id: "album-1",
+					photo: [{ file_id: `photo-${id}`, file_unique_id: `u${id}`, width: 1, height: 1 }],
+					...(caption ? { caption } : {}),
+				},
+			}) as Update;
+
+		try {
+			await bot.handleUpdate(photoUpdate(1));
+			await bot.handleUpdate(photoUpdate(2, "compare these"));
+			await bot.handleUpdate(photoUpdate(3));
+			await vi.waitFor(() => expect(session.prompt).toHaveBeenCalledTimes(1), { timeout: 3000 });
+			prompts[0]?.();
+
+			const [text, options] = session.prompt.mock.calls[0] as unknown as [string, { images: string[] }];
+			expect(text).toBe("compare these");
+			expect(options.images).toHaveLength(3);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+});
