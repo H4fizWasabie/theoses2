@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.77] - 2026-09-22
 
 - feat: Jev ("System One") calls now log their real per-call cost to `~/.theoses/agent/jev-usage.jsonl`. Jev is invoked fire-and-forget from internal detectors (memory-gate, memory-relevance, task-boundary-detector, memory-consolidation), not through the agent loop, so its cost never appeared in a session's `.jsonl` the way model usage does — it was only visible baked into OpenRouter's account-wide total.
