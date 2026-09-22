@@ -7,7 +7,15 @@
  * rather than /chat/completions — confirmed live: the plain chat-completions path either 404s
  * ("No endpoints found that support tool use") or 500s on every request shape tried, since this
  * model was never meant to be called that way.
+ *
+ * Jev calls never go through the agent loop (they're fire-and-forget from internal detectors, not
+ * tool calls), so they never land in a session .jsonl the way model usage does. Cost is instead
+ * appended to its own log (see logJevCost) so a nightly report can total it independently.
  */
+import { appendFileSync } from "node:fs";
+import { join } from "node:path";
+import { getAgentDir } from "../config.ts";
+
 const JEV_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
 const JEV_MODEL = "~typesafe/jev-latest";
 /** Default per-request ceiling. Jev answers in ~100-500ms, so anything near this is a stalled
@@ -34,6 +42,19 @@ interface JevAnswer {
 
 interface JevResponse {
 	answers?: Record<string, JevAnswer | undefined>;
+	usage?: { cost?: number };
+}
+
+const JEV_USAGE_LOG = join(getAgentDir(), "jev-usage.jsonl");
+
+/** Appends one line per Jev call so a report can total spend across all call sites without a
+ * session to attach it to. Never throws: a logging failure must not affect the caller's answer. */
+function logJevCost(cost: number, label: string | undefined): void {
+	try {
+		appendFileSync(JEV_USAGE_LOG, `${JSON.stringify({ timestamp: Date.now(), cost, label: label ?? null })}\n`);
+	} catch {
+		// Best-effort logging only.
+	}
 }
 
 /** Posts a set of named questions to the Jev decisions endpoint and returns the parsed JSON body,
@@ -66,7 +87,9 @@ async function askJev(
 			console.error(`Jev call failed ${describe()}: ${response.status} ${(await response.text()).slice(0, 200)}`);
 			return undefined;
 		}
-		return (await response.json()) as JevResponse;
+		const parsed = (await response.json()) as JevResponse;
+		if (typeof parsed.usage?.cost === "number") logJevCost(parsed.usage.cost, options.label);
+		return parsed;
 	} catch (error) {
 		console.error(`Jev call failed ${describe()}:`, error instanceof Error ? error.message : error);
 		return undefined;
