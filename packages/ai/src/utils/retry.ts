@@ -87,6 +87,13 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 
 	// gRPC based providers (e.g. NVIDIA NIM)
 	"ResourceExhausted",
+
+	// OpenRouter's generic finish_reason "error", seen when a model corrupts its
+	// own tool-call output mid-generation (garbled pseudo-XML instead of a real
+	// tool_calls block) rather than a transport-level failure (#341). Retrying
+	// re-sends the same context and asks the model again, which recovers cleanly
+	// since this is model flakiness, not a persistent state problem.
+	"finish_reason: error",
 ]);
 
 /**
