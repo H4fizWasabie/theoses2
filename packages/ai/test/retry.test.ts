@@ -68,6 +68,14 @@ describe("provider retry classification", () => {
 		).toBe(true);
 	});
 
+	it("matches OpenRouter's generic finish_reason error (e.g. a corrupted tool-call block)", () => {
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: "Provider finish_reason: error" }),
+			),
+		).toBe(true);
+	});
+
 	it("keeps provider limit errors non-retryable", () => {
 		expect(
 			isRetryableAssistantError(
