@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.78] - 2026-09-22
+
+- feat: memory consolidation now logs its real per-pass cost to `~/.theoses/agent/consolidation-usage.jsonl`. Consolidation calls the model directly (`completeSimple`, no agent session), so its cost never landed in a session `.jsonl` the way a normal turn's usage does — it was invisible to any session-log-based cost report, mirroring the Jev logging added in 1.0.77.
 
 ## [1.0.77] - 2026-09-22
 
