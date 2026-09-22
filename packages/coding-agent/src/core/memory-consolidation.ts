@@ -315,6 +315,21 @@ function edgeRelationShadowLogPath(): string {
 	);
 }
 
+/**
+ * Consolidation calls modelRuntime.completeSimple() directly rather than running a full agent
+ * session, so its cost never lands in a session .jsonl the way a normal turn's usage does — a daily
+ * cost report scanning session files misses it entirely. Logged separately here, mirroring
+ * jev-client.ts's logJevCost, so a report can total it independently.
+ */
+function logConsolidationCost(cost: number, model: string): void {
+	try {
+		const path = join(getAgentDir(), "consolidation-usage.jsonl");
+		appendFileSync(path, `${JSON.stringify({ timestamp: Date.now(), cost, model })}\n`);
+	} catch (error) {
+		console.error("Consolidation usage log write failed:", error instanceof Error ? error.message : error);
+	}
+}
+
 interface EdgeRelationShadowLogEntry {
 	timestamp: string;
 	from: string;
@@ -622,6 +637,9 @@ async function runConsolidationPass(params: {
 		CONSOLIDATION_RETRY_POLICY,
 		undefined,
 	);
+	if (typeof response.usage?.cost?.total === "number") {
+		logConsolidationCost(response.usage.cost.total, response.responseModel ?? model.id);
+	}
 
 	if (response.stopReason === "aborted") throw new Error("Consolidation pass was aborted");
 	if (response.stopReason === "error")
