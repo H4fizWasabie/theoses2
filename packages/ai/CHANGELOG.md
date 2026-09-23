@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: cap reasoning length for every OpenRouter-routed reasoning model (`thinkingFormat: "openrouter"`), not just the one that triggered it. The nested `reasoning` object now also sends `max_tokens`, from the existing `settingsManager.getThinkingBudgets()` / `settings.json` override, so the cap is adjustable without a code change. OpenRouter rejects a request that sets both `effort` and `max_tokens` together, so `effort` is dropped once a numeric budget resolves (falls back to `effort` alone otherwise).
+
 ## [1.0.82] - 2026-09-23
 
 - fix: retry when theoses's own stream-duration watchdog fires (`Stream exceeded the Ns max duration`), instead of leaving the turn to fail silently. The watchdog catches a model stuck trickling tokens for minutes without ever finishing a turn (often rambling inside its own reasoning), and its error text already said "Retry" - it just wasn't wired into `isRetryableAssistantError`.
