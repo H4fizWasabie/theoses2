@@ -949,24 +949,19 @@ function buildParams(
 		}
 	} else if (compat.thinkingFormat === "openrouter" && model.reasoning) {
 		// OpenRouter normalizes reasoning across providers via a nested reasoning object.
-		const openRouterParams = params as typeof params & {
-			reasoning?: { effort?: string; max_tokens?: number; exclude?: boolean };
-		};
+		const openRouterParams = params as typeof params & { reasoning?: { effort?: string; max_tokens?: number } };
 		if (options?.reasoningEffort) {
-			openRouterParams.reasoning = {
-				effort: model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort,
-				// Caps a model that keeps trickling reasoning tokens well past what the effort
-				// level implies (#352 incident) - thinkingBudget already reflects the
-				// minimal/low/medium/high settings.thinkingBudgets override when the caller sets
-				// one, so this is adjustable without a code change. Every OpenRouter-routed
-				// reasoning model gets this ceiling, not just the one that triggered it.
-				max_tokens: thinkingBudget,
-				// Reasoning traces get resent as context on every later turn in an agentic loop,
-				// so returning them compounds token cost turn over turn for no decision-quality
-				// benefit - the model still reasons the same either way, this just stops paying
-				// to see it. Applies to every OpenRouter-routed reasoning model.
-				exclude: true,
-			};
+			// OpenRouter rejects a request that sets both reasoning.effort and reasoning.max_tokens
+			// (400: "Only one of ... can be specified"). Prefer the numeric cap when one resolves -
+			// it caps a model that keeps trickling reasoning tokens well past what an effort label
+			// implies (#352 incident), and reflects the minimal/low/medium/high
+			// settings.thinkingBudgets override when the caller sets one, so it's adjustable
+			// without a code change. Every OpenRouter-routed reasoning model gets this ceiling,
+			// not just the one that triggered it. Falls back to effort only if no budget resolves.
+			openRouterParams.reasoning =
+				thinkingBudget !== undefined
+					? { max_tokens: thinkingBudget }
+					: { effort: model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort };
 		} else if (model.thinkingLevelMap?.off !== null) {
 			openRouterParams.reasoning = { effort: model.thinkingLevelMap?.off ?? "none" };
 		}

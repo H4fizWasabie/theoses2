@@ -47,7 +47,7 @@ type CapturedParams = {
 	thinking_budget_tokens?: number;
 	thinking?: unknown;
 	chat_template_kwargs?: Record<string, unknown>;
-	reasoning?: { effort?: string; max_tokens?: number; exclude?: boolean };
+	reasoning?: { effort?: string; max_tokens?: number };
 };
 
 function vllmModel(
@@ -219,13 +219,13 @@ describe("openai-completions thinking token budget", () => {
 		expect(params.chat_template_kwargs).toEqual({ enable_thinking: false });
 	});
 
-	describe("openrouter format (#352 follow-up: cap + hide the reasoning trace for every OpenRouter-routed model)", () => {
-		it("sends the clamped budget and hides the trace when reasoning is on", async () => {
+	describe("openrouter format (#353 follow-up: cap reasoning length for every OpenRouter-routed model)", () => {
+		it("sends max_tokens and omits effort (OpenRouter 400s if both are set)", async () => {
 			const params = await capture(openRouterModel(), {
 				reasoning: "high",
 				thinkingBudgets: { high: 12000 },
 			});
-			expect(params.reasoning).toEqual({ effort: "high", max_tokens: 12000, exclude: true });
+			expect(params.reasoning).toEqual({ max_tokens: 12000 });
 		});
 
 		it("uses settings.thinkingBudgets so the cap is adjustable without a code change", async () => {
@@ -236,7 +236,15 @@ describe("openai-completions thinking token budget", () => {
 			expect(params.reasoning?.max_tokens).toBe(3000);
 		});
 
-		it("omits max_tokens and exclude when reasoning is off", async () => {
+		it("falls back to effort alone when no budget resolves (e.g. too little room for the answer)", async () => {
+			const params = await capture(openRouterModel(), {
+				reasoning: "high",
+				maxTokens: 500,
+			});
+			expect(params.reasoning).toEqual({ effort: "high" });
+		});
+
+		it("omits max_tokens when reasoning is off", async () => {
 			const params = await capture(openRouterModel(), { reasoning: undefined });
 			expect(params.reasoning).toEqual({ effort: "none" });
 		});

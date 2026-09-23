@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-- fix: cap and hide the reasoning trace for every OpenRouter-routed reasoning model (`thinkingFormat: "openrouter"`), not just the one that triggered it. The nested `reasoning` object now also sends `max_tokens` (from the existing `settingsManager.getThinkingBudgets()` / `settings.json` override, so the cap is adjustable without a code change) and `exclude: true` (reasoning traces get resent as context on every later agentic turn, so returning them compounds token cost for no decision-quality benefit).
+- fix: cap reasoning length for every OpenRouter-routed reasoning model (`thinkingFormat: "openrouter"`), not just the one that triggered it. The nested `reasoning` object now also sends `max_tokens`, from the existing `settingsManager.getThinkingBudgets()` / `settings.json` override, so the cap is adjustable without a code change. OpenRouter rejects a request that sets both `effort` and `max_tokens` together, so `effort` is dropped once a numeric budget resolves (falls back to `effort` alone otherwise).
 
 ## [1.0.82] - 2026-09-23
 

@@ -1746,10 +1746,15 @@ describe("openai-completions tool_choice", () => {
 		).result();
 
 		const params = (payload ?? mockState.lastParams) as {
-			reasoning?: { effort?: string };
+			reasoning?: { effort?: string; max_tokens?: number };
 			reasoning_effort?: string;
 		};
-		expect(params.reasoning).toEqual({ effort: "high" });
+		// #353: every OpenRouter-routed reasoning model also gets a token cap (adjustable via
+		// settings.thinkingBudgets, defaults applied here). OpenRouter 400s if both effort and
+		// max_tokens are set, so effort is dropped once a numeric budget resolves - which it
+		// does here via DEFAULT_THINKING_BUDGETS.
+		expect(params.reasoning?.effort).toBeUndefined();
+		expect(params.reasoning?.max_tokens).toBeGreaterThan(0);
 		expect(params.reasoning_effort).toBeUndefined();
 	});
 
