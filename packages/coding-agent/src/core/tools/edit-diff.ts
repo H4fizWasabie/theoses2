@@ -250,14 +250,42 @@ function countOccurrences(content: string, oldText: string): number {
 	return fuzzyContent.split(fuzzyOldText).length - 1;
 }
 
-function getNotFoundError(path: string, editIndex: number, totalEdits: number): Error {
+/**
+ * Look for oldText's lines in content while ignoring all leading/trailing
+ * whitespace and collapsing internal runs of whitespace to a single space.
+ * This is deliberately never used to drive an actual replacement (that would
+ * risk silently reformatting indentation the model never intended to touch)
+ * - it only powers the "closest match" hint in getNotFoundError, so a
+ * whitespace-only mismatch can be fixed without a wasted Read round-trip.
+ */
+function findNearMissLine(content: string, oldText: string): number | undefined {
+	const diagKey = (line: string): string => line.trim().replace(/\s+/g, " ");
+	const contentLines = content.split("\n").map(diagKey);
+	const oldLines = oldText.split("\n").map(diagKey);
+	while (oldLines.length > 0 && oldLines[oldLines.length - 1] === "") oldLines.pop();
+	if (oldLines.length === 0) return undefined;
+
+	outer: for (let start = 0; start <= contentLines.length - oldLines.length; start++) {
+		for (let i = 0; i < oldLines.length; i++) {
+			if (contentLines[start + i] !== oldLines[i]) continue outer;
+		}
+		return start + 1;
+	}
+	return undefined;
+}
+
+function getNotFoundError(path: string, editIndex: number, totalEdits: number, nearMissLine?: number): Error {
+	const hint =
+		nearMissLine !== undefined
+			? ` Closest match found at line ${nearMissLine}, but whitespace/indentation differs - check exact spacing.`
+			: "";
 	if (totalEdits === 1) {
 		return new Error(
-			`Could not find the exact text in ${path}. The old text must match exactly including all whitespace and newlines.`,
+			`Could not find the exact text in ${path}. The old text must match exactly including all whitespace and newlines.${hint}`,
 		);
 	}
 	return new Error(
-		`Could not find edits[${editIndex}] in ${path}. The oldText must match exactly including all whitespace and newlines.`,
+		`Could not find edits[${editIndex}] in ${path}. The oldText must match exactly including all whitespace and newlines.${hint}`,
 	);
 }
 
@@ -322,7 +350,7 @@ export function applyEditsToNormalizedContent(
 		const edit = normalizedEdits[i];
 		const matchResult = fuzzyFindText(replacementBaseContent, edit.oldText);
 		if (!matchResult.found) {
-			throw getNotFoundError(path, i, normalizedEdits.length);
+			throw getNotFoundError(path, i, normalizedEdits.length, findNearMissLine(normalizedContent, edit.oldText));
 		}
 
 		const occurrences = countOccurrences(replacementBaseContent, edit.oldText);

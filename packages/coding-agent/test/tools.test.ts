@@ -1037,6 +1037,30 @@ describe("edit tool fuzzy matching", () => {
 		).rejects.toThrow(/Could not find the exact text/);
 	});
 
+	it("should hint at the closest line when oldText only differs by indentation", async () => {
+		const testFile = join(testDir, "near-miss-indent.txt");
+		writeFileSync(testFile, "function f() {\n    return {\n        a: 1,\n    };\n}\n");
+
+		await expect(
+			editTool.execute("test-fuzzy-near-miss", {
+				path: testFile,
+				edits: [{ oldText: "  return {\n      a: 1,\n  };", newText: "  return {};" }],
+			}),
+		).rejects.toThrow(/Closest match found at line 2/);
+	});
+
+	it("should not hint at a closest match when no line-level near miss exists", async () => {
+		const testFile = join(testDir, "near-miss-none.txt");
+		writeFileSync(testFile, "completely unrelated content\n");
+
+		await expect(
+			editTool.execute("test-fuzzy-no-near-miss", {
+				path: testFile,
+				edits: [{ oldText: "nothing like this exists here", newText: "replacement" }],
+			}),
+		).rejects.not.toThrow(/Closest match found/);
+	});
+
 	it("should detect duplicates after fuzzy normalization", async () => {
 		const testFile = join(testDir, "fuzzy-dups.txt");
 		// Two lines that are identical after trailing whitespace is stripped
