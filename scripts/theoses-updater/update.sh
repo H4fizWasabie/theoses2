@@ -34,6 +34,11 @@ HEALTH_CHECK_INTERVAL=3
 IDLE_BUSY_WINDOW_SECONDS=20
 IDLE_POLL_INTERVAL_SECONDS=30
 IDLE_MAX_WAIT_SECONDS=1200
+# Retry `gh release download` a few times within one invocation when a freshly
+# published release reports "no assets to download" - the GitHub API can serve an
+# empty asset list for a few seconds while read replicas converge (theoses2#350).
+ASSET_DOWNLOAD_ATTEMPTS=5
+ASSET_DOWNLOAD_RETRY_INTERVAL=3
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 notify() {
@@ -90,8 +95,32 @@ cleanup() {
 }
 trap cleanup EXIT
 
-gh release download "$latest_tag" --repo "$REPO" --dir "$workdir" \
-    --pattern "$ASSET_NAME" --pattern "SHA256SUMS"
+# Success means the command exited 0 AND both expected files actually landed in
+# the workdir, so a half-visible asset list (some patterns matched, some not) is
+# retried too. --clobber keeps a retry safe after a partial download.
+download_assets() {
+    gh release download "$latest_tag" --repo "$REPO" --dir "$workdir" --clobber \
+        --pattern "$ASSET_NAME" --pattern "SHA256SUMS" \
+        && [[ -s "${workdir}/${ASSET_NAME}" && -s "${workdir}/SHA256SUMS" ]]
+}
+
+asset_downloaded=false
+for ((attempt = 1; attempt <= ASSET_DOWNLOAD_ATTEMPTS; attempt++)); do
+    if download_assets; then
+        asset_downloaded=true
+        break
+    fi
+    if (( attempt < ASSET_DOWNLOAD_ATTEMPTS )); then
+        log "release assets not visible yet (attempt ${attempt}/${ASSET_DOWNLOAD_ATTEMPTS}), retrying in ${ASSET_DOWNLOAD_RETRY_INTERVAL}s"
+        sleep "$ASSET_DOWNLOAD_RETRY_INTERVAL"
+    fi
+done
+
+if [[ "$asset_downloaded" != true ]]; then
+    log "could not download release assets after ${ASSET_DOWNLOAD_ATTEMPTS} attempts, aborting"
+    notify "theoses update ${current_tag:-<none>} -> ${latest_tag} FAILED: could not download release assets after ${ASSET_DOWNLOAD_ATTEMPTS} attempts (possible GitHub asset-list lag). Left running on ${current_tag:-<none>}."
+    exit 1
+fi
 
 (
     cd "$workdir"
