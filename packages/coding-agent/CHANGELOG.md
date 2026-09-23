@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.83] - 2026-09-23
+
 - feat: add a `<reasoning_proportionality>` guideline to the system prompt telling the model to match reasoning depth to task complexity and stop re-litigating a decision it already settled, to reduce the odds of burning a whole reasoning budget on indecisive rambling (companion to the theoses-ai stream-duration and reasoning-cap fixes).
 
 ## [1.0.81] - 2026-09-23
