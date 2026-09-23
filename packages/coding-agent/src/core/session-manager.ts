@@ -151,6 +151,13 @@ export interface OperationFinishedEntry extends SessionEntryBase {
 	outcome: "completed" | "aborted" | "failed";
 }
 
+/**
+ * "interrupted" isn't a real OperationFinishedEntry outcome — it's synthesized by
+ * getLastOperationOutcome() when a process died mid-turn (crash, OOM kill, or a
+ * `systemctl restart` during a live task) and never got to append one at all.
+ */
+export type OperationOutcome = OperationFinishedEntry["outcome"] | "interrupted";
+
 export interface PromotedRangeEntry extends SessionEntryBase {
 	type: "promoted_range";
 	firstEntryId: string;
@@ -955,6 +962,7 @@ export class SessionManager {
 	private labelsById: Map<string, string> = new Map();
 	private labelTimestampsById: Map<string, string> = new Map();
 	private leafId: string | null = null;
+	private _loadedWithUnclosedTurn = false;
 
 	private constructor(
 		cwd: string,
@@ -1013,6 +1021,7 @@ export class SessionManager {
 			}
 
 			this._buildIndex();
+			this._loadedWithUnclosedTurn = this._computeUnclosedTurn();
 			this.flushed = true;
 		} else {
 			const explicitPath = this.sessionFile;
@@ -1021,7 +1030,17 @@ export class SessionManager {
 		}
 	}
 
+	/** Issue #246: does the branch, as loaded from disk, end with a user turn that never got an OperationFinishedEntry? */
+	private _computeUnclosedTurn(): boolean {
+		for (const entry of [...this.getBranch()].reverse()) {
+			if (entry.type === "operation_finished") return false;
+			if (entry.type === "message" && entry.message.role === "user") return true;
+		}
+		return false;
+	}
+
 	newSession(options?: NewSessionOptions): string | undefined {
+		this._loadedWithUnclosedTurn = false;
 		if (options?.id !== undefined) {
 			assertValidSessionId(options.id);
 		}
@@ -1192,7 +1211,18 @@ export class SessionManager {
 		return userTurns > WORKING_NOTE_STALE_TURNS;
 	}
 
-	getLastOperationOutcome(): OperationFinishedEntry["outcome"] | undefined {
+	/**
+	 * Issue #246: a process kill mid-turn (crash, OOM, or a `systemctl restart` during
+	 * a live task) never reaches the agent_end handler that appends an
+	 * OperationFinishedEntry, leaving the on-disk log with a user turn that has no
+	 * closing entry. `_loadedWithUnclosedTurn` is computed once, from the entries as
+	 * they existed on disk when this session file was loaded — not re-derived on every
+	 * call — so it fires exactly once for a genuinely resumed session and is immune to
+	 * a live process's own in-flight bookkeeping (queued turns, test fixtures seeding
+	 * raw entries, etc.) looking like a dangling turn.
+	 */
+	getLastOperationOutcome(): OperationOutcome | undefined {
+		if (this._loadedWithUnclosedTurn) return "interrupted";
 		for (const entry of [...this.getBranch()].reverse()) {
 			if (entry.type === "operation_finished") return entry.outcome;
 		}
@@ -1200,6 +1230,7 @@ export class SessionManager {
 	}
 
 	appendOperationFinished(outcome: OperationFinishedEntry["outcome"]): string {
+		this._loadedWithUnclosedTurn = false;
 		const entry: OperationFinishedEntry = {
 			type: "operation_finished",
 			id: generateId(this.byId),

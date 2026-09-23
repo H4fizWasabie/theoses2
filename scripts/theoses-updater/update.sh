@@ -20,10 +20,20 @@ REPO="H4fizWasabie/theoses2"
 ASSET_NAME="theoses-services-linux-x64.tar.gz"
 RELEASES_ROOT="/opt/theoses2-releases"
 ENV_FILE="/home/theoses/.theoses/agent/theoses.env"
+AGENT_DIR="/home/theoses/.theoses/agent"
 SERVICES=(theoses2-dashboard theoses2-telegram)
 KEEP_RELEASES=3
 HEALTH_CHECK_ATTEMPTS=10
 HEALTH_CHECK_INTERVAL=3
+# Idle-wait before restarting (theoses2#246): restart_and_check kills both services outright,
+# dropping any in-flight task with no resume. Session .jsonl files are written to on every
+# streamed delta, so a file modified within IDLE_BUSY_WINDOW_SECONDS is a reliable "something is
+# actively running" signal without needing a new health endpoint. IDLE_MAX_WAIT_SECONDS caps how
+# long an update can be deferred for a busy session - past that, proceed anyway rather than let a
+# stuck/never-idle session block updates forever.
+IDLE_BUSY_WINDOW_SECONDS=20
+IDLE_POLL_INTERVAL_SECONDS=30
+IDLE_MAX_WAIT_SECONDS=1200
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 notify() {
@@ -105,6 +115,33 @@ done
 rm -rf "$target_dir"
 mv "${target_dir}.tmp" "$target_dir"
 
+is_busy() {
+    [[ -d "${AGENT_DIR}/sessions" ]] || return 1
+    find "${AGENT_DIR}/sessions" -name '*.jsonl' -newermt "-${IDLE_BUSY_WINDOW_SECONDS} seconds" -print -quit 2>/dev/null | grep -q .
+}
+
+# Waits for no session file to have been written to in the last IDLE_BUSY_WINDOW_SECONDS,
+# polling every IDLE_POLL_INTERVAL_SECONDS, up to IDLE_MAX_WAIT_SECONDS total. Always returns 0
+# (proceeds with the restart either way) - this defers a disruptive restart when it easily can,
+# it does not block releases indefinitely on a session that never goes idle.
+wait_for_idle() {
+    if ! is_busy; then
+        return 0
+    fi
+    log "a session looks active (file written within ${IDLE_BUSY_WINDOW_SECONDS}s), deferring restart"
+    local waited=0
+    while is_busy && (( waited < IDLE_MAX_WAIT_SECONDS )); do
+        sleep "$IDLE_POLL_INTERVAL_SECONDS"
+        waited=$(( waited + IDLE_POLL_INTERVAL_SECONDS ))
+    done
+    if is_busy; then
+        log "still busy after ${IDLE_MAX_WAIT_SECONDS}s, proceeding with restart anyway"
+        notify "theoses update ${current_tag:-<none>} -> ${latest_tag}: a session was still active after waiting ${IDLE_MAX_WAIT_SECONDS}s, restarting anyway. Any in-flight task there was interrupted."
+    else
+        log "idle after waiting ${waited}s, proceeding"
+    fi
+}
+
 restart_and_check() {
     systemctl restart "${SERVICES[@]}"
 
@@ -124,6 +161,8 @@ restart_and_check() {
     done
     return 1
 }
+
+wait_for_idle
 
 ln -sfn "$target_dir" "${RELEASES_ROOT}/current.new"
 mv -T "${RELEASES_ROOT}/current.new" "${RELEASES_ROOT}/current"
