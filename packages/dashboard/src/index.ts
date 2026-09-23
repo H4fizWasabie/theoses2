@@ -9,6 +9,7 @@ import {
 	type AgentSessionEvent,
 	configureHttpDispatcher,
 	createAgentSession,
+	findExactModelReferenceMatch,
 	getAgentDir,
 	type SessionInfo,
 	SessionManager,
@@ -386,6 +387,16 @@ async function stopChat(info: SessionInfo): Promise<void> {
 	await record.session.abort();
 }
 
+async function changeModel(info: SessionInfo, input: unknown): Promise<{ provider: string; id: string }> {
+	if (info.channel !== DASHBOARD_CHANNEL) throw new Error("Telegram sessions are read-only");
+	const modelArg = stringField(input, "model");
+	const record = await dashboardSession(info.path);
+	const match = findExactModelReferenceMatch(modelArg, [...record.session.modelRuntime.getAvailableSnapshot()]);
+	if (!match) throw new Error(`No exact match for "${modelArg}". Use the canonical provider/id.`);
+	await record.session.setModel(match, { persist: false });
+	return { provider: match.provider, id: match.id };
+}
+
 function errorStatus(error: unknown): number {
 	if (error instanceof FileConflictError) return 409;
 	if (error instanceof Error && "code" in error) {
@@ -427,7 +438,7 @@ async function api(
 		return true;
 	}
 
-	const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)(?:\/(messages|stop))?$/);
+	const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)(?:\/(messages|stop|model))?$/);
 	if (sessionMatch) {
 		const id = decodeURIComponent(sessionMatch[1]);
 		const info = await findVisibleSession(id);
@@ -438,6 +449,10 @@ async function api(
 		if (sessionMatch[2] === "stop" && request.method === "POST") {
 			await stopChat(info);
 			json(response, 200, { ok: true });
+			return true;
+		}
+		if (sessionMatch[2] === "model" && request.method === "POST") {
+			json(response, 200, { model: await changeModel(info, await body(request)) });
 			return true;
 		}
 		if (request.method === "GET") {

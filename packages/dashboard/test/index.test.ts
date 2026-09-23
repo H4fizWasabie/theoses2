@@ -149,3 +149,27 @@ test("dashboard session runtime info is read-only and never exposes credentials"
 		await close(server);
 	}
 });
+
+test("dashboard rejects a model switch to an unknown provider/id", async () => {
+	const root = await mkdtemp(join(tmpdir(), "theoses-dashboard-model-"));
+	const server = createDashboardServer({ accessToken: "test-owner-token", cwd: root });
+	const base = await listen(server);
+	try {
+		const created = await fetch(`${base}/api/sessions`, {
+			method: "POST",
+			headers: { Authorization: "Bearer test-owner-token" },
+		});
+		const session = (await created.json()) as { id: string };
+
+		const response = await fetch(`${base}/api/sessions/${encodeURIComponent(session.id)}/model`, {
+			method: "POST",
+			headers: { Authorization: "Bearer test-owner-token", "Content-Type": "application/json" },
+			body: JSON.stringify({ model: "no-such-provider/no-such-model" }),
+		});
+		assert.equal(response.status, 400);
+		const body = (await response.json()) as { error: string };
+		assert.match(body.error, /No exact match/);
+	} finally {
+		await close(server);
+	}
+});
