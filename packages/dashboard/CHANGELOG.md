@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: added `POST /api/sessions/:id/model` so a dashboard session's model can be switched, matching Telegram's `/model` command. Previously a dashboard session was pinned to whatever model it started with for the life of the process, with no API route to change it (#249).
+
 ## [1.0.79] - 2026-09-22
 
 ## [1.0.76] - 2026-09-21
