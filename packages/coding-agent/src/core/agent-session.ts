@@ -285,6 +285,9 @@ const REPLY_CONTEXT_CAP = 2000;
 const BASH_AUTO_LOG_COMMAND_CAP = 200;
 const ABORT_NOTICE =
 	"[Abort Notice: The previous task was cancelled. Do not resume it unless the user explicitly asks you to.]";
+/** Issue #246: distinct from ABORT_NOTICE — this wasn't a deliberate stop, the process died mid-turn. */
+const INTERRUPTED_NOTICE =
+	"[Interrupted Notice: The previous task was cut off mid-turn by a restart or crash, not cancelled by the user. Tell the user their last task was interrupted before continuing, and ask whether they want it resumed rather than assuming.]";
 
 function normalizeImages(images: PromptOptions["images"]): ImageContent[] | undefined {
 	if (!images) return undefined;
@@ -1277,7 +1280,13 @@ export class AgentSession {
 				expandedText = this._expandSkillCommand(expandedText);
 				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 			}
-			const abortNotice = this.sessionManager.getLastOperationOutcome() === "aborted" ? `${ABORT_NOTICE}\n\n` : "";
+			const lastOutcome = this.sessionManager.getLastOperationOutcome();
+			const abortNotice =
+				lastOutcome === "aborted"
+					? `${ABORT_NOTICE}\n\n`
+					: lastOutcome === "interrupted"
+						? `${INTERRUPTED_NOTICE}\n\n`
+						: "";
 			const contextualText = `${abortNotice}${addReplyContext(expandedText, options?.replyContext)}${formatClockAnnotation()}`;
 
 			// If streaming, queue via steer() or followUp() based on option
