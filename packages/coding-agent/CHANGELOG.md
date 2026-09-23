@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.80] - 2026-09-23
 
 - fix: a process kill mid-turn (crash, OOM, or a `systemctl restart` while a task is in flight) left the session log with a dangling user turn and no closing record, so the next message silently continued as if nothing had happened. `SessionManager` now detects this shape on load and the harness tells the model the previous task was interrupted by a restart rather than resumed silently, asking the user before continuing (#246).
 - fix: the `edit` tool's "could not find the exact text" error now names the closest matching line when one exists (whitespace/indentation-only mismatch), so a failed edit can be corrected in the same turn instead of needing a wasted `Read` round-trip first. The hint is diagnostic only and never changes what content actually matches or gets replaced (#176).
