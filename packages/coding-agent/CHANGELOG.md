@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.80] - 2026-09-23
 
 - fix: a process kill mid-turn (crash, OOM, or a `systemctl restart` while a task is in flight) left the session log with a dangling user turn and no closing record, so the next message silently continued as if nothing had happened. `SessionManager` now detects this shape on load and the harness tells the model the previous task was interrupted by a restart rather than resumed silently, asking the user before continuing (#246).
