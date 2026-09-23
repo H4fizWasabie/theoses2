@@ -76,6 +76,19 @@ describe("provider retry classification", () => {
 		).toBe(true);
 	});
 
+	it("matches theoses's own stream-duration watchdog (a model stuck rambling without finishing)", () => {
+		expect(
+			isRetryableAssistantError(
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage:
+						"Stream exceeded the 300s max duration (provider kept sending data without finishing the " +
+						"response). Retry, or raise THEOSES_MAX_STREAM_DURATION_MS (up to 300s) if this source is just slow.",
+				}),
+			),
+		).toBe(true);
+	});
+
 	it("keeps provider limit errors non-retryable", () => {
 		expect(
 			isRetryableAssistantError(

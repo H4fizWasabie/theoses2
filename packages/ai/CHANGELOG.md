@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: retry when theoses's own stream-duration watchdog fires (`Stream exceeded the Ns max duration`), instead of leaving the turn to fail silently. The watchdog catches a model stuck trickling tokens for minutes without ever finishing a turn (often rambling inside its own reasoning), and its error text already said "Retry" - it just wasn't wired into `isRetryableAssistantError`.
+
 ## [1.0.81] - 2026-09-23
 
 ## [1.0.80] - 2026-09-23

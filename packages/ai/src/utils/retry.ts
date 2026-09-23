@@ -94,6 +94,13 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	// re-sends the same context and asks the model again, which recovers cleanly
 	// since this is model flakiness, not a persistent state problem.
 	"finish_reason: error",
+
+	// theoses's own stream-duration watchdog (openai-completions.ts), not a provider
+	// error: fires when a model keeps trickling tokens (often stuck rambling inside
+	// its own reasoning/thinking) for minutes without ever finishing the turn. Model
+	// flakiness, not a persistent state problem, and the error text itself already
+	// says "Retry" - it just wasn't wired into this classifier.
+	"stream exceeded the \\d+s max duration",
 ]);
 
 /**
