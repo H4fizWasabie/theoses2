@@ -47,6 +47,7 @@ type CapturedParams = {
 	thinking_budget_tokens?: number;
 	thinking?: unknown;
 	chat_template_kwargs?: Record<string, unknown>;
+	reasoning?: { effort?: string; max_tokens?: number; exclude?: boolean };
 };
 
 function vllmModel(
@@ -66,6 +67,24 @@ function vllmModel(
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 262144,
 		maxTokens: 16384,
+		compat,
+	};
+}
+
+function openRouterModel(
+	compat: Model<"openai-completions">["compat"] = { thinkingFormat: "openrouter" },
+): Model<"openai-completions"> {
+	return {
+		id: "xiaomi/mimo-v2.6-pro",
+		name: "Xiaomi: MiMo-V2.6-Pro",
+		api: "openai-completions",
+		provider: "openrouter",
+		baseUrl: "https://openrouter.ai/api/v1",
+		reasoning: true,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 1048576,
+		maxTokens: 131072,
 		compat,
 	};
 }
@@ -198,5 +217,28 @@ describe("openai-completions thinking token budget", () => {
 			{ reasoning: undefined },
 		);
 		expect(params.chat_template_kwargs).toEqual({ enable_thinking: false });
+	});
+
+	describe("openrouter format (#352 follow-up: cap + hide the reasoning trace for every OpenRouter-routed model)", () => {
+		it("sends the clamped budget and hides the trace when reasoning is on", async () => {
+			const params = await capture(openRouterModel(), {
+				reasoning: "high",
+				thinkingBudgets: { high: 12000 },
+			});
+			expect(params.reasoning).toEqual({ effort: "high", max_tokens: 12000, exclude: true });
+		});
+
+		it("uses settings.thinkingBudgets so the cap is adjustable without a code change", async () => {
+			const params = await capture(openRouterModel(), {
+				reasoning: "medium",
+				thinkingBudgets: { medium: 3000 },
+			});
+			expect(params.reasoning?.max_tokens).toBe(3000);
+		});
+
+		it("omits max_tokens and exclude when reasoning is off", async () => {
+			const params = await capture(openRouterModel(), { reasoning: undefined });
+			expect(params.reasoning).toEqual({ effort: "none" });
+		});
 	});
 });
