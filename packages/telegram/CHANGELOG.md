@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.88] - 2026-09-24
 
 - fix: extracted the /stop, queue and auto-resume state machine (previously ten chat-keyed Maps/Sets inline in `createTelegramBot`) into `turn-queue.ts`, a standalone, unit-testable module. Behavior-preserving - no user-visible change. Dashboard-sharing was considered and rejected: the dashboard adapter's needs (one promise-chain queue, unconditional abort) are much thinner, so a shared module would have only one real caller.
 - fix: `scheduleAutoResume` now clears a chat's prior pending auto-resume timer before scheduling a new one, matching `requestStop`'s existing pattern (issue #365). Previously only the map entry was overwritten, so an earlier timer nobody could reach anymore would still fire. Never observed in practice - the adapter always cancels any pending auto-resume before it could schedule a second one for the same chat - but no longer relies on that being the only path.

@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.88] - 2026-09-24
 
 - fix: Turn Settlement (memory consolidation, task-boundary detection) is now triggered by `AgentSession` itself when an operation finishes `completed` with no retry pending, for non-CLI Channel Sessions. Previously each channel adapter decided: Telegram settled failed turns, the dashboard settled aborted turns. `settleTurn` is no longer exported; adapters pass `PromptOptions.settlementText` when the settled text should differ from the prompt. Task-boundary detection now drops its write if the next turn started while it ran, instead of splicing entries into that turn.
 - fix: `createAgentSession` gains an `appendSystemPrompt` option, forwarded to the `DefaultResourceLoader` it builds internally. Telegram no longer constructs its own resource loader (and manually calls `reload()` on it) just to append its rich-formatting guidance - that loader was building a second, independent `SettingsManager` instance from the one the session itself uses. Also dropped a dead `convert_doc` active-tools guard; the tool has been in the default active set since the SDK's current defaults landed.
