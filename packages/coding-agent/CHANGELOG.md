@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.87] - 2026-09-24
 
 - fix: when `edit` can't find `oldText`, the error now shows the file's current lines around the closest match (with line numbers) instead of only hinting on whitespace-only mismatches. Prod session data showed most edit failures came from `oldText` quoted from before an earlier edit to the same file, which previously cost a separate re-read before the retry.
