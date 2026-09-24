@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: Turn Settlement (memory consolidation, task-boundary detection) is now triggered by `AgentSession` itself when an operation finishes `completed` with no retry pending, for non-CLI Channel Sessions. Previously each channel adapter decided: Telegram settled failed turns, the dashboard settled aborted turns. `settleTurn` is no longer exported; adapters pass `PromptOptions.settlementText` when the settled text should differ from the prompt. Task-boundary detection now drops its write if the next turn started while it ran, instead of splicing entries into that turn.
+
 ## [1.0.87] - 2026-09-24
 
 - fix: when `edit` can't find `oldText`, the error now shows the file's current lines around the closest match (with line numbers) instead of only hinting on whitespace-only mismatches. Prod session data showed most edit failures came from `oldText` quoted from before an earlier edit to the same file, which previously cost a separate re-read before the retry.

@@ -15,7 +15,7 @@ import { AuthStorage } from "../../src/core/auth-storage.ts";
 import { stripClockAnnotation } from "../../src/core/clock.ts";
 import type { ExtensionRunner } from "../../src/core/extensions/index.ts";
 import { convertToLlm } from "../../src/core/messages.ts";
-import { SessionManager } from "../../src/core/session-manager.ts";
+import { type NewSessionOptions, SessionManager } from "../../src/core/session-manager.ts";
 import type { Settings } from "../../src/core/settings-manager.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
 import type { InlineExtension, ResourceLoader } from "../../src/index.ts";
@@ -69,6 +69,8 @@ export interface HarnessOptions {
 	extensionFactories?: Array<InlineExtension | CreateTestExtensionsResultInput>;
 	withConfiguredAuth?: boolean;
 	modelsJson?: Record<string, unknown>;
+	/** e.g. a channel header, to make the session a Channel Session. */
+	sessionOptions?: NewSessionOptions;
 }
 
 export interface Harness {
@@ -106,7 +108,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 	const withConfiguredAuth = options.withConfiguredAuth ?? true;
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};
 
-	const sessionManager = SessionManager.inMemory();
+	const sessionManager = SessionManager.inMemory(undefined, options.sessionOptions);
 	const settingsManager = SettingsManager.inMemory(options.settings);
 
 	const authStorage = AuthStorage.inMemory();

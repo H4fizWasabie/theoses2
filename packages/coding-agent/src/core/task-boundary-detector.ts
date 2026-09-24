@@ -347,6 +347,7 @@ async function runDetection(options: MaybeDetectTaskBoundaryOptions): Promise<vo
 
 	try {
 		const branch = mainSessionManager.getBranch();
+		const leafAtStart = mainSessionManager.getLeafId();
 		const currentDescriptor = getTaskDescriptor(branch);
 
 		const previousReply = findPreviousAssistantText(branch, userMessageEntryId);
@@ -382,6 +383,9 @@ async function runDetection(options: MaybeDetectTaskBoundaryOptions): Promise<vo
 			key,
 		);
 		if (!summary) return; // failure: write nothing, retried naturally next turn
+		// The next turn started while the model calls ran: appending now would splice these entries into
+		// the middle of that turn. Drop them, like a failure; the next turn's detection redoes the work.
+		if (mainSessionManager.getLeafId() !== leafAtStart) return;
 
 		mainSessionManager.appendCustomEntry(TASK_DESCRIPTOR_CUSTOM_TYPE, {
 			summary,

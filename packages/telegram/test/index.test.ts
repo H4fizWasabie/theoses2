@@ -8,7 +8,6 @@ vi.mock("theoses-coding-agent", () => ({
 		open: vi.fn(),
 	},
 	createAgentSession: vi.fn(),
-	settleTurn: vi.fn(),
 	configureHttpDispatcher: vi.fn(),
 	findExactModelReferenceMatch: vi.fn(),
 	getAgentDir: vi.fn(() => "/tmp/telegram-test-agent-dir"),
@@ -164,7 +163,7 @@ function typingHarness(options: { sessionGate?: Promise<void> } = {}) {
 	const session = {
 		isStreaming: false,
 		prompt: vi.fn(
-			(_text: string) =>
+			(_text: string, _options?: unknown) =>
 				new Promise<void>((resolve) => {
 					prompts.push(resolve);
 				}),
@@ -224,6 +223,8 @@ describe("Telegram typing indicator", () => {
 
 			openGate();
 			await vi.advanceTimersByTimeAsync(0);
+			// Turn Settlement is the session's job now; the adapter only supplies the owner's own text.
+			expect(session.prompt).toHaveBeenCalledWith("hello", expect.objectContaining({ settlementText: "hello" }));
 			prompts[0]?.();
 			await vi.advanceTimersByTimeAsync(0);
 		} finally {

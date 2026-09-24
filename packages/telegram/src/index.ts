@@ -12,7 +12,6 @@ import {
 	getAgentDir,
 	type SessionInfo,
 	SessionManager,
-	settleTurn,
 } from "theoses-coding-agent";
 import { chunkHtml, formatTelegramHtml, renderToolCallBlocks, splitSections, type ToolCallEntry } from "./format.ts";
 import { createToolCallLogger } from "./tool-call-log.ts";
@@ -804,6 +803,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 					replyContext: replyText(ctx),
 					images: images.length ? images : undefined,
 					source: "extension",
+					settlementText: messageText(ctx),
 				});
 			} finally {
 				unsubscribe();
@@ -860,8 +860,6 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			} else if (generatedImages.length === 1) {
 				await bot.api.sendPhoto(ctx.chat.id, new InputFile(generatedImages[0]));
 			}
-
-			settleTurn(session, messageText(ctx));
 
 			if (autoResume) {
 				// Re-enters through handleUpdate so the resume gets the normal queue, typing, status,

@@ -1,6 +1,16 @@
 import type { AgentMessage } from "theoses-agent-core";
-import { describe, expect, it } from "vitest";
-import type { CustomEntry, SessionEntry, SessionMessageEntry } from "../src/core/session-manager.ts";
+import type { AssistantMessage } from "theoses-ai";
+import { describe, expect, it, vi } from "vitest";
+import type { ModelRuntime } from "../src/core/model-runtime.ts";
+import {
+	type CustomEntry,
+	type SessionEntry,
+	SessionManager,
+	type SessionMessageEntry,
+} from "../src/core/session-manager.ts";
+
+vi.mock("../src/core/background-models.ts", () => ({ resolveBackgroundModel: () => ({ maxTokens: 100 }) }));
+
 import {
 	combineRelatedSignals,
 	findLastUserMessageEntryId,
@@ -9,6 +19,7 @@ import {
 	getTaskDescriptor,
 	isMetaSummary,
 	isTerseFollowUp,
+	maybeDetectTaskBoundary,
 	TASK_BOUNDARY_CUSTOM_TYPE,
 	TASK_DESCRIPTOR_CUSTOM_TYPE,
 	type TaskBoundaryData,
@@ -211,5 +222,61 @@ describe("combineRelatedSignals", () => {
 
 	it("ignores a topic-switch signal below the veto", () => {
 		expect(combineRelatedSignals({ continuesTask: 0.3, reactsToReply: 0.4, topicSwitch: 0.59 })).toBe(0.4);
+	});
+});
+
+describe("maybeDetectTaskBoundary", () => {
+	// A terse reply to a question takes the deterministic path (no Jev call); only the summary model runs.
+	function setup() {
+		const manager = SessionManager.inMemory("/tmp/task-boundary-test", {
+			channel: "telegram",
+			channelSessionId: "1",
+		});
+		manager.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "Want me to fix the auth bug?" }],
+			timestamp: Date.now(),
+		} as AssistantMessage);
+		const userEntryId = manager.appendMessage({ role: "user", content: "yes", timestamp: Date.now() });
+		let answer: (summary: string) => void = () => {};
+		const reply = new Promise<AssistantMessage>((resolve) => {
+			answer = (summary) =>
+				resolve({
+					role: "assistant",
+					content: [{ type: "text", text: summary }],
+					stopReason: "stop",
+				} as AssistantMessage);
+		});
+		const modelRuntime = { completeSimple: vi.fn(() => reply) } as unknown as ModelRuntime;
+		maybeDetectTaskBoundary({
+			channel: "telegram",
+			channelSessionId: "1",
+			userMessageText: "yes",
+			userMessageEntryId: userEntryId,
+			mainSessionManager: manager,
+			modelRuntime,
+		});
+		return { manager, modelRuntime, answer };
+	}
+
+	const descriptors = (manager: SessionManager) =>
+		manager
+			.getBranch()
+			.filter((entry) => entry.type === "custom" && entry.customType === TASK_DESCRIPTOR_CUSTOM_TYPE);
+
+	it("writes the task descriptor when the session is still where detection started", async () => {
+		const { manager, modelRuntime, answer } = setup();
+		await vi.waitFor(() => expect(modelRuntime.completeSimple).toHaveBeenCalled());
+		answer("Fixing the auth bug");
+		await vi.waitFor(() => expect(descriptors(manager)).toHaveLength(1));
+	});
+
+	it("writes nothing when the next turn started during detection", async () => {
+		const { manager, modelRuntime, answer } = setup();
+		await vi.waitFor(() => expect(modelRuntime.completeSimple).toHaveBeenCalled());
+		manager.appendMessage({ role: "user", content: "next question", timestamp: Date.now() });
+		answer("Fixing the auth bug");
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(descriptors(manager)).toHaveLength(0);
 	});
 });

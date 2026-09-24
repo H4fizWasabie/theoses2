@@ -13,7 +13,6 @@ import {
 	getAgentDir,
 	type SessionInfo,
 	SessionManager,
-	settleTurn,
 	stripClockAnnotation,
 } from "theoses-coding-agent";
 import { deletePath, FileConflictError, listDirectory, readTextFile, renamePath, writeTextFile } from "./files.ts";
@@ -373,7 +372,6 @@ async function streamChat(info: SessionInfo, request: IncomingMessage, response:
 	try {
 		await work;
 		sseSend(response, "done", {});
-		settleTurn(record.session, message);
 	} catch (error) {
 		sseSend(response, "error", { message: error instanceof Error ? error.message : String(error) });
 	} finally {

@@ -135,6 +135,7 @@ import { createDeferredToolDefinitions } from "./tools/deferred-dispatch.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { spillPrunedText } from "./tools/output-shaping.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
+import { settleTurn } from "./turn-settlement.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
 // ============================================================================
@@ -278,6 +279,11 @@ export interface PromptOptions {
 	source?: InputSource;
 	/** Internal hook used by RPC mode to observe prompt preflight acceptance or rejection. */
 	preflightResult?: (success: boolean) => void;
+	/**
+	 * User text Turn Settlement sees for this prompt, when it should differ from `text` (Telegram passes
+	 * "" for attachment-only turns, whose prompt is the attachment note). Defaults to `text`.
+	 */
+	settlementText?: string;
 }
 
 const REPLY_CONTEXT_CAP = 2000;
@@ -394,6 +400,9 @@ export class AgentSession {
 	// Retry state
 	private _retryAbortController: AbortController | undefined = undefined;
 	private _retryAttempt = 0;
+
+	/** Turn Settlement input: the latest prompt's user text (or its settlementText override). */
+	private _settlementText = "";
 
 	// Bash execution state
 	private readonly _bashAbortControllers = new Set<AbortController>();
@@ -706,7 +715,8 @@ export class AgentSession {
 		await this._emitExtensionEvent(event);
 
 		// Notify all listeners
-		this._emit(event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event) } : event);
+		const willRetry = event.type === "agent_end" && this._willRetryAfterAgentEnd(event);
+		this._emit(event.type === "agent_end" ? { ...event, willRetry } : event);
 		if (event.type === "agent_end") {
 			const assistant = [...event.messages].reverse().find((message) => message.role === "assistant") as
 				| AssistantMessage
@@ -727,6 +737,12 @@ export class AgentSession {
 			// backstop can still make use of it.
 			if (outcome === "completed" && this.sessionManager.getWorkingNote()) {
 				this.sessionManager.clearWorkingNote();
+			}
+			// Turn Settlement: only a finished, non-retrying turn of a non-CLI Channel Session (every header
+			// defaults to channel "cli"; plain coding runs stay out of Durable Memory). Failed and aborted
+			// turns are never distilled into memory.
+			if (outcome === "completed" && !willRetry && this.sessionManager.getChannelSessionKey().channel !== "cli") {
+				settleTurn(this, this._settlementText);
 			}
 		}
 
@@ -1297,6 +1313,8 @@ export class AgentSession {
 						? `${INTERRUPTED_NOTICE}\n\n`
 						: "";
 			const contextualText = `${abortNotice}${addReplyContext(expandedText, options?.replyContext)}${formatClockAnnotation()}`;
+			// Last prompt wins: one agent_end can cover queued follow-ups, and settlement wants the newest intent.
+			this._settlementText = options?.settlementText ?? text;
 
 			// If streaming, queue via steer() or followUp() based on option
 			if (this.isStreaming) {
