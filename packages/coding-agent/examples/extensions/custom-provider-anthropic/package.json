@@ -1,7 +1,7 @@
 {
   "name": "theoses-extension-custom-provider-anthropic",
   "private": true,
-  "version": "1.0.85",
+  "version": "1.0.86",
   "type": "module",
   "scripts": {
     "clean": "echo 'nothing to clean'",
