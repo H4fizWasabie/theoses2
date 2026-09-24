@@ -122,6 +122,22 @@ describe("createAgentSession session manager defaults", () => {
 		session.dispose();
 	});
 
+	it("forwards appendSystemPrompt to the resource loader it builds", async () => {
+		const model = getModel("anthropic", "claude-sonnet-4-5");
+		expect(model).toBeTruthy();
+
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir,
+			model: model!,
+			appendSystemPrompt: ["Custom channel guidance."],
+		});
+
+		expect(session.systemPrompt).toContain("Custom channel guidance.");
+
+		session.dispose();
+	});
+
 	it("exposes current session state to the built-in bash tool", async () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5");
 		expect(model).toBeTruthy();

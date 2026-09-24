@@ -96,6 +96,12 @@ export interface CreateAgentSessionOptions {
 
 	/** Resource loader. When omitted, DefaultResourceLoader is used. */
 	resourceLoader?: ResourceLoader;
+	/**
+	 * Extra system-prompt text (or file paths) appended after the base prompt, for a channel adapter's
+	 * own guidance (e.g. Telegram's rich-formatting notes). Forwarded to the DefaultResourceLoader this
+	 * function builds; has no effect when `resourceLoader` is provided explicitly.
+	 */
+	appendSystemPrompt?: string[];
 
 	/** Session manager. Default: SessionManager.create(cwd) */
 	sessionManager?: SessionManager;
@@ -232,7 +238,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		options.sessionManager ?? SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir), undefined, agentDir);
 
 	if (!resourceLoader) {
-		resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
+		resourceLoader = new DefaultResourceLoader({
+			cwd,
+			agentDir,
+			settingsManager,
+			appendSystemPrompt: options.appendSystemPrompt,
+		});
 		await resourceLoader.reload();
 		time("resourceLoader.reload");
 	}

@@ -7,7 +7,6 @@ import {
 	type AgentSessionEvent,
 	configureHttpDispatcher,
 	createAgentSession,
-	DefaultResourceLoader,
 	findExactModelReferenceMatch,
 	getAgentDir,
 	type SessionInfo,
@@ -406,36 +405,20 @@ async function sessionFor(
 		// process restarts - that's what silently kept every extension's tools (e.g. procura's
 		// four) off Telegram no matter how the extension or session were refreshed. Leaving it
 		// unset matches the dashboard channel: full SDK default tools plus every extension tool.
+		// convert_doc (needed to read Telegram document uploads stored as artifacts, see the
+		// `ctx.message.document` branch below) is already in that default active set - see issue #211.
 		//
-		// A custom resourceLoader (issues #195/#196) appends Telegram-only rich-formatting
-		// guidance - collapsible blocks and footnotes have no existing habit to build on, unlike
-		// headings/quotes, so they need explicit guidance. Channel-scoped deliberately: this cwd
-		// is Telegram-specific, so it never reaches the dashboard or CLI, which don't render rich
-		// messages the same way.
-		const resourceLoader = new DefaultResourceLoader({
-			cwd,
-			agentDir: getAgentDir(),
+		// appendSystemPrompt (issues #195/#196) adds Telegram-only rich-formatting guidance -
+		// collapsible blocks and footnotes have no existing habit to build on, unlike headings/quotes,
+		// so they need explicit guidance. Channel-scoped deliberately: this cwd is Telegram-specific,
+		// so it never reaches the dashboard or CLI, which don't render rich messages the same way.
+		const { session } = await createAgentSession({
+			sessionManager,
 			appendSystemPrompt: [TELEGRAM_RICH_FORMATTING_GUIDANCE],
 		});
-		// createAgentSession() only calls reload() on a DefaultResourceLoader it builds itself;
-		// since we pass our own instance in, we must reload it or extensionsResult never leaves
-		// its empty constructor default - every extension (skills, prompts, themes too) silently
-		// never loads for Telegram sessions with no error, since discovery never runs at all.
-		await resourceLoader.reload();
-		const { session } = await createAgentSession({ sessionManager, resourceLoader });
 		// settings.json's defaultThinkingLevel wins even over a resumed session's saved level, so the
 		// long-lived Telegram session can be retuned with a settings edit and restart. High when unset (#60).
 		session.setThinkingLevel(session.settingsManager.getDefaultThinkingLevel() ?? "high");
-		// Telegram document uploads are stored as artifacts (see the `ctx.message.document` branch
-		// below) and need convert_doc enabled to ever be read. Guard against it already being in
-		// the default active set (it is, as of the SDK's current defaults) - blindly appending it
-		// produced a duplicate `convert_doc` entry in the tools array sent on every request, which
-		// OpenRouter's Novita backend rejects outright as an invalid request (400) and DeepInfra
-		// silently declines to serve (404, filtered out at the routing layer) - see issue #211.
-		const activeToolNames = session.getActiveToolNames();
-		if (!activeToolNames.includes("convert_doc")) {
-			session.setActiveToolsByName([...activeToolNames, "convert_doc"]);
-		}
 		return session;
 	})();
 	sessions.set(chat, created);
