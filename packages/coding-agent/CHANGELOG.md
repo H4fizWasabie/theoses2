@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.88] - 2026-09-24
 
 - fix: Turn Settlement (memory consolidation, task-boundary detection) is now triggered by `AgentSession` itself when an operation finishes `completed` with no retry pending, for non-CLI Channel Sessions. Previously each channel adapter decided: Telegram settled failed turns, the dashboard settled aborted turns. `settleTurn` is no longer exported; adapters pass `PromptOptions.settlementText` when the settled text should differ from the prompt. Task-boundary detection now drops its write if the next turn started while it ran, instead of splicing entries into that turn.
