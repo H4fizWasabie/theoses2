@@ -119,7 +119,7 @@ describe("createTurnQueue", () => {
 		}
 	});
 
-	it("cancelAutoResume only cancels the most recently scheduled timer (matches the original: no clearTimeout on re-schedule)", () => {
+	it("a later scheduleAutoResume replaces (clears) an earlier one for the same chat (issue #365)", () => {
 		vi.useFakeTimers();
 		try {
 			const turnQueue = createTurnQueue();
@@ -127,13 +127,9 @@ describe("createTurnQueue", () => {
 			const second = vi.fn();
 			turnQueue.scheduleAutoResume("chat", first, 1000);
 			turnQueue.scheduleAutoResume("chat", second, 1000);
-			turnQueue.cancelAutoResume("chat");
 			vi.advanceTimersByTime(1000);
-			// The first timer was never cancelled - only the map entry (and so cancelAutoResume's
-			// reach) moved to the second. In practice this never bites: the adapter always cancels
-			// any pending auto-resume (via the top-of-handler cancelAutoResume call) before it would
-			// ever schedule a new one for the same chat.
-			expect(first).toHaveBeenCalledTimes(1);
+			expect(first).not.toHaveBeenCalled();
+			expect(second).toHaveBeenCalledTimes(1);
 		} finally {
 			vi.useRealTimers();
 		}
