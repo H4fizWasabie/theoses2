@@ -1172,8 +1172,17 @@ export class AgentSession {
 	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
 		this._isAgentRunActive = true;
 		try {
-			if (!this._isPromptCacheWarm()) {
+			// A model or thinking-level switch also rebuilds, so the reasoning budget note never states the old cap.
+			const { model, thinkingLevel } = this.agent.state;
+			if (
+				!this._isPromptCacheWarm() ||
+				this._baseSystemPromptOptions.model !== model ||
+				this._baseSystemPromptOptions.thinkingLevel !== thinkingLevel
+			) {
 				this._baseSystemPromptOptions.artifactCatalog = this.sessionManager.getArtifactCatalog();
+				this._baseSystemPromptOptions.model = model;
+				this._baseSystemPromptOptions.thinkingLevel = thinkingLevel;
+				this._baseSystemPromptOptions.thinkingBudgets = this.settingsManager.getThinkingBudgets();
 				this._baseSystemPrompt = buildSystemPrompt(this._baseSystemPromptOptions);
 			}
 			this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;

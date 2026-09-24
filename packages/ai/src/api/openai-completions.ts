@@ -13,6 +13,7 @@ import type {
 } from "openai/resources/chat/completions.js";
 import { calculateCost, clampThinkingLevel } from "../models.ts";
 import type {
+	Api,
 	AssistantMessage,
 	CacheRetention,
 	ChatTemplateKwargValue,
@@ -21,6 +22,7 @@ import type {
 	JsonValue,
 	Message,
 	Model,
+	ModelThinkingLevel,
 	OpenAICompletionsCompat,
 	ProviderHeaders,
 	SimpleStreamOptions,
@@ -1034,6 +1036,24 @@ function resolveThinkingTokenBudgetField(
 	if (compat.thinkingTokenBudgetField) return compat.thinkingTokenBudgetField;
 	if (compat.supportsThinkingTokenBudget) return "thinking_token_budget";
 	return undefined;
+}
+
+/**
+ * The `reasoning.max_tokens` ceiling an OpenRouter-format request sends at this thinking level, so the system
+ * prompt can state it (#355). Ceilings on model.maxTokens, not the per-request context-clamped max_tokens, so the
+ * prompt stays cache-stable; near a full context the real cap can be lower.
+ */
+export function openRouterReasoningBudget(
+	model: Model<Api>,
+	level: ModelThinkingLevel,
+	thinkingBudgets?: ThinkingBudgets,
+): number | undefined {
+	if (model.api !== "openai-completions") return undefined;
+	const completionsModel = model as Model<"openai-completions">;
+	if (getCompat(completionsModel).thinkingFormat !== "openrouter") return undefined;
+	const reasoningEffort = clampThinkingLevel(completionsModel, level);
+	if (reasoningEffort === "off") return undefined;
+	return resolveClampedThinkingBudget(completionsModel, { reasoningEffort, thinkingBudgets }, {});
 }
 
 function resolveClampedThinkingBudget(
