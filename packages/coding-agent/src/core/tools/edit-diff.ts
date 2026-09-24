@@ -250,35 +250,81 @@ function countOccurrences(content: string, oldText: string): number {
 	return fuzzyContent.split(fuzzyOldText).length - 1;
 }
 
-/**
- * Look for oldText's lines in content while ignoring all leading/trailing
- * whitespace and collapsing internal runs of whitespace to a single space.
- * This is deliberately never used to drive an actual replacement (that would
- * risk silently reformatting indentation the model never intended to touch)
- * - it only powers the "closest match" hint in getNotFoundError, so a
- * whitespace-only mismatch can be fixed without a wasted Read round-trip.
- */
-function findNearMissLine(content: string, oldText: string): number | undefined {
-	const diagKey = (line: string): string => line.trim().replace(/\s+/g, " ");
-	const contentLines = content.split("\n").map(diagKey);
-	const oldLines = oldText.split("\n").map(diagKey);
-	while (oldLines.length > 0 && oldLines[oldLines.length - 1] === "") oldLines.pop();
-	if (oldLines.length === 0) return undefined;
-
-	outer: for (let start = 0; start <= contentLines.length - oldLines.length; start++) {
-		for (let i = 0; i < oldLines.length; i++) {
-			if (contentLines[start + i] !== oldLines[i]) continue outer;
-		}
-		return start + 1;
-	}
-	return undefined;
+interface NearMiss {
+	line: number;
+	whitespaceOnly: boolean;
+	snippet: string;
 }
 
-function getNotFoundError(path: string, editIndex: number, totalEdits: number, nearMissLine?: number): Error {
-	const hint =
-		nearMissLine !== undefined
-			? ` Closest match found at line ${nearMissLine}, but whitespace/indentation differs - check exact spacing.`
-			: "";
+const NEAR_MISS_CONTEXT_LINES = 2;
+const NEAR_MISS_MAX_SNIPPET_LINES = 40;
+const NEAR_MISS_MAX_LINE_CHARS = 240;
+
+/**
+ * Find the block of content lines that best matches oldText's lines, comparing
+ * each line with all leading/trailing whitespace ignored and internal runs of
+ * whitespace collapsed. This is deliberately never used to drive an actual
+ * replacement (that would risk silently reformatting or rewriting text the model
+ * never saw) - it only powers the "closest match" hint in getNotFoundError. The
+ * hint includes the current text of that block, so a stale oldText (typically
+ * quoted from before an earlier edit to the same file) can be corrected without
+ * a wasted Read round-trip.
+ */
+function findNearMiss(content: string, oldText: string): NearMiss | undefined {
+	const diagKey = (line: string): string => line.trim().replace(/\s+/g, " ");
+	const rawLines = content.split("\n");
+	const contentLines = rawLines.map(diagKey);
+	const oldLines = oldText.split("\n").map(diagKey);
+	while (oldLines.length > 0 && oldLines[oldLines.length - 1] === "") oldLines.pop();
+	// Lines like "}" or "" match almost anywhere, so they don't count as evidence.
+	const significant = oldLines.flatMap((line, i) => (line.length > 3 ? [i] : []));
+	if (significant.length === 0) return undefined;
+	// ponytail: O(content lines x oldText lines) scan, skipped for huge inputs
+	if (contentLines.length * oldLines.length > 5_000_000) return undefined;
+
+	let bestStart = -1;
+	let bestScore = 0;
+	const lastStart = Math.max(0, contentLines.length - oldLines.length);
+	for (let start = 0; start <= lastStart; start++) {
+		let score = 0;
+		for (const i of significant) {
+			if (contentLines[start + i] === oldLines[i]) score++;
+		}
+		if (score > bestScore) {
+			bestScore = score;
+			bestStart = start;
+		}
+	}
+	if (bestStart < 0 || bestScore * 2 < significant.length) return undefined;
+
+	const whitespaceOnly = oldLines.every((line, i) => contentLines[bestStart + i] === line);
+	const from = Math.max(0, bestStart - NEAR_MISS_CONTEXT_LINES);
+	const to = Math.min(
+		rawLines.length,
+		bestStart + oldLines.length + NEAR_MISS_CONTEXT_LINES,
+		from + NEAR_MISS_MAX_SNIPPET_LINES,
+	);
+	const snippet = rawLines
+		.slice(from, to)
+		.map((line, i) => {
+			const text =
+				line.length > NEAR_MISS_MAX_LINE_CHARS
+					? `${line.slice(0, NEAR_MISS_MAX_LINE_CHARS)} [line truncated]`
+					: line;
+			return `${from + i + 1}\t${text}`;
+		})
+		.join("\n");
+	return { line: bestStart + 1, whitespaceOnly, snippet };
+}
+
+function getNotFoundError(path: string, editIndex: number, totalEdits: number, nearMiss?: NearMiss): Error {
+	let hint = "";
+	if (nearMiss) {
+		const reason = nearMiss.whitespaceOnly
+			? "but whitespace/indentation differs - check exact spacing"
+			: "but some lines differ - the file may have changed since you last saw it";
+		hint = ` Closest match found at line ${nearMiss.line}, ${reason}. Current content (line number, tab, text):\n${nearMiss.snippet}`;
+	}
 	if (totalEdits === 1) {
 		return new Error(
 			`Could not find the exact text in ${path}. The old text must match exactly including all whitespace and newlines.${hint}`,
@@ -350,7 +396,7 @@ export function applyEditsToNormalizedContent(
 		const edit = normalizedEdits[i];
 		const matchResult = fuzzyFindText(replacementBaseContent, edit.oldText);
 		if (!matchResult.found) {
-			throw getNotFoundError(path, i, normalizedEdits.length, findNearMissLine(normalizedContent, edit.oldText));
+			throw getNotFoundError(path, i, normalizedEdits.length, findNearMiss(normalizedContent, edit.oldText));
 		}
 
 		const occurrences = countOccurrences(replacementBaseContent, edit.oldText);
