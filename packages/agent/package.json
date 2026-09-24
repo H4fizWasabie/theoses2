@@ -1,6 +1,6 @@
 {
 	"name": "theoses-agent-core",
-	"version": "1.0.83",
+	"version": "1.0.84",
 	"description": "General-purpose agent with transport abstraction, state management, and attachment support",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -23,7 +23,7 @@
 		"prepublishOnly": "npm run build"
 	},
 	"dependencies": {
-		"theoses-ai": "^1.0.83",
+		"theoses-ai": "^1.0.84",
 		"typebox": "1.3.7"
 	},
 	"keywords": [

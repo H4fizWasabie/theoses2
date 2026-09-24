@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.84] - 2026-09-24
 
 - fix: a turn that ends in a provider error after its retries now always shows the error, even when the model narrated before an earlier tool call in the same turn. Previously that narration was sent as the final reply and the error was dropped, so a failed turn looked like the model announcing a step and then idling.
 - feat: a turn that ends in a provider error is resumed automatically once after 60s, as if the owner had typed "Proceed". Any owner message (including `/stop`) cancels the pending resume; a resume that fails again is reported and not retried.
