@@ -14,10 +14,10 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Agent, type AgentEvent, type AgentMessage } from "theoses-agent-core";
-import type { Api, Model, ModelsRequestTransforms, ProviderHeaders, SimpleStreamOptions } from "theoses-ai";
+import type { Api, Model, ProviderHeaders, SimpleStreamOptions } from "theoses-ai";
 import { type Static, Type } from "typebox";
 import { getAgentDir } from "../config.ts";
+import { createBudgetedAgent, endedOnToolCall, lastAssistantText } from "./background-agent.ts";
 import { resolveBackgroundModel } from "./background-models.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -57,25 +57,6 @@ Report format (markdown):
 3. "Gaps": what you could not verify or find.
 Never invent sources or specifics. If sources disagree, say so.`;
 
-function lastAssistantText(messages: AgentMessage[]): string {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const message = messages[i];
-		if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
-		const text = message.content
-			.filter((block): block is { type: "text"; text: string } => block.type === "text")
-			.map((block) => block.text)
-			.join("\n")
-			.trim();
-		if (text) return text;
-	}
-	return "";
-}
-
-function endedOnToolCall(messages: AgentMessage[]): boolean {
-	const last = messages[messages.length - 1];
-	return last?.role === "assistant" && Array.isArray(last.content) && last.content.some((b) => b.type === "toolCall");
-}
-
 /** Tavily tools that refuse after `max` calls in one job, so the Tavily bill is capped independently of tokens. */
 function withCallBudget(tool: ToolDefinition<any, any>, budget: { used: number }): ToolDefinition<any, any> {
 	return {
@@ -114,60 +95,41 @@ export async function runResearch(options: RunResearchOptions): Promise<Research
 		wrapToolDefinition(withCallBudget(tool, budget)),
 	);
 
-	let turns = 0;
-	let inputTokens = 0;
-	let stoppedByBudget = false;
-
-	const agent: Agent = new Agent({
-		initialState: { systemPrompt: RESEARCH_SYSTEM_PROMPT, model, thinkingLevel: "off", tools },
-		streamFn: (streamModel, context, streamOptions) =>
-			options.modelRuntime.streamSimple(streamModel, context, {
-				...streamOptions,
-				transformHeaders: options.transformHeaders
-					? (headers) => options.transformHeaders?.(headers ?? {}, model) ?? headers ?? {}
-					: (streamOptions as ModelsRequestTransforms | undefined)?.transformHeaders,
-			}),
-		onPayload: options.onPayload,
-		onResponse: options.onResponse,
-		shouldStopAfterTurn: () => {
-			turns++;
-			if (turns >= RESEARCH_CAPS.maxTurns || inputTokens >= RESEARCH_CAPS.maxInputTokens) {
-				stoppedByBudget = true;
-				return true;
-			}
-			return false;
-		},
-	});
-
-	const unsubscribe = agent.subscribe((event: AgentEvent) => {
-		if (event.type === "message_end" && event.message.role === "assistant") {
-			inputTokens += (event.message as { usage?: { input?: number } }).usage?.input ?? 0;
-		}
-	});
-
 	const signal = options.signal
 		? AbortSignal.any([options.signal, AbortSignal.timeout(RESEARCH_CAPS.timeoutMs)])
 		: AbortSignal.timeout(RESEARCH_CAPS.timeoutMs);
-	signal.addEventListener("abort", () => agent.abort(), { once: true });
 
-	try {
-		await agent.prompt(options.question);
-		// The model can end a turn with narration and no tool call ("Let me extract a few pages...");
-		// the loop then stops without a report. Give it one turn to write it up from what it has.
-		if (!stoppedByBudget && !signal.aborted && !looksLikeReport(lastAssistantText(agent.state.messages))) {
-			await agent.prompt(FINALIZE_PROMPT);
-		}
-	} finally {
-		unsubscribe();
+	const handle = createBudgetedAgent({
+		systemPrompt: RESEARCH_SYSTEM_PROMPT,
+		model,
+		tools,
+		modelRuntime: options.modelRuntime,
+		maxTurns: RESEARCH_CAPS.maxTurns,
+		maxInputTokens: RESEARCH_CAPS.maxInputTokens,
+		signal,
+		onPayload: options.onPayload,
+		onResponse: options.onResponse,
+		transformHeaders: options.transformHeaders,
+	});
+
+	let stats = await handle.prompt(options.question);
+	// The model can end a turn with narration and no tool call ("Let me extract a few pages...");
+	// the loop then stops without a report. Give it one turn to write it up from what it has. Turns/
+	// tokens from this second prompt accumulate onto the same budget as the first (see createBudgetedAgent).
+	if (!stats.stoppedByBudget && !signal.aborted && !looksLikeReport(lastAssistantText(handle.agent.state.messages))) {
+		stats = await handle.prompt(FINALIZE_PROMPT);
 	}
 
-	const text = lastAssistantText(agent.state.messages);
+	const text = lastAssistantText(handle.agent.state.messages);
 	const complete =
-		!stoppedByBudget && !signal.aborted && !endedOnToolCall(agent.state.messages) && looksLikeReport(text);
+		!stats.stoppedByBudget &&
+		!signal.aborted &&
+		!endedOnToolCall(handle.agent.state.messages) &&
+		looksLikeReport(text);
 	const report = complete
 		? text
 		: `INCOMPLETE: the job hit its budget or timeout before finishing.${text ? `\n\nLast notes:\n${text}` : ""}`;
-	return { report, complete, turnsUsed: turns, inputTokens };
+	return { report, complete, turnsUsed: stats.turns, inputTokens: stats.inputTokens };
 }
 
 /** Per-session job accounting. One instance lives on the AgentSession so runtime rebuilds don't reset it. */

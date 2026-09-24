@@ -18,9 +18,10 @@
  * parallel for independent questions (spawn #3 waits for a slot instead of a 4th running).
  */
 
-import { Agent, type AgentEvent, type AgentMessage } from "theoses-agent-core";
-import type { Api, Model, ModelsRequestTransforms, ProviderHeaders, SimpleStreamOptions } from "theoses-ai";
+import type { AgentEvent } from "theoses-agent-core";
+import type { Api, Model, ProviderHeaders, SimpleStreamOptions } from "theoses-ai";
 import { type Static, Type } from "typebox";
+import { createBudgetedAgent, endedOnToolCall, lastAssistantText } from "./background-agent.ts";
 import { resolveBackgroundModel } from "./background-models.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -126,20 +127,6 @@ function lineCount(text: string): number {
 	return text.split("\n").length;
 }
 
-function lastAssistantText(messages: AgentMessage[]): string {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const message = messages[i];
-		if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
-		const text = message.content
-			.filter((block): block is { type: "text"; text: string } => block.type === "text")
-			.map((block) => block.text)
-			.join("\n")
-			.trim();
-		if (text) return text;
-	}
-	return "";
-}
-
 function enforceAnswerCap(answer: string, tier: ExplorerTier): string {
 	const caps = TIER_CAPS[tier];
 	if (lineCount(answer) <= caps.lines) return answer;
@@ -205,60 +192,28 @@ async function runExplorerWithSlot(
 		createLsToolDefinition(options.cwd),
 	];
 
-	let turns = 0;
-	let inputTokens = 0;
-	let outputTokens = 0;
-	let stoppedByBudget = false;
-
-	const agent: Agent = new Agent({
-		initialState: {
-			systemPrompt: buildExplorerSystemPrompt(tier),
-			model,
-			thinkingLevel: "off",
-			tools: readOnlyToolDefinitions.map((definition) => wrapToolDefinition(definition)),
-		},
-		streamFn: (streamModel, context, streamOptions) =>
-			options.modelRuntime.streamSimple(streamModel, context, {
-				...streamOptions,
-				// AgentLoopConfig doesn't carry transformHeaders (the loop spreads it into
-				// streamFn options via `...config`), so inject it here like sdk.ts's wrapper does.
-				// `model` (this function's own closure variable, the explorer's resolved model) is
-				// passed through — see the field's doc comment on RunExplorerOptions.
-				transformHeaders: options.transformHeaders
-					? (headers) => options.transformHeaders?.(headers ?? {}, model) ?? headers ?? {}
-					: (streamOptions as ModelsRequestTransforms | undefined)?.transformHeaders,
-			}),
+	const handle = createBudgetedAgent({
+		systemPrompt: buildExplorerSystemPrompt(tier),
+		model,
+		tools: readOnlyToolDefinitions.map((definition) => wrapToolDefinition(definition)),
+		modelRuntime: options.modelRuntime,
+		maxTurns: caps.maxTurns,
+		maxInputTokens: caps.maxInputTokens,
+		signal: options.signal,
 		onPayload: options.onPayload,
 		onResponse: options.onResponse,
-		shouldStopAfterTurn: () => {
-			turns++;
-			if (turns >= caps.maxTurns || inputTokens >= caps.maxInputTokens) {
-				stoppedByBudget = true;
-				return true;
-			}
-			return false;
-		},
+		transformHeaders: options.transformHeaders,
 	});
 
-	const unsubscribe = agent.subscribe((event: AgentEvent) => {
+	const unsubscribe = handle.agent.subscribe((event: AgentEvent) => {
 		if (event.type === "tool_execution_start") {
 			options.onStatus?.(`${event.toolName}: ${summarizeArgs(event.args)}`);
-		} else if (event.type === "message_end" && event.message.role === "assistant") {
-			const usage = (event.message as { usage?: { input?: number; output?: number } }).usage;
-			if (usage) {
-				inputTokens += usage.input ?? 0;
-				outputTokens += usage.output ?? 0;
-			}
 		}
 	});
 
-	if (options.signal) {
-		const abortListener = () => agent.abort();
-		options.signal.addEventListener("abort", abortListener, { once: true });
-	}
-
+	let stats: { turns: number; inputTokens: number; outputTokens: number; stoppedByBudget: boolean };
 	try {
-		await agent.prompt(options.question);
+		stats = await handle.prompt(options.question);
 	} finally {
 		unsubscribe();
 	}
@@ -266,21 +221,29 @@ async function runExplorerWithSlot(
 	// Did the run end with a complete answer, or did the budget cut it off mid-work? If the
 	// budget stopped us (or the last assistant turn was a tool call we never got an answer
 	// after), the outcome is INCOMPLETE — the one-line contract, not a padded guess.
-	const rawAnswer = lastAssistantText(agent.state.messages);
-	const pendingToolCall = endedOnToolCall(agent.state.messages);
+	const rawAnswer = lastAssistantText(handle.agent.state.messages);
+	const pendingToolCall = endedOnToolCall(handle.agent.state.messages);
 	const complete =
-		!stoppedByBudget && !pendingToolCall && rawAnswer.length > 0 && !rawAnswer.startsWith("INCOMPLETE:");
+		!stats.stoppedByBudget && !pendingToolCall && rawAnswer.length > 0 && !rawAnswer.startsWith("INCOMPLETE:");
 
 	let answer = complete ? rawAnswer : `INCOMPLETE: budget exhausted before a final answer was produced.`;
 	if (complete) {
 		answer = enforceAnswerCap(answer, tier);
-		answer = ensureBudgetFooter(answer, tier, turns, inputTokens);
+		answer = ensureBudgetFooter(answer, tier, stats.turns, stats.inputTokens);
 	} else {
-		const kIn = Math.round(inputTokens / 1000);
-		answer += `\n~${kIn}K in, ${turns}/${caps.maxTurns} turns`;
+		const kIn = Math.round(stats.inputTokens / 1000);
+		answer += `\n~${kIn}K in, ${stats.turns}/${caps.maxTurns} turns`;
 	}
 
-	return { answer, complete, tier, turnsUsed: turns, maxTurns: caps.maxTurns, inputTokens, outputTokens };
+	return {
+		answer,
+		complete,
+		tier,
+		turnsUsed: stats.turns,
+		maxTurns: caps.maxTurns,
+		inputTokens: stats.inputTokens,
+		outputTokens: stats.outputTokens,
+	};
 }
 
 function summarizeArgs(args: unknown): string {
@@ -290,11 +253,6 @@ function summarizeArgs(args: unknown): string {
 	} catch {
 		return "";
 	}
-}
-
-function endedOnToolCall(messages: AgentMessage[]): boolean {
-	const last = messages[messages.length - 1];
-	return last?.role === "assistant" && Array.isArray(last.content) && last.content.some((b) => b.type === "toolCall");
 }
 
 // ---------------------------------------------------------------------------

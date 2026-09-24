@@ -75,7 +75,7 @@ import {
 } from "./compaction/index.ts";
 import { pruneFinishedTurnOutputs } from "./context-pruning.ts";
 import { DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS } from "./defaults.ts";
-import { createExploreToolDefinition } from "./explorer.ts";
+import { createExploreToolDefinition, type ExploreToolDeps } from "./explorer.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
@@ -3026,69 +3026,49 @@ export class AgentSession {
 					onMemorySaved: () => this._memoryPromotion.recordSaved(),
 				});
 
-		// Explorer sub-agent tool (issue #254). Merged into the base definitions here rather than
-		// exported through core/tools/index.ts: tools/index.ts already sits in an import cycle
-		// with core/extensions/types.ts, and explorer.ts needs both — re-exporting through the
-		// barrel made explorer.ts the third node of that cycle, and tsgo resolved the cyclic
-		// re-export to "name not found" at use sites. The direct merge keeps the cycle out.
+		// Explorer/research sub-agent tools (issues #254, #260, #263) route their provider traffic
+		// through the same extension events the main session emits (sdk.ts's streamFn/onPayload/
+		// onResponse), so cost-watch can see and route their requests under their own model instead
+		// of the session's. The runner is read lazily inside each hook because these tools are built
+		// before the ExtensionRunner below is (re)created, and the runner is rebuilt on runtime
+		// rebuilds. Shared by both tools below — identical regardless of which sub-agent is calling.
+		const backgroundModelHooks: Pick<ExploreToolDeps, "onPayload" | "onResponse" | "transformHeaders"> = {
+			onPayload: async (payload, model) => {
+				const runner = this._extensionRunner;
+				return runner?.hasHandlers("before_provider_request")
+					? runner.emitBeforeProviderRequest(payload, model)
+					: payload;
+			},
+			onResponse: async (response, model) => {
+				const runner = this._extensionRunner;
+				if (runner?.hasHandlers("after_provider_response")) {
+					await runner.emitAfterProviderResponse({ status: response.status, headers: response.headers }, model);
+				}
+			},
+			transformHeaders: async (requestHeaders, model) => {
+				const runner = this._extensionRunner;
+				return runner?.hasHandlers("before_provider_headers")
+					? runner.emitBeforeProviderHeaders(requestHeaders ?? {}, model)
+					: (requestHeaders ?? {});
+			},
+		};
+
+		// Merged into the base definitions here rather than exported through core/tools/index.ts:
+		// tools/index.ts already sits in an import cycle with core/extensions/types.ts, and
+		// explorer.ts needs both — re-exporting through the barrel made explorer.ts the third node
+		// of that cycle, and tsgo resolved the cyclic re-export to "name not found" at use sites.
+		// The direct merge keeps the cycle out.
 		(baseToolDefinitions as Record<string, ToolDefinition<any>>).explore = createExploreToolDefinition({
 			cwd: this._cwd,
 			modelRuntime: this._modelRuntime,
-			// Issue #260: route the explorer's provider traffic through the same extension events the
-			// main session emits (sdk.ts's streamFn/onPayload/onResponse) so cost-watch can see and
-			// route explorer requests. The runner is read lazily inside each hook because this tool is
-			// built before the ExtensionRunner below is (re)created, and the runner is rebuilt on
-			// runtime rebuilds.
-			//
-			// Issue #263: pass the sub-agent's actual `model` (the adapter always knows it — see
-			// openai-completions.ts's `onPayload?.(params, model)`) into the emitters so `ctx.model`
-			// reflects the explorer's real model instead of `ExtensionRunner`'s session-level
-			// `getModel()`. Before this, cost-watch's handler fired but always saw the *main*
-			// session's model — the explorer's traffic was silently attributed to the wrong model,
-			// never visible under its own id and never getting its own provider-order lookup.
-			onPayload: async (payload, model) => {
-				const runner = this._extensionRunner;
-				return runner?.hasHandlers("before_provider_request")
-					? runner.emitBeforeProviderRequest(payload, model)
-					: payload;
-			},
-			onResponse: async (response, model) => {
-				const runner = this._extensionRunner;
-				if (runner?.hasHandlers("after_provider_response")) {
-					await runner.emitAfterProviderResponse({ status: response.status, headers: response.headers }, model);
-				}
-			},
-			transformHeaders: async (requestHeaders, model) => {
-				const runner = this._extensionRunner;
-				return runner?.hasHandlers("before_provider_headers")
-					? runner.emitBeforeProviderHeaders(requestHeaders ?? {}, model)
-					: (requestHeaders ?? {});
-			},
+			...backgroundModelHooks,
 		});
 
-		// Same reason as `explore` above for living here rather than in tools/index.ts. Provider hooks
-		// are wired like the explorer's so cost-watch sees research traffic under its own model.
+		// Same reason as `explore` above for living here rather than in tools/index.ts.
 		(baseToolDefinitions as Record<string, ToolDefinition<any>>).research = createResearchToolDefinition({
 			modelRuntime: this._modelRuntime,
 			jobs: this._researchJobs,
-			onPayload: async (payload, model) => {
-				const runner = this._extensionRunner;
-				return runner?.hasHandlers("before_provider_request")
-					? runner.emitBeforeProviderRequest(payload, model)
-					: payload;
-			},
-			onResponse: async (response, model) => {
-				const runner = this._extensionRunner;
-				if (runner?.hasHandlers("after_provider_response")) {
-					await runner.emitAfterProviderResponse({ status: response.status, headers: response.headers }, model);
-				}
-			},
-			transformHeaders: async (requestHeaders, model) => {
-				const runner = this._extensionRunner;
-				return runner?.hasHandlers("before_provider_headers")
-					? runner.emitBeforeProviderHeaders(requestHeaders ?? {}, model)
-					: (requestHeaders ?? {});
-			},
+			...backgroundModelHooks,
 		});
 
 		this._baseToolDefinitions = new Map(
