@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.86] - 2026-09-24
 
 - fix: inbound rich messages (formatted pastes, tables) are now read. `messageText` only checked `.text`/`.caption`, so a rich message reached the model as an empty prompt. The rich-message flattener also keeps text from block types it doesn't know (such as tables) and puts separate blocks on separate lines instead of running them together.
