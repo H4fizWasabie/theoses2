@@ -151,30 +151,43 @@ export function parseModelCommand(text: string): string | undefined {
 }
 
 function messageText(ctx: Context): string {
-	return ctx.message?.text ?? ctx.message?.caption ?? "";
+	const message = ctx.message;
+	// A rich message (formatted paste, table) has no .text at all - without this fallback it reached
+	// the model as an empty prompt (2026-09-24: a Mini Pharmacy report arrived as nothing).
+	return (
+		message?.text ??
+		message?.caption ??
+		flattenRichMessage((message as { rich_message?: unknown } | undefined)?.rich_message) ??
+		""
+	);
 }
 
+/** Metadata keys whose string values aren't message text. `label` is prefixed separately. */
+const RICH_NON_TEXT_KEYS = new Set(["type", "url", "label", "language"]);
+
 /**
- * Recursively pulls plain text out of a rich-message block/span tree. The exact shape isn't
- * publicly documented beyond "blocks" (paragraph/list/etc, each optionally nesting more blocks,
- * items, or inline spans) and "spans" (bold/url/etc, each wrapping more text or spans) - rather
- * than hardcode every node type, this walks any `text`, `items`, or `blocks` property it finds and
- * concatenates what falls out, so an unrecognized node degrades to "keep its text" instead of
- * vanishing silently.
+ * Recursively pulls plain text out of a rich-message block/span tree. The shape isn't publicly
+ * documented, so this walks every property except known metadata rather than a fixed list: a block
+ * type not seen before (e.g. a table's rows/cells) keeps its text instead of vanishing. Inline span
+ * runs (anything under `text`) join directly; other arrays (blocks, items, rows, cells) put one
+ * entry per line so separate blocks don't run together.
  */
-function flattenRichNode(node: unknown): string {
+function flattenRichNode(node: unknown, inline = false): string {
 	if (node == null) return "";
 	if (typeof node === "string") return node;
-	if (Array.isArray(node)) return node.map(flattenRichNode).join("");
-	if (typeof node === "object") {
-		const obj = node as { text?: unknown; items?: unknown; blocks?: unknown; label?: unknown };
-		const parts = [flattenRichNode(obj.text), flattenRichNode(obj.items), flattenRichNode(obj.blocks)].filter(
-			Boolean,
-		);
-		if (!parts.length) return "";
-		return typeof obj.label === "string" ? `${obj.label} ${parts.join(" ")}` : parts.join(" ");
-	}
-	return "";
+	if (Array.isArray(node))
+		return node
+			.map((child) => flattenRichNode(child, inline))
+			.filter(Boolean)
+			.join(inline ? "" : "\n");
+	if (typeof node !== "object") return "";
+	const parts = Object.entries(node)
+		.filter(([key]) => !RICH_NON_TEXT_KEYS.has(key))
+		.map(([key, value]) => flattenRichNode(value, inline || key === "text"))
+		.filter(Boolean);
+	if (!parts.length) return "";
+	const label = (node as { label?: unknown }).label;
+	return typeof label === "string" ? `${label} ${parts.join(" ")}` : parts.join(" ");
 }
 
 /**

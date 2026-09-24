@@ -575,3 +575,50 @@ describe("Telegram thinking level", () => {
 		expect(session.setThinkingLevel).toHaveBeenCalledWith(expected);
 	});
 });
+
+describe("inbound rich messages", () => {
+	// Block shape of the lost 2026-09-24 report: paragraphs around a table. The table's key names are
+	// not documented, so the walker must keep text from any shape.
+	const report = {
+		blocks: [
+			{ type: "paragraph", text: [{ type: "bold", text: "Mini Pharmacy Stock Reduction Report" }] },
+			{ type: "paragraph", text: "The following medicines were returned from the Mini Pharmacy:" },
+			{
+				type: "table",
+				rows: [
+					{ cells: [{ text: "Medicine" }, { text: "Qty" }] },
+					{ cells: [{ text: "Paracetamol 500mg" }, { text: "20 boxes" }] },
+				],
+			},
+			{ type: "paragraph", text: "Following this adjustment, the Mini Pharmacy will keep two boxes." },
+		],
+	};
+
+	it("sends a rich message's text to the model instead of an empty prompt", async () => {
+		const { bot, session, prompts } = typingHarness();
+		await bot.handleUpdate({
+			update_id: 1,
+			message: {
+				message_id: 1,
+				date: 1,
+				chat: { id: 1, type: "private" },
+				from: { id: 1, is_bot: false, first_name: "Owner" },
+				rich_message: report,
+			},
+		} as unknown as Update);
+		await vi.waitFor(() => expect(session.prompt).toHaveBeenCalledTimes(1));
+		prompts[0]?.();
+
+		const prompt = String(vi.mocked(session.prompt).mock.calls[0]?.[0]);
+		expect(prompt).toContain("Mini Pharmacy Stock Reduction Report\nThe following medicines were returned");
+		expect(prompt).toContain("Paracetamol 500mg");
+		expect(prompt).toContain("20 boxes");
+		expect(prompt).toContain("Following this adjustment");
+	});
+
+	it("keeps text from block types it does not know when quoted", () => {
+		const result = replyText({ message: { reply_to_message: { rich_message: report } } } as never);
+		expect(result).toContain("Paracetamol 500mg");
+		expect(result).not.toContain("table");
+	});
+});
