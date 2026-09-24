@@ -1,3 +1,4 @@
+import type { Api, Model } from "theoses-ai/compat";
 import { describe, expect, test } from "vitest";
 import { buildSystemPrompt } from "../src/core/system-prompt.ts";
 
@@ -213,5 +214,42 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("Established by earlier turns; verify this note if it contradicts current evidence.");
 		expect(prompt).toContain("x".repeat(1000));
 		expect(prompt).not.toContain("x".repeat(1001));
+	});
+
+	describe("reasoning budget note", () => {
+		// Production shape: no explicit compat, so thinkingFormat "openrouter" comes from provider detection.
+		const model = (provider: string, maxTokens = 64000) =>
+			({
+				id: "xiaomi/mimo-v2.6-pro",
+				provider,
+				api: "openai-completions",
+				baseUrl: provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1",
+				maxTokens,
+				contextWindow: 128000,
+				reasoning: true,
+			}) as unknown as Model<Api>;
+		const build = (options: Partial<Parameters<typeof buildSystemPrompt>[0]>) =>
+			buildSystemPrompt({ contextFiles: [], skills: [], cwd: process.cwd(), ...options });
+
+		test("states the configured budget for an auto-detected OpenRouter model", () => {
+			const prompt = build({ model: model("openrouter"), thinkingLevel: "high", thinkingBudgets: { high: 16384 } });
+			expect(prompt).toContain("<reasoning_budget>");
+			expect(prompt).toContain("capped at 16384 tokens");
+		});
+
+		test("clamps the budget to leave room for the answer, like the request does", () => {
+			const prompt = build({
+				model: model("openrouter", 8000),
+				thinkingLevel: "high",
+				thinkingBudgets: { high: 16384 },
+			});
+			expect(prompt).toContain(`capped at ${8000 - 1024} tokens`);
+		});
+
+		test("is absent for non-OpenRouter models, thinking off, or no model", () => {
+			expect(build({ model: model("openai"), thinkingLevel: "high" })).not.toContain("<reasoning_budget>");
+			expect(build({ model: model("openrouter"), thinkingLevel: "off" })).not.toContain("<reasoning_budget>");
+			expect(build({ thinkingLevel: "high" })).not.toContain("<reasoning_budget>");
+		});
 	});
 });

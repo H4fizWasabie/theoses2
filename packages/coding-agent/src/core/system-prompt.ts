@@ -3,6 +3,9 @@
  */
 
 import { basename } from "node:path";
+import type { ThinkingLevel } from "theoses-agent-core";
+import { openRouterReasoningBudget } from "theoses-ai/api/openai-completions";
+import type { Api, Model, ThinkingBudgets } from "theoses-ai/compat";
 import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
 import { formatSkillsForPrompt, type Skill } from "./skills.ts";
 
@@ -27,6 +30,12 @@ export interface BuildSystemPromptOptions {
 	workingNote?: string;
 	/** Capped live document artifact catalog for this channel session. */
 	artifactCatalog?: string;
+	/** Current model for reasoning budget calculation. */
+	model?: Model<Api>;
+	/** Current thinking level for reasoning budget calculation. */
+	thinkingLevel?: ThinkingLevel;
+	/** Custom thinking budgets from settings. */
+	thinkingBudgets?: ThinkingBudgets;
 }
 
 function injectWorkingNote(note: string | undefined): string {
@@ -86,6 +95,20 @@ function getProjectContext(contextFiles: ContextFile[]): string {
 	return section;
 }
 
+/** States the reasoning cap OpenRouter-format requests send (#355), so the model can pace itself instead of being cut off mid-thought. */
+function buildReasoningBudgetNote(
+	model: Model<Api> | undefined,
+	thinkingLevel: ThinkingLevel | undefined,
+	thinkingBudgets: ThinkingBudgets | undefined,
+): string | undefined {
+	if (!model || !thinkingLevel) return undefined;
+	const budget = openRouterReasoningBudget(model, thinkingLevel, thinkingBudgets);
+	if (budget === undefined) return undefined;
+	return `<reasoning_budget>
+Your reasoning budget for this turn is capped at ${budget} tokens. If you haven't reached a conclusion by then, generation is cut off mid-thought. Budget accordingly.
+</reasoning_budget>`;
+}
+
 /** Build the system prompt with tools, guidelines, and context */
 export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const {
@@ -99,6 +122,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		skills: providedSkills,
 		workingNote,
 		artifactCatalog,
+		model,
+		thinkingLevel,
+		thinkingBudgets,
 	} = options;
 	const promptCwd = cwd.replace(/\\/g, "/");
 
@@ -215,6 +241,12 @@ Theoses documentation (read only when the user asks about Theoses itself, its SD
 	}
 	if (personaSection) prompt += `\n\n${personaSection}`;
 	prompt += structuralSections;
+
+	const reasoningBudgetNote = buildReasoningBudgetNote(model, thinkingLevel, thinkingBudgets);
+	if (reasoningBudgetNote) {
+		prompt += `\n\n${reasoningBudgetNote}`;
+	}
+
 	prompt += workingNoteSection;
 	prompt += artifactSection;
 
