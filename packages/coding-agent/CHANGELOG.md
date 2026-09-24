@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.85] - 2026-09-24
 
 - feat: surface the reasoning token budget (from `settings.thinkingBudgets`) to OpenRouter-routed thinking models in the system prompt upfront, so they know their hard ceiling before generation starts and can pace reasoning accordingly. The budget uses the model's configured `maxTokens` as a stable ceiling to preserve prompt caching across turns, and the prompt is rebuilt when the model or thinking level changes (#355).
 

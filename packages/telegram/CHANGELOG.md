@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.85] - 2026-09-24
 
 - changed: Telegram sessions use `defaultThinkingLevel` from settings.json instead of a hardcoded `high` (#60), including resumed sessions whose saved level would otherwise win. Unset still means `high`.
 
