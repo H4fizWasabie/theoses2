@@ -160,7 +160,6 @@ export type {
 } from "./tool-sources.ts";
 export { HttpSidecarToolSource, McpHttpToolSource, McpStdioToolSource } from "./tool-sources.ts";
 export type { Tool } from "./tools/index.ts";
-export { settleTurn } from "./turn-settlement.ts";
 
 export {
 	withFileMutationQueue,

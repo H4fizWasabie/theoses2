@@ -29,7 +29,7 @@ A rendering rule, not stored state: when the most recent operation's outcome is 
 _Avoid_: stop marker, boundary marker
 
 **Turn Settlement**:
-The fire-and-forget work a channel adapter triggers after a Channel Session turn ends successfully (memory consolidation, task-boundary detection). It never blocks or fails the reply. The adapter decides when a turn counts as finished; Turn Settlement owns everything that follows.
+The fire-and-forget work that runs after a Channel Session turn ends successfully (memory consolidation, task-boundary detection). It never blocks or fails the reply. Triggered by the Channel Session itself when an operation finishes with outcome `completed` and no retry is pending; adapters never trigger it. Only non-CLI Channel Sessions (Telegram, dashboard) settle, so plain coding runs stay out of Durable Memory.
 _Avoid_: post-turn hook (implies an event seam that doesn't exist), background turn work
 
 **Owner**:

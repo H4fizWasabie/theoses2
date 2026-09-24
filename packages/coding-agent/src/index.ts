@@ -241,7 +241,6 @@ export {
 	type MemoryEdge,
 	type MemoryNode,
 	type PromptTemplate,
-	settleTurn,
 	shouldTriggerConsolidation,
 	stripClockAnnotation,
 	type TaskBoundaryData,
