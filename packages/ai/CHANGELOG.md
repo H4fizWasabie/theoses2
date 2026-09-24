@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.85] - 2026-09-24
 
 - feat: export `openRouterReasoningBudget(model, level, thinkingBudgets)`, the `reasoning.max_tokens` ceiling an OpenRouter-format request sends at a given thinking level, resolved through the same compat detection and clamping as the request itself (#355).
