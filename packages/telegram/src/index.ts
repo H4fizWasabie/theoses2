@@ -14,6 +14,7 @@ import {
 } from "theoses-coding-agent";
 import { chunkHtml, formatTelegramHtml, renderToolCallBlocks, splitSections, type ToolCallEntry } from "./format.ts";
 import { createToolCallLogger } from "./tool-call-log.ts";
+import { createTurnQueue } from "./turn-queue.ts";
 
 // No settings.json override plumbing here (telegram doesn't load SettingsManager);
 // this applies the shared default idle timeout globally so a stalled/looping
@@ -25,7 +26,6 @@ const CHANNEL = "telegram";
 const TELEGRAM_MESSAGE_LIMIT = 4000;
 const TELEGRAM_DOWNLOAD_TIMEOUT_MS = 120_000;
 const TELEGRAM_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024;
-const TELEGRAM_STOP_REQUEST_TTL_MS = 30_000;
 // Telegram's typing indicator expires after ~5s, so it must be re-sent. 3s leaves room for a late timer
 // or a slow API call before it lapses.
 const TYPING_INTERVAL_MS = 3000;
@@ -445,40 +445,10 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 	// session (and its Working Note/Active Context Window) on every update.
 	const cwd = options.cwd ?? process.env.THEOSES_TELEGRAM_CWD ?? process.cwd();
 	const sessions = new Map<string, Promise<AgentSession>>();
-	const queues = new Map<string, Promise<void>>();
-	// Tracks the tool currently running for each chat, so a stop command can report what it interrupted.
-	const runningTool = new Map<string, string | undefined>();
-	// Set right before abort() so the in-flight message handler skips sending its own (partial/empty) reply.
-	const haltedByStop = new Set<string>();
-	const stopRequested = new Map<string, { messageId: number; timer: ReturnType<typeof setTimeout> }>();
-	const queuedMessageIds = new Map<string, number[]>();
 	const albums = new Map<string, Array<NonNullable<Context["message"]>>>();
-	const queueDepth = new Map<string, number>();
-	const pendingResumes = new Map<string, ReturnType<typeof setTimeout>>();
+	// Queue scheduling, /stop targeting, running-tool tracking and auto-resume - see turn-queue.ts.
+	const turnQueue = createTurnQueue();
 	let toolCallDetailEnabled = loadToolCallDetailPreference();
-	const removeQueuedMessage = (chat: string, messageId: number): void => {
-		const queued = queuedMessageIds.get(chat);
-		if (!queued) return;
-		const remaining = queued.filter((id) => id !== messageId);
-		if (remaining.length > 0) queuedMessageIds.set(chat, remaining);
-		else queuedMessageIds.delete(chat);
-	};
-	const requestStop = (chat: string, messageId: number): void => {
-		const previous = stopRequested.get(chat);
-		if (previous) clearTimeout(previous.timer);
-		const timer = setTimeout(() => {
-			const request = stopRequested.get(chat);
-			if (request?.messageId === messageId) stopRequested.delete(chat);
-		}, TELEGRAM_STOP_REQUEST_TTL_MS);
-		stopRequested.set(chat, { messageId, timer });
-	};
-	const consumeStopRequest = (chat: string, messageId: number): boolean => {
-		const request = stopRequested.get(chat);
-		if (!request || request.messageId !== messageId) return false;
-		clearTimeout(request.timer);
-		stopRequested.delete(chat);
-		return true;
-	};
 
 	// One typing indicator per chat, shared by every message queued for it. It starts when a message is
 	// received (not when its turn reaches the model), so session load, attachment downloads and queue
@@ -525,25 +495,21 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 		if (chat !== ownerChatId || !ctx.message) return;
 
 		// Any new owner message supersedes a scheduled auto-resume: it either continues the task itself or redirects it.
-		const pendingResume = pendingResumes.get(chat);
-		if (pendingResume) {
-			clearTimeout(pendingResume);
-			pendingResumes.delete(chat);
-		}
+		const cancelledResume = turnQueue.cancelAutoResume(chat);
 
 		const text = messageText(ctx);
 		if (isStopCommand(text)) {
-			if (pendingResume) {
+			if (cancelledResume) {
 				await bot.api.sendMessage(ctx.chat.id, "Cancelled the automatic resume.");
 				return;
 			}
 			const existing = sessions.get(chat);
 			const session = existing ? await existing : undefined;
 			if (session?.isStreaming) {
-				const queuedMessageId = queuedMessageIds.get(chat)?.[0];
-				if (queuedMessageId !== undefined) requestStop(chat, queuedMessageId);
-				haltedByStop.add(chat);
-				const activity = runningTool.get(chat);
+				const queuedMessageId = turnQueue.nextQueuedMessageId(chat);
+				if (queuedMessageId !== undefined) turnQueue.requestStop(chat, queuedMessageId);
+				turnQueue.markHaltedByStop(chat);
+				const activity = turnQueue.getRunningTool(chat);
 				await session.abort();
 				await bot.api.sendMessage(
 					ctx.chat.id,
@@ -553,16 +519,16 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				);
 				return;
 			}
-			if ((queueDepth.get(chat) ?? 0) === 0) {
+			if (turnQueue.queueDepth(chat) === 0) {
 				await bot.api.sendMessage(ctx.chat.id, "Nothing is running.");
 				return;
 			}
-			const queuedMessageId = queuedMessageIds.get(chat)?.[0];
+			const queuedMessageId = turnQueue.nextQueuedMessageId(chat);
 			if (queuedMessageId === undefined) {
 				await bot.api.sendMessage(ctx.chat.id, "Nothing is queued.");
 				return;
 			}
-			requestStop(chat, queuedMessageId);
+			turnQueue.requestStop(chat, queuedMessageId);
 			await bot.api.sendMessage(ctx.chat.id, "Halted the queued message.");
 			return;
 		}
@@ -597,18 +563,14 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 
 		const messageId = ctx.message.message_id;
 		const releaseTyping = acquireTyping(chat, ctx.chat.id);
-		const queued = queuedMessageIds.get(chat) ?? [];
-		queued.push(messageId);
-		queuedMessageIds.set(chat, queued);
-		queueDepth.set(chat, (queueDepth.get(chat) ?? 0) + 1);
-		const previous = queues.get(chat) ?? Promise.resolve();
-		const next = previous.then(async () => {
+		turnQueue.trackDepth(chat);
+		const next = turnQueue.enqueue(chat, messageId, async () => {
 			if (albumKey) {
 				await new Promise((resolve) => setTimeout(resolve, ALBUM_WAIT_MS));
 				albums.delete(albumKey);
 			}
-			removeQueuedMessage(chat, messageId);
-			if (consumeStopRequest(chat, messageId)) return;
+			turnQueue.dequeue(chat, messageId);
+			if (turnQueue.consumeStopRequest(chat, messageId)) return;
 			const session = await sessionFor(chat, cwd, sessions);
 
 			const modelArg = parseModelCommand(messageText(ctx));
@@ -758,7 +720,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				}
 				if (event.type === "tool_execution_start") {
 					toolCallLogger.start(event.toolCallId);
-					runningTool.set(chat, event.toolName);
+					turnQueue.setRunningTool(chat, event.toolName);
 					if (toolCallDetailEnabled) {
 						toolCallEntries.push({ id: event.toolCallId, name: event.toolName, args: event.args });
 						setRichStatus(renderToolCallBlocks(toolCallEntries));
@@ -768,7 +730,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				}
 				if (event.type === "tool_execution_end") {
 					toolCallLogger.end(event);
-					runningTool.delete(chat);
+					turnQueue.setRunningTool(chat, undefined);
 					toolNames.push(event.toolName);
 					generatedImages.push(...extractGeneratedImages(event.result));
 					if (toolCallDetailEnabled) {
@@ -791,10 +753,10 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			} finally {
 				unsubscribe();
 				releaseTyping();
-				runningTool.delete(chat);
+				turnQueue.setRunningTool(chat, undefined);
 			}
 			await statusPending;
-			if (haltedByStop.delete(chat)) {
+			if (turnQueue.consumeHaltedByStop(chat)) {
 				if (statusMessageId !== undefined)
 					await bot.api.deleteMessage(ctx.chat.id, statusMessageId).catch(() => {});
 				return;
@@ -857,36 +819,30 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 						text: AUTO_RESUME_PROMPT,
 					},
 				};
-				pendingResumes.set(
+				turnQueue.scheduleAutoResume(
 					chat,
-					setTimeout(() => {
-						pendingResumes.delete(chat);
+					() => {
 						bot.handleUpdate(resume).catch((error: unknown) =>
 							console.error("Telegram auto-resume failed:", error),
 						);
-					}, AUTO_RESUME_DELAY_MS),
+					},
+					AUTO_RESUME_DELAY_MS,
 				);
 			}
 		});
-		queues.set(
-			chat,
-			next.catch(() => {}),
-		);
 		// Deliberately not awaited (issue #209): grammY's default bot.start() dispatches updates
 		// strictly sequentially, so awaiting the full turn here - which can run for many minutes
 		// on a long tool call - blocked the handler from returning, which blocked grammY from ever
 		// invoking the handler again for the NEXT incoming update. That made a "/stop"/"stop"/
 		// "halt" message (and anything else) undeliverable for the entire duration of an in-flight
 		// turn, including the one command specifically meant to interrupt it. The turn itself is
-		// still correctly ordered per chat via the `queues` chain above; this only lets grammY's
+		// still correctly ordered per chat via turnQueue's own chain; this only lets grammY's
 		// own dispatch loop move on to the next update instead of waiting on it.
 		void next
 			.finally(() => {
 				// Also covers turns that never reach the prompt: skipped by /stop, /model, or a failure.
 				releaseTyping();
-				const depth = (queueDepth.get(chat) ?? 1) - 1;
-				if (depth > 0) queueDepth.set(chat, depth);
-				else queueDepth.delete(chat);
+				turnQueue.untrackDepth(chat);
 			})
 			.catch(() => {});
 	});
