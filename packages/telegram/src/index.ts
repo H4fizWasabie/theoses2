@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Bot, type Context, InputFile } from "grammy";
+import type { Update } from "grammy/types";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
@@ -35,6 +36,14 @@ const ALBUM_WAIT_MS = 1000;
 const TYPING_FAILURE_LOG_INTERVAL_MS = 30_000;
 // Bot API's own documented ceiling for a rich message's text (headings/bold/tables/etc combined).
 const RICH_MESSAGE_CHAR_LIMIT = 32768;
+/**
+ * A turn that still ends in a provider error after the session's own retries gets one automatic
+ * follow-up after this delay - the same "Proceed" the owner otherwise had to type by hand (2026-09-24:
+ * four Xiaomi stream timeouts left a PR task idle for 9 minutes). Any owner message cancels it.
+ */
+const AUTO_RESUME_DELAY_MS = 60_000;
+const AUTO_RESUME_PROMPT =
+	"[automatic resume] Your previous turn stopped on a provider error before finishing. Continue the task from where you left off.";
 
 /**
  * Bot API 10.1 (June 2026) added sendRichMessage/InputRichMessage, with native pipe-table
@@ -447,6 +456,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 	const queuedMessageIds = new Map<string, number[]>();
 	const albums = new Map<string, Array<NonNullable<Context["message"]>>>();
 	const queueDepth = new Map<string, number>();
+	const pendingResumes = new Map<string, ReturnType<typeof setTimeout>>();
 	let toolCallDetailEnabled = loadToolCallDetailPreference();
 	const removeQueuedMessage = (chat: string, messageId: number): void => {
 		const queued = queuedMessageIds.get(chat);
@@ -516,8 +526,19 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 		const chat = chatId(ctx);
 		if (chat !== ownerChatId || !ctx.message) return;
 
+		// Any new owner message supersedes a scheduled auto-resume: it either continues the task itself or redirects it.
+		const pendingResume = pendingResumes.get(chat);
+		if (pendingResume) {
+			clearTimeout(pendingResume);
+			pendingResumes.delete(chat);
+		}
+
 		const text = messageText(ctx);
 		if (isStopCommand(text)) {
+			if (pendingResume) {
+				await bot.api.sendMessage(ctx.chat.id, "Cancelled the automatic resume.");
+				return;
+			}
 			const existing = sessions.get(chat);
 			const session = existing ? await existing : undefined;
 			if (session?.isStreaming) {
@@ -784,11 +805,21 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			// rather than being overwritten with the answer, so the answer always lands as a
 			// separate message instead of being glued onto (or replacing) the tool-call block.
 			const editTarget = toolCallDetailEnabled ? undefined : statusMessageId;
+			// Capped at one: a resume that fails again is reported and left for the owner.
+			const autoResume = lastError !== undefined && messageText(ctx) !== AUTO_RESUME_PROMPT;
+			const errorText =
+				lastError &&
+				`${lastError.provider}/${lastError.model} failed: ${lastError.message}` +
+					(autoResume
+						? `\nResuming automatically in ${AUTO_RESUME_DELAY_MS / 1000}s. Send any message to cancel.`
+						: "");
 			if (response) {
 				const footerNames = toolCallDetailEnabled ? [] : toolNames;
-				await sendTelegramReply(bot, ctx.chat.id, response, footerNames, ctx.message.message_id, editTarget);
-			} else if (lastError) {
-				const errorText = `${lastError.provider}/${lastError.model} failed: ${lastError.message}`;
+				// Narration from before the failure must not hide it (2026-09-24: the owner saw only "Now
+				// proving it works..." and assumed the model stopped without calling a tool).
+				const reply = errorText ? `${response}\n\n${errorText}` : response;
+				await sendTelegramReply(bot, ctx.chat.id, reply, footerNames, ctx.message.message_id, editTarget);
+			} else if (errorText) {
 				if (editTarget !== undefined) {
 					await bot.api.editMessageText(ctx.chat.id, editTarget, errorText).catch(() => {});
 				} else {
@@ -815,6 +846,30 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			}
 
 			settleTurn(session, messageText(ctx));
+
+			if (autoResume) {
+				// Re-enters through handleUpdate so the resume gets the normal queue, typing, status,
+				// /stop and reply handling, threaded to the message that started the failed task.
+				const resume: Update = {
+					update_id: 0,
+					message: {
+						message_id: ctx.message.message_id,
+						date: Math.floor(Date.now() / 1000),
+						chat: ctx.message.chat,
+						from: ctx.message.from,
+						text: AUTO_RESUME_PROMPT,
+					},
+				};
+				pendingResumes.set(
+					chat,
+					setTimeout(() => {
+						pendingResumes.delete(chat);
+						bot.handleUpdate(resume).catch((error: unknown) =>
+							console.error("Telegram auto-resume failed:", error),
+						);
+					}, AUTO_RESUME_DELAY_MS),
+				);
+			}
 		});
 		queues.set(
 			chat,

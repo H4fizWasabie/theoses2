@@ -160,7 +160,7 @@ function typingHarness(options: { sessionGate?: Promise<void> } = {}) {
 	const session = {
 		isStreaming: false,
 		prompt: vi.fn(
-			() =>
+			(_text: string) =>
 				new Promise<void>((resolve) => {
 					prompts.push(resolve);
 				}),
@@ -451,6 +451,105 @@ describe("Telegram photo albums", () => {
 			expect(options.images).toHaveLength(3);
 		} finally {
 			vi.unstubAllGlobals();
+		}
+	});
+});
+
+describe("Telegram turn that ends on a provider error", () => {
+	function failedTurnHarness() {
+		const harness = typingHarness();
+		const outbound: string[] = [];
+		harness.bot.api.config.use(async (_prev, method, payload) => {
+			const p = payload as { text?: string; rich_message?: { markdown?: string } };
+			outbound.push(`${method}: ${p.rich_message?.markdown ?? p.text ?? ""}`);
+			return { ok: true, result: { message_id: 101 } } as never;
+		});
+		vi.mocked(harness.bot.api.sendMessage).mockImplementation(async (_chat, text) => {
+			outbound.push(`sendMessage: ${text}`);
+			return { message_id: 100 } as never;
+		});
+		const emit = (event: unknown) => {
+			for (const listener of harness.listeners) listener(event);
+		};
+		// Replays the 2026-09-24 incident: narration + tool call, then every retry of the next turn errors.
+		const failTurn = (narration?: string) => {
+			if (narration) {
+				emit({
+					type: "message_end",
+					message: { role: "assistant", content: [{ type: "text", text: narration }], stopReason: "toolUse" },
+				});
+				emit({ type: "tool_execution_start", toolName: "bash", toolCallId: "t1", args: {} });
+				emit({ type: "tool_execution_end", toolName: "bash", toolCallId: "t1", result: {}, isError: false });
+			}
+			for (let i = 0; i < 4; i++) {
+				emit({
+					type: "message_end",
+					message: {
+						role: "assistant",
+						content: [],
+						stopReason: "error",
+						errorMessage: "Provider timed out after 41191ms",
+						provider: "openrouter",
+						model: "xiaomi/mimo-v2.6-pro",
+					},
+				});
+			}
+		};
+		return { ...harness, outbound, failTurn };
+	}
+
+	it("shows the error after earlier narration and resumes once", async () => {
+		vi.useFakeTimers();
+		try {
+			const { bot, session, prompts, outbound, failTurn } = failedTurnHarness();
+
+			await bot.handleUpdate(messageUpdate(1, 1, "Pr the skip-list"));
+			await vi.advanceTimersByTimeAsync(0);
+			failTurn("Now proving it works - scratch DB test before any commit:");
+			prompts[0]?.();
+			await vi.advanceTimersByTimeAsync(0);
+
+			const reply = outbound.at(-1) ?? "";
+			expect(reply).toContain("Now proving it works");
+			expect(reply).toContain("openrouter/xiaomi/mimo-v2.6-pro failed: Provider timed out after 41191ms");
+			expect(reply).toContain("Resuming automatically in 60s");
+
+			await vi.advanceTimersByTimeAsync(60_000);
+			expect(session.prompt).toHaveBeenCalledTimes(2);
+			expect(String(vi.mocked(session.prompt).mock.calls[1]?.[0])).toContain("[automatic resume]");
+
+			// The resume fails too: reported, but not resumed again.
+			failTurn();
+			prompts[1]?.();
+			await vi.advanceTimersByTimeAsync(0);
+			expect(outbound.at(-1)).toContain("failed: Provider timed out");
+			expect(outbound.at(-1)).not.toContain("Resuming automatically");
+			await vi.advanceTimersByTimeAsync(120_000);
+			expect(session.prompt).toHaveBeenCalledTimes(2);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("cancels the pending resume when the owner sends a message", async () => {
+		vi.useFakeTimers();
+		try {
+			const { bot, session, prompts, failTurn } = failedTurnHarness();
+
+			await bot.handleUpdate(messageUpdate(1, 1, "Pr the skip-list"));
+			await vi.advanceTimersByTimeAsync(0);
+			failTurn();
+			prompts[0]?.();
+			await vi.advanceTimersByTimeAsync(0);
+
+			await bot.handleUpdate(messageUpdate(2, 2, "Proceed"));
+			await vi.advanceTimersByTimeAsync(0);
+			prompts[1]?.();
+			await vi.advanceTimersByTimeAsync(120_000);
+
+			expect(vi.mocked(session.prompt).mock.calls.map((call) => call[0])).toEqual(["Pr the skip-list", "Proceed"]);
+		} finally {
+			vi.useRealTimers();
 		}
 	});
 });
