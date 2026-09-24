@@ -116,6 +116,8 @@ export function createTurnQueue(options: { stopRequestTtlMs?: number } = {}) {
 
 		/** Schedule `run` as chat's pending auto-resume; replaces (does not stack with) an existing one. */
 		scheduleAutoResume(chat: string, run: () => void, delayMs: number): void {
+			const previous = pendingResumes.get(chat);
+			if (previous) clearTimeout(previous);
 			pendingResumes.set(
 				chat,
 				setTimeout(() => {
