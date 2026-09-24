@@ -1049,6 +1049,22 @@ describe("edit tool fuzzy matching", () => {
 		).rejects.toThrow(/Closest match found at line 2/);
 	});
 
+	it("should show the current content when oldText is stale from an earlier edit", async () => {
+		const testFile = join(testDir, "near-miss-stale.txt");
+		writeFileSync(testFile, "header\nfunction f() {\n    const a = 1;\n    return a;\n}\n");
+		await editTool.execute("test-stale-1", {
+			path: testFile,
+			edits: [{ oldText: "const a = 1;", newText: "const a = 2;" }],
+		});
+
+		const stale = editTool.execute("test-stale-2", {
+			path: testFile,
+			edits: [{ oldText: "function f() {\n    const a = 1;\n    return a;\n}", newText: "function f() {}" }],
+		});
+		await expect(stale).rejects.toThrow(/Closest match found at line 2, but some lines differ/);
+		await expect(stale).rejects.toThrow(/3\t {4}const a = 2;/);
+	});
+
 	it("should not hint at a closest match when no line-level near miss exists", async () => {
 		const testFile = join(testDir, "near-miss-none.txt");
 		writeFileSync(testFile, "completely unrelated content\n");
