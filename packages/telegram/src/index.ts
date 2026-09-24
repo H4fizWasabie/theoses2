@@ -410,7 +410,10 @@ async function sessionFor(
 		// its empty constructor default - every extension (skills, prompts, themes too) silently
 		// never loads for Telegram sessions with no error, since discovery never runs at all.
 		await resourceLoader.reload();
-		const { session } = await createAgentSession({ sessionManager, thinkingLevel: "high", resourceLoader });
+		const { session } = await createAgentSession({ sessionManager, resourceLoader });
+		// settings.json's defaultThinkingLevel wins even over a resumed session's saved level, so the
+		// long-lived Telegram session can be retuned with a settings edit and restart. High when unset (#60).
+		session.setThinkingLevel(session.settingsManager.getDefaultThinkingLevel() ?? "high");
 		// Telegram document uploads are stored as artifacts (see the `ctx.message.document` branch
 		// below) and need convert_doc enabled to ever be read. Guard against it already being in
 		// the default active set (it is, as of the SDK's current defaults) - blindly appending it

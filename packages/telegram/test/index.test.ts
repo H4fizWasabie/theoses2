@@ -59,6 +59,8 @@ describe("Telegram stop queueing", () => {
 			getActiveToolNames: vi.fn(() => []),
 			setActiveToolsByName: vi.fn(),
 			sessionManager,
+			settingsManager: { getDefaultThinkingLevel: (): string | undefined => undefined },
+			setThinkingLevel: vi.fn(),
 			modelRuntime: {},
 		};
 
@@ -115,6 +117,8 @@ describe("Telegram update dispatch", () => {
 			getActiveToolNames: vi.fn(() => []),
 			setActiveToolsByName: vi.fn(),
 			sessionManager,
+			settingsManager: { getDefaultThinkingLevel: (): string | undefined => undefined },
+			setThinkingLevel: vi.fn(),
 			modelRuntime: {},
 		};
 
@@ -173,6 +177,8 @@ function typingHarness(options: { sessionGate?: Promise<void> } = {}) {
 		getActiveToolNames: vi.fn(() => []),
 		setActiveToolsByName: vi.fn(),
 		sessionManager,
+		settingsManager: { getDefaultThinkingLevel: (): string | undefined => undefined },
+		setThinkingLevel: vi.fn(),
 		modelRuntime: {},
 	};
 	vi.mocked(SessionManager.list).mockResolvedValue([]);
@@ -551,5 +557,21 @@ describe("Telegram turn that ends on a provider error", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+});
+
+describe("Telegram thinking level", () => {
+	it.each([
+		["medium", "medium"],
+		[undefined, "high"],
+	])("applies settings defaultThinkingLevel %s as %s", async (configured, expected) => {
+		const { bot, session, prompts } = typingHarness();
+		session.settingsManager.getDefaultThinkingLevel = () => configured;
+
+		await bot.handleUpdate(messageUpdate(1, 1, "hello"));
+		await vi.waitFor(() => expect(session.prompt).toHaveBeenCalledTimes(1));
+		prompts[0]?.();
+
+		expect(session.setThinkingLevel).toHaveBeenCalledWith(expected);
 	});
 });

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- changed: Telegram sessions use `defaultThinkingLevel` from settings.json instead of a hardcoded `high` (#60), including resumed sessions whose saved level would otherwise win. Unset still means `high`.
+
 ## [1.0.84] - 2026-09-24
 
 - fix: a turn that ends in a provider error after its retries now always shows the error, even when the model narrated before an earlier tool call in the same turn. Previously that narration was sent as the final reply and the error was dropped, so a failed turn looked like the model announcing a step and then idling.
