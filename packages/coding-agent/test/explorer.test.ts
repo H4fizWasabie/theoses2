@@ -1,10 +1,21 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AssistantMessage, EventStream, getModel } from "theoses-ai/compat";
+import { type AssistantMessage, EventStream, getModel, type ProviderHeaders } from "theoses-ai/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createExploreToolDefinition, resetExplorerConcurrencyForTests, runExplorer } from "../src/core/explorer.ts";
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
+import type { ProviderHooks } from "../src/core/provider-hooks.ts";
+
+/** Pass-through provider hooks, with the ones a test inspects overridden. */
+function hooks(overrides: Partial<ProviderHooks> = {}): ProviderHooks {
+	return {
+		onPayload: async (payload) => payload,
+		onResponse: async () => {},
+		transformHeaders: async (headers) => headers ?? {},
+		...overrides,
+	};
+}
 
 // ---------------------------------------------------------------------------
 // Scripted model: a fake ModelRuntime whose streamSimple replays a scripted
@@ -253,10 +264,15 @@ describe("explorer (issue #254)", () => {
 
 		it("forwards onPayload and onResponse to streamSimple options", async () => {
 			const { runtime, captured } = createCapturingRuntime(() => createAssistantMessage("done. ~1K in, 1/8 turns"));
-			const onPayload = (payload: unknown) => payload;
-			const onResponse = () => {};
+			const onPayload = async (payload: unknown) => payload;
+			const onResponse = async () => {};
 
-			await runExplorer({ question: "q", cwd: tempDir, modelRuntime: runtime, onPayload, onResponse });
+			await runExplorer({
+				question: "q",
+				cwd: tempDir,
+				modelRuntime: runtime,
+				providerHooks: hooks({ onPayload, onResponse }),
+			});
 
 			expect(captured.length).toBeGreaterThan(0);
 			for (const options of captured) {
@@ -267,9 +283,14 @@ describe("explorer (issue #254)", () => {
 
 		it("injects transformHeaders into streamSimple options, preserving fallback when absent", async () => {
 			const { runtime, captured } = createCapturingRuntime(() => createAssistantMessage("done. ~1K in, 1/8 turns"));
-			const transformHeaders = (headers: Record<string, string | null>) => ({ ...headers, "x-probe": "1" });
+			const transformHeaders = async (headers: ProviderHeaders | undefined) => ({ ...headers, "x-probe": "1" });
 
-			await runExplorer({ question: "q", cwd: tempDir, modelRuntime: runtime, transformHeaders });
+			await runExplorer({
+				question: "q",
+				cwd: tempDir,
+				modelRuntime: runtime,
+				providerHooks: hooks({ transformHeaders }),
+			});
 
 			expect(captured.length).toBeGreaterThan(0);
 			for (const options of captured) {
@@ -286,12 +307,17 @@ describe("explorer (issue #254)", () => {
 		it("passes the explorer's resolved model as transformHeaders' second argument", async () => {
 			const { runtime, captured } = createCapturingRuntime(() => createAssistantMessage("done. ~1K in, 1/8 turns"));
 			const seenModels: unknown[] = [];
-			const transformHeaders = (headers: Record<string, string | null>, model?: unknown) => {
+			const transformHeaders = async (headers: ProviderHeaders | undefined, model: unknown) => {
 				seenModels.push(model);
-				return headers;
+				return headers ?? {};
 			};
 
-			await runExplorer({ question: "q", cwd: tempDir, modelRuntime: runtime, transformHeaders });
+			await runExplorer({
+				question: "q",
+				cwd: tempDir,
+				modelRuntime: runtime,
+				providerHooks: hooks({ transformHeaders }),
+			});
 
 			expect(captured.length).toBeGreaterThan(0);
 			for (const options of captured) {
@@ -310,8 +336,12 @@ describe("explorer (issue #254)", () => {
 			const { runtime, captured } = createCapturingRuntime(() =>
 				createAssistantMessage("answer. ~1K in, 1/8 turns"),
 			);
-			const onPayload = (payload: unknown) => payload;
-			const definition = createExploreToolDefinition({ cwd: tempDir, modelRuntime: runtime, onPayload });
+			const onPayload = async (payload: unknown) => payload;
+			const definition = createExploreToolDefinition({
+				cwd: tempDir,
+				modelRuntime: runtime,
+				providerHooks: hooks({ onPayload }),
+			});
 
 			await definition.execute("id-260", { question: "where is X?" }, undefined, undefined, {} as never);
 

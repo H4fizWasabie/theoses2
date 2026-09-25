@@ -76,7 +76,7 @@ import {
 } from "./compaction/index.ts";
 import { pruneFinishedTurnOutputs } from "./context-pruning.ts";
 import { DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS } from "./defaults.ts";
-import { createExploreToolDefinition, type ExploreToolDeps } from "./explorer.ts";
+import { createExploreToolDefinition } from "./explorer.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
@@ -114,6 +114,7 @@ import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
+import { extensionProviderHooks } from "./provider-hooks.ts";
 import { createResearchToolDefinition, ResearchJobs } from "./researcher.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import { logServedProvider } from "./served-provider-log.ts";
@@ -3049,31 +3050,8 @@ export class AgentSession {
 				});
 
 		// Explorer/research sub-agent tools (issues #254, #260, #263) route their provider traffic
-		// through the same extension events the main session emits (sdk.ts's streamFn/onPayload/
-		// onResponse), so cost-watch can see and route their requests under their own model instead
-		// of the session's. The runner is read lazily inside each hook because these tools are built
-		// before the ExtensionRunner below is (re)created, and the runner is rebuilt on runtime
-		// rebuilds. Shared by both tools below — identical regardless of which sub-agent is calling.
-		const backgroundModelHooks: Pick<ExploreToolDeps, "onPayload" | "onResponse" | "transformHeaders"> = {
-			onPayload: async (payload, model) => {
-				const runner = this._extensionRunner;
-				return runner?.hasHandlers("before_provider_request")
-					? runner.emitBeforeProviderRequest(payload, model)
-					: payload;
-			},
-			onResponse: async (response, model) => {
-				const runner = this._extensionRunner;
-				if (runner?.hasHandlers("after_provider_response")) {
-					await runner.emitAfterProviderResponse({ status: response.status, headers: response.headers }, model);
-				}
-			},
-			transformHeaders: async (requestHeaders, model) => {
-				const runner = this._extensionRunner;
-				return runner?.hasHandlers("before_provider_headers")
-					? runner.emitBeforeProviderHeaders(requestHeaders ?? {}, model)
-					: (requestHeaders ?? {});
-			},
-		};
+		// through the same extension events as the main session, under their own model.
+		const providerHooks = extensionProviderHooks(() => this._extensionRunner);
 
 		// Merged into the base definitions here rather than exported through core/tools/index.ts:
 		// tools/index.ts already sits in an import cycle with core/extensions/types.ts, and
@@ -3083,14 +3061,14 @@ export class AgentSession {
 		(baseToolDefinitions as Record<string, ToolDefinition<any>>).explore = createExploreToolDefinition({
 			cwd: this._cwd,
 			modelRuntime: this._modelRuntime,
-			...backgroundModelHooks,
+			providerHooks,
 		});
 
 		// Same reason as `explore` above for living here rather than in tools/index.ts.
 		(baseToolDefinitions as Record<string, ToolDefinition<any>>).research = createResearchToolDefinition({
 			modelRuntime: this._modelRuntime,
 			jobs: this._researchJobs,
-			...backgroundModelHooks,
+			providerHooks,
 		});
 
 		this._baseToolDefinitions = new Map(

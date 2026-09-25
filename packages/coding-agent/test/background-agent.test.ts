@@ -153,7 +153,7 @@ describe("createBudgetedAgent", () => {
 		let seenStreamOptions: { onPayload?: unknown; onResponse?: unknown; transformHeaders?: unknown } | undefined;
 		const onPayload = vi.fn(async (payload: unknown) => payload);
 		const onResponse = vi.fn(async () => {});
-		const transformHeaders = vi.fn(async (headers: ProviderHeaders) => headers);
+		const transformHeaders = vi.fn(async (headers: ProviderHeaders | undefined) => headers ?? {});
 		const runtime = {
 			getModel: () => model,
 			streamSimple: (_model: unknown, _context: unknown, streamOptions: Record<string, unknown>) => {
@@ -175,9 +175,7 @@ describe("createBudgetedAgent", () => {
 			modelRuntime: runtime,
 			maxTurns: 5,
 			maxInputTokens: 100_000,
-			onPayload,
-			onResponse,
-			transformHeaders,
+			providerHooks: { onPayload, onResponse, transformHeaders },
 		});
 		await handle.prompt("question");
 

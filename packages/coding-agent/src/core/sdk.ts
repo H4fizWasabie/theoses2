@@ -17,6 +17,7 @@ import type {
 import { convertToLlm } from "./messages.ts";
 import { findInitialModel } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
+import { extensionProviderHooks } from "./provider-hooks.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
 import { getDefaultSessionDir, limitActiveContextMessages, SessionManager } from "./session-manager.ts";
@@ -401,6 +402,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	};
 
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};
+	const providerHooks = extensionProviderHooks(() => extensionRunnerRef.current);
 
 	agent = new Agent({
 		initialState: {
@@ -419,39 +421,18 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			const timeoutMs = options?.timeoutMs ?? providerRetrySettings.timeoutMs ?? effectiveTimeoutMs;
 			const websocketConnectTimeoutMs =
 				options?.websocketConnectTimeoutMs ?? settingsManager.getWebSocketConnectTimeoutMs();
-			const headerRunner = extensionRunnerRef.current;
 			return modelRuntime.streamSimple(model, context, {
 				...options,
 				timeoutMs,
 				websocketConnectTimeoutMs,
 				maxRetries: options?.maxRetries ?? providerRetrySettings.maxRetries,
 				maxRetryDelayMs: options?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
-				// Issue #263: pass `model` (this streamFn's own closure param) through so `ctx.model`
-				// reflects the request actually in flight rather than ExtensionRunner's session-level
-				// getModel(). Harmless no-op today since this Agent only ever runs the session's one
-				// model, but leaving it as session-level here while agent-session.ts's explorer hooks
-				// (which DO need this) pass the real model would be an inconsistent, easy-to-miss trap.
-				transformHeaders: async (requestHeaders) => {
-					return headerRunner?.hasHandlers("before_provider_headers")
-						? headerRunner.emitBeforeProviderHeaders(requestHeaders ?? {}, model)
-						: (requestHeaders ?? {});
-				},
+				// Issue #263: the request's own model, not the session-level one, like the background sub-agents.
+				transformHeaders: (requestHeaders) => providerHooks.transformHeaders(requestHeaders, model),
 			});
 		},
-		onPayload: async (payload, model) => {
-			const runner = extensionRunnerRef.current;
-			if (!runner?.hasHandlers("before_provider_request")) {
-				return payload;
-			}
-			return runner.emitBeforeProviderRequest(payload, model);
-		},
-		onResponse: async (response, model) => {
-			const runner = extensionRunnerRef.current;
-			if (!runner?.hasHandlers("after_provider_response")) {
-				return;
-			}
-			await runner.emitAfterProviderResponse({ status: response.status, headers: response.headers }, model);
-		},
+		onPayload: providerHooks.onPayload,
+		onResponse: providerHooks.onResponse,
 		sessionId: sessionManager.getSessionId(),
 		transformContext: async (messages) => {
 			const runner = extensionRunnerRef.current;
