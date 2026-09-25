@@ -96,7 +96,7 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 
 Single-context — one root `CONTEXT.md` + `docs/adr/`, despite this being an npm-workspaces monorepo. See `docs/agents/domain.md`.
 
-For repository-wide orientation or cross-package work, read `theo bible/README.md` first and follow its task index; use the Bible to navigate, then verify implemented behavior in the current source code.
+For repository-wide orientation or cross-package work, navigate with graft (see Code navigation above); `theo bible/README.md` covers architecture and intent only. Verify implemented behavior in the current source code.
 
 ## User Override
 

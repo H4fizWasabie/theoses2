@@ -12,33 +12,31 @@ Project context guides the investigation but is not authoritative. The current e
 - **Legacy**: historical or compatibility behavior, not the preferred current path.
 - **Unknown**: the current evidence is insufficient.
 
-This pass is complete for the current tracked revision: every in-scope path has been inspected, while exclusions are explicit and remain in the ledger. The measured completion gate is recorded in [14-coverage-ledger.md](14-coverage-ledger.md), with the path-by-path evidence ledger in [14-file-inventory.md](14-file-inventory.md).
+To locate code, files, tests, or config, use graft (`graft ask "<task>" --source`, `graft skeleton <file>`, `graft callers <symbol>`); it rebuilds from the working tree, so it cannot drift. This Bible covers architecture, intent, and decisions.
 
 ## Agent navigation index
 
-Start with this file, choose the smallest route that matches the task, then open the cited source paths. This Bible is a navigation aid; current executable source determines implemented behavior.
+Start with this file, choose the smallest route that matches the task, then open the cited source paths. Current executable source determines implemented behavior.
 
 | If you need to understand... | Start here | Then follow |
 |---|---|---|
-| The system in five minutes | [01 Executive overview](01-executive-overview.md) | [02 Repository map](02-repository-map.md), [03 Architecture](03-architecture.md) |
-| A user-facing feature | [04 Features](04-features.md) | [05 Runtime flows](05-runtime-flows.md), [13 Source index](13-source-index.md) |
+| The system in five minutes | [01 Executive overview](01-executive-overview.md) | [03 Architecture](03-architecture.md), `graft map` |
+| A user-facing feature | [04 Features](04-features.md) | [05 Runtime flows](05-runtime-flows.md), `graft ask` |
 | What happens during a prompt | [05 Runtime flows](05-runtime-flows.md) | [03 Architecture](03-architecture.md), [06 Data model](06-data-model.md), relevant source links |
 | Sessions, memory, compaction, or persistence | [06 Data model](06-data-model.md) | [04 Features](04-features.md), [08 Cross-cutting mechanisms](08-cross-cutting-mechanisms.md) |
-| Public APIs or package boundaries | [07 Interfaces](07-interfaces.md) | [02 Repository map](02-repository-map.md), [13 Source index](13-source-index.md) |
-| Settings, environment variables, or resource loading | [16 Configuration index](16-configuration-index.md) | [08 Cross-cutting mechanisms](08-cross-cutting-mechanisms.md), [14 File inventory](14-file-inventory.md) |
-| AI providers, models, auth, or streaming | [19 AI and provider architecture](19-ai-provider-architecture.md) | [07 Interfaces](07-interfaces.md), [16 Configuration index](16-configuration-index.md), provider source/tests |
+| Public APIs or package boundaries | [07 Interfaces](07-interfaces.md) | `graft skeleton <file>`, `graft callers <symbol>` |
+| Settings, environment variables, or resource loading | [08 Cross-cutting mechanisms](08-cross-cutting-mechanisms.md) | `graft grep "<setting or env var>"` |
+| AI providers, models, auth, or streaming | [19 AI and provider architecture](19-ai-provider-architecture.md) | [07 Interfaces](07-interfaces.md), provider source/tests |
 | Dashboard, Telegram, RPC, client, or server integration | [07 Interfaces](07-interfaces.md) | [05 Runtime flows](05-runtime-flows.md), [09 Operations](09-operations.md), adapter source/tests |
-| Tests and what they exercise | [17 Test and fixture index](17-test-index.md) | [10 Testing](10-testing.md), owning source and test file |
-| Exact path coverage or audit evidence | [14 Coverage ledger](14-coverage-ledger.md) | [14 File inventory](14-file-inventory.md), [13 Source index](13-source-index.md) |
+| Tests and what they exercise | [10 Testing](10-testing.md) | `graft grep "<symbol>"` scoped to `test/`, owning source and test file |
 | Risks, uncertainty, or unresolved design questions | [11 Risk register](11-risk-register.md) | [15 Open questions](15-open-questions.md), cited source paths |
-| Operations, release, CI, or deployment seams | [09 Operations](09-operations.md) | [10 Testing](10-testing.md), [16 Configuration index](16-configuration-index.md) |
-| TypeScript-to-Go rewrite planning or feature parity | [20 Go rewrite parity plan](20-go-rewrite-parity-plan.md) | [03 Architecture](03-architecture.md), [06 Data model](06-data-model.md), [07 Interfaces](07-interfaces.md), [17 Test and fixture index](17-test-index.md) |
-| How to continue or refresh this documentation | [18 Continuation note](18-continuation.md) | [14 Coverage ledger](14-coverage-ledger.md), changed source paths |
+| Operations, release, CI, or deployment seams | [09 Operations](09-operations.md) | [10 Testing](10-testing.md) |
+| TypeScript-to-Go rewrite planning or feature parity | [20 Go rewrite parity plan](20-go-rewrite-parity-plan.md) | [03 Architecture](03-architecture.md), [06 Data model](06-data-model.md), [07 Interfaces](07-interfaces.md) |
+| How to continue or refresh this documentation | [18 Continuation note](18-continuation.md) | changed source paths |
 
 ## Contents
 
 1. [Executive overview](01-executive-overview.md)
-2. [Repository map](02-repository-map.md)
 3. [Architecture](03-architecture.md)
 4. [Features](04-features.md)
 5. [Runtime flows](05-runtime-flows.md)
@@ -49,11 +47,7 @@ Start with this file, choose the smallest route that matches the task, then open
 10. [Testing](10-testing.md)
 11. [Risk register](11-risk-register.md)
 12. [Glossary](12-glossary.md)
-13. [Source index](13-source-index.md)
-14. [Coverage ledger](14-coverage-ledger.md)
 15. [Open questions](15-open-questions.md)
-16. [Configuration index](16-configuration-index.md)
-17. [Test and fixture index](17-test-index.md)
 18. [Continuation note](18-continuation.md)
 19. [AI and provider architecture](19-ai-provider-architecture.md)
 20. [TypeScript-to-Go rewrite parity plan](20-go-rewrite-parity-plan.md)

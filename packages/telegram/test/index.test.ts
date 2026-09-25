@@ -13,7 +13,7 @@ vi.mock("theoses-coding-agent", () => ({
 	getAgentDir: vi.fn(() => "/tmp/telegram-test-agent-dir"),
 }));
 
-import { createAgentSession, SessionManager } from "theoses-coding-agent";
+import { createAgentSession, type PromptResult, SessionManager } from "theoses-coding-agent";
 import { createTelegramBot, parseModelCommand, replyText } from "../src/index.ts";
 
 function messageUpdate(updateId: number, messageId: number, text: string): Update {
@@ -152,7 +152,7 @@ describe("Telegram update dispatch", () => {
 
 function typingHarness(options: { sessionGate?: Promise<void> } = {}) {
 	const listeners: Array<(event: unknown) => void> = [];
-	const prompts: Array<() => void> = [];
+	const prompts: Array<(result?: PromptResult) => void> = [];
 	const sessionManager = {
 		getChannelSessionKey: () => ({ channel: "telegram", channelSessionId: "1" }),
 		getCwd: () => "/tmp/telegram-test",
@@ -161,7 +161,7 @@ function typingHarness(options: { sessionGate?: Promise<void> } = {}) {
 		isStreaming: false,
 		prompt: vi.fn(
 			(_text: string, _options?: unknown) =>
-				new Promise<void>((resolve) => {
+				new Promise<PromptResult | undefined>((resolve) => {
 					prompts.push(resolve);
 				}),
 		),
@@ -476,7 +476,7 @@ describe("Telegram turn that ends on a provider error", () => {
 			for (const listener of harness.listeners) listener(event);
 		};
 		// Replays the 2026-09-24 incident: narration + tool call, then every retry of the next turn errors.
-		const failTurn = (narration?: string) => {
+		const failTurn = (narration?: string): PromptResult => {
 			if (narration) {
 				emit({
 					type: "message_end",
@@ -485,19 +485,14 @@ describe("Telegram turn that ends on a provider error", () => {
 				emit({ type: "tool_execution_start", toolName: "bash", toolCallId: "t1", args: {} });
 				emit({ type: "tool_execution_end", toolName: "bash", toolCallId: "t1", result: {}, isError: false });
 			}
-			for (let i = 0; i < 4; i++) {
-				emit({
-					type: "message_end",
-					message: {
-						role: "assistant",
-						content: [],
-						stopReason: "error",
-						errorMessage: "Provider timed out after 41191ms",
-						provider: "openrouter",
-						model: "xiaomi/mimo-v2.6-pro",
-					},
-				});
-			}
+			return {
+				outcome: "failed",
+				finalError: {
+					message: "Provider timed out after 41191ms",
+					provider: "openrouter",
+					model: "xiaomi/mimo-v2.6-pro",
+				},
+			};
 		};
 		return { ...harness, outbound, failTurn };
 	}
@@ -509,8 +504,7 @@ describe("Telegram turn that ends on a provider error", () => {
 
 			await bot.handleUpdate(messageUpdate(1, 1, "Pr the skip-list"));
 			await vi.advanceTimersByTimeAsync(0);
-			failTurn("Now proving it works - scratch DB test before any commit:");
-			prompts[0]?.();
+			prompts[0]?.(failTurn("Now proving it works - scratch DB test before any commit:"));
 			await vi.advanceTimersByTimeAsync(0);
 
 			const reply = outbound.at(-1) ?? "";
@@ -523,8 +517,7 @@ describe("Telegram turn that ends on a provider error", () => {
 			expect(String(vi.mocked(session.prompt).mock.calls[1]?.[0])).toContain("[automatic resume]");
 
 			// The resume fails too: reported, but not resumed again.
-			failTurn();
-			prompts[1]?.();
+			prompts[1]?.(failTurn());
 			await vi.advanceTimersByTimeAsync(0);
 			expect(outbound.at(-1)).toContain("failed: Provider timed out");
 			expect(outbound.at(-1)).not.toContain("Resuming automatically");
@@ -542,8 +535,7 @@ describe("Telegram turn that ends on a provider error", () => {
 
 			await bot.handleUpdate(messageUpdate(1, 1, "Pr the skip-list"));
 			await vi.advanceTimersByTimeAsync(0);
-			failTurn();
-			prompts[0]?.();
+			prompts[0]?.(failTurn());
 			await vi.advanceTimersByTimeAsync(0);
 
 			await bot.handleUpdate(messageUpdate(2, 2, "Proceed"));

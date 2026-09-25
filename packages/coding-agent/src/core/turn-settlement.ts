@@ -4,7 +4,7 @@ import { findLastUserMessageEntryId, maybeDetectTaskBoundary } from "./task-boun
 
 /**
  * Turn Settlement: the fire-and-forget work after a Channel Session turn ends successfully. Triggered
- * by AgentSession on agent_end (outcome "completed", no retry pending, channel other than "cli");
+ * by AgentSession once an operation finishes (outcome "completed" after any retries, channel other than "cli");
  * adapters never call it. Never blocks or throws into the reply path.
  *
  * `userText` is a parameter, not derived from the session log, because it can differ from what was

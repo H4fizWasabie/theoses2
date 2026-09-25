@@ -6,7 +6,7 @@ Root CI runs `npm run build`, `npm run check`, and `npm test` after `npm ci --ig
 
 ## Test inventory
 
-The tracked inventory contains 500 test/fixture-classified files. The path-by-path list is [17-test-index.md](17-test-index.md). Exact package counts are an inventory metric, not pass results; fixtures/helpers are included where the path classifier identifies them.
+The tracked inventory contains 500 test/fixture-classified files. To find the tests for a symbol, use `graft grep "<symbol>"` or `graft callers <symbol>`. Exact package counts are an inventory metric, not pass results; fixtures/helpers are included where the path classifier identifies them.
 
 ## Verified testable contracts
 
