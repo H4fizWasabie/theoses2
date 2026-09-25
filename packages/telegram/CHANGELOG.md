@@ -5,6 +5,9 @@
 - fix: only `generate_image` results are delivered as Telegram photos. Images from any tool used to be sent, so reading an image file with `read` and then sending it via bash delivered the photo twice.
 - refactor: a failed turn's error now comes from `prompt()`'s `PromptResult.finalError` instead of being rebuilt from `message_end` events. No user-visible change.
 - refactor: session opening, the thinking-level default, turn submission, /stop and /model now go through the shared Channel Session module (`createChannelSessions`). `turn-queue.ts` drops `markHaltedByStop`/`consumeHaltedByStop` (a halted turn is now recognized by its `aborted` outcome) and `setRunningTool`/`getRunningTool` (reported by the session's `stop()`). The unmatched-`/model` reply no longer includes an example model id.
+- refactor: `inbound.ts` reads each update once (`readInbound`: stop, tool-call-detail toggle, /model, or prompt) and builds the prompt from a message or album (`resolvePrompt`); `turn-view.ts` renders one turn (status message, rich/HTML/plain fallback, provider error, generated photos) through an `Outbox` port with a grammy adapter. `index.ts` keeps only the bot wiring, queue and typing.
+- fix: an album's caption now also reaches Turn Settlement when it sits on a later photo (the prompt already used it). The automatic resume after a failed turn is queued directly instead of as a fake Telegram update, and settles no text, so memory consolidation and task-boundary detection no longer judge the harness's own "[automatic resume]" prompt as the owner's words.
+- change: the typing indicator is re-sent after every message the bot sends during a turn, not only after the status message.
 
 ## [1.0.88] - 2026-09-24
 

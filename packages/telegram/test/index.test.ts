@@ -21,7 +21,7 @@ vi.mock("theoses-coding-agent", () => ({
 }));
 
 import type { AgentSessionEvent, ChannelInput, PromptResult } from "theoses-coding-agent";
-import { createTelegramBot, extractGeneratedImages, parseModelCommand, replyText } from "../src/index.ts";
+import { createTelegramBot } from "../src/index.ts";
 
 /** A fake Channel Session whose turns run `turn`; `isRunning` is true while one does. */
 function fakeChannelSession(
@@ -302,104 +302,6 @@ describe("Telegram typing indicator", () => {
 	});
 });
 
-describe("replyText", () => {
-	function replyUpdate(replyToMessage: Record<string, unknown>): { message: { reply_to_message: unknown } } {
-		return { message: { reply_to_message: replyToMessage } } as never;
-	}
-
-	it("returns undefined when there is no reply", () => {
-		expect(replyText({ message: {} } as never)).toBeUndefined();
-	});
-
-	it("reads .text from a classic reply", () => {
-		expect(replyText(replyUpdate({ text: "hello" }) as never)).toBe("hello");
-	});
-
-	it("falls back to .caption when .text is absent", () => {
-		expect(replyText(replyUpdate({ caption: "a photo caption" }) as never)).toBe("a photo caption");
-	});
-
-	// Bot API 10.1 rich messages (sendRichMessage/rich editMessageText) come back on
-	// reply_to_message with no .text/.caption at all - only a rich_message.blocks tree. Payload
-	// shape below is exactly what a live reply to a rich-sent theoses answer returned.
-	it("flattens rich_message.blocks when .text/.caption are absent", () => {
-		const richMessage = {
-			blocks: [
-				{ type: "paragraph", text: "No need — already ran and finished. Summary:" },
-				{
-					type: "list",
-					items: [
-						{
-							label: "•",
-							blocks: [
-								{
-									type: "paragraph",
-									text: [
-										{ type: "bold", text: "Sync succeeded:" },
-										" 3 posts synced across daily-quote, daily-jokes, github-repo-highlight, workplace-drama.",
-									],
-								},
-							],
-						},
-						{
-							label: "•",
-							blocks: [
-								{
-									type: "paragraph",
-									text: [
-										{
-											type: "bold",
-											text: [{ type: "url", text: "learnings.md", url: "learnings.md" }, " regenerated"],
-										},
-										" for all 4 workspaces (fresh insight files the posting jobs read tomorrow).",
-									],
-								},
-							],
-						},
-						{
-							label: "•",
-							blocks: [
-								{ type: "paragraph", text: "Crontab is live again for tomorrow's automatic 21:30 KUL run." },
-							],
-						},
-					],
-				},
-				{ type: "paragraph", text: "Nothing left to do tonight, abah." },
-			],
-		};
-
-		const result = replyText(replyUpdate({ rich_message: richMessage }) as never);
-		expect(result).toContain("No need — already ran and finished. Summary:");
-		expect(result).toContain(
-			"Sync succeeded: 3 posts synced across daily-quote, daily-jokes, github-repo-highlight, workplace-drama.",
-		);
-		expect(result).toContain("learnings.md regenerated");
-		expect(result).toContain("Nothing left to do tonight, abah.");
-	});
-
-	it("returns undefined for an empty or malformed rich_message", () => {
-		expect(replyText(replyUpdate({ rich_message: {} }) as never)).toBeUndefined();
-		expect(replyText(replyUpdate({ rich_message: { blocks: [] } }) as never)).toBeUndefined();
-	});
-});
-
-describe("parseModelCommand", () => {
-	it("returns undefined for non-/model messages", () => {
-		expect(parseModelCommand("hello")).toBeUndefined();
-		expect(parseModelCommand("/modeling something")).toBeUndefined();
-	});
-
-	it("returns an empty string for bare /model", () => {
-		expect(parseModelCommand("/model")).toBe("");
-		expect(parseModelCommand("  /model  ")).toBe("");
-	});
-
-	it("returns the trimmed argument for /model <ref>", () => {
-		expect(parseModelCommand("/model deepseek/deepseek-v4.1-flash")).toBe("deepseek/deepseek-v4.1-flash");
-		expect(parseModelCommand("/model   z-ai/glm-5.3-flash  ")).toBe("z-ai/glm-5.3-flash");
-	});
-});
-
 describe("Telegram photo albums", () => {
 	it("handles every photo in an album as one turn, using the album caption", async () => {
 		const { bot, session, prompts } = typingHarness();
@@ -493,7 +395,10 @@ describe("Telegram turn that ends on a provider error", () => {
 
 			await vi.advanceTimersByTimeAsync(60_000);
 			expect(session.submit).toHaveBeenCalledTimes(2);
-			expect(String(session.submit.mock.calls[1]?.[0].text)).toContain("[automatic resume]");
+			const resume = session.submit.mock.calls[1]?.[0];
+			expect(resume?.text).toContain("[automatic resume]");
+			// Turn Settlement only judges what the owner wrote.
+			expect(resume?.settlementText).toBe("");
 
 			// The resume fails too: reported, but not resumed again.
 			prompts[1]?.(failTurn());
@@ -567,23 +472,5 @@ describe("inbound rich messages", () => {
 		expect(prompt).toContain("Paracetamol 500mg");
 		expect(prompt).toContain("20 boxes");
 		expect(prompt).toContain("Following this adjustment");
-	});
-
-	it("keeps text from block types it does not know when quoted", () => {
-		const result = replyText({ message: { reply_to_message: { rich_message: report } } } as never);
-		expect(result).toContain("Paracetamol 500mg");
-		expect(result).not.toContain("table");
-	});
-});
-
-describe("extractGeneratedImages", () => {
-	const result = { content: [{ type: "image", data: Buffer.from("png").toString("base64"), mimeType: "image/png" }] };
-
-	it("delivers generate_image output", () => {
-		expect(extractGeneratedImages("generate_image", result)).toEqual([Buffer.from("png")]);
-	});
-
-	it("skips images returned by read, which the agent may already be sending itself", () => {
-		expect(extractGeneratedImages("read", result)).toEqual([]);
 	});
 });
