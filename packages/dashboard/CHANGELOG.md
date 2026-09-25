@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.89] - 2026-09-25
 
 - fix: a chat turn that fails with a provider error after its retries now ends with an SSE `error` event (`provider/model failed: message`), shown in the chat status line, instead of `done` with no text. Telegram had this since #211; the dashboard was silent.
 - refactor: chat, stop and model switch go through the shared Channel Session module (`createChannelSessions`). The per-session promise-chain queue and the in-memory scan for not-yet-flushed sessions are gone. Dashboard sessions now take their thinking level from `settings.defaultThinkingLevel`, else `high` (was the session's saved level, else `medium`), matching Telegram.
