@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- change: memory consolidation now records what it has consolidated as `promoted_range` entries in the Channel Session's own log, the same record save_note uses, instead of in `consolidation-checkpoints.json`. Each deployment's progress now lives in its own session file, so two bots sharing a chat id can no longer overwrite each other's checkpoint (the 2026-09-19 incident). Compaction distillation now skips messages consolidation already covered, and consolidation skips turns the model already saved a note from. An existing checkpoint is migrated into the session log on that session's next consolidation check, and the file is deleted once empty. The failure cooldown is now kept per process.
+
 - change: `ChannelSessions.list()` is replaced by `find(sessionId)`, which returns the open Channel Session with that engine session id (including one not yet written to disk). `ChannelSession` exposes `thinkingLevel`. New `describeFinalError(result)` gives the owner-facing "provider/model failed: message" line both channel adapters show.
 
 - fix: the task-boundary summary call, which runs after every Telegram and dashboard turn, now logs its cost to `consolidation-usage.jsonl` like memory consolidation does, so the daily cost report counts it. Each line now carries a `caller` field (`consolidation` or `task-boundary`).
