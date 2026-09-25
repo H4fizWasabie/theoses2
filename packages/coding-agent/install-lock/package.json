@@ -1,10 +1,10 @@
 {
 	"name": "theoses-coding-agent-install",
-	"version": "1.0.89",
+	"version": "1.0.90",
 	"private": true,
 	"description": "Lockfile root used by the Pi installer and updater.",
 	"dependencies": {
-		"theoses-coding-agent": "1.0.89"
+		"theoses-coding-agent": "1.0.90"
 	},
 	"overrides": {
 		"protobufjs": "7.6.5",

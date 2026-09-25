@@ -1,6 +1,6 @@
 {
 	"name": "theoses-ai",
-	"version": "1.0.89",
+	"version": "1.0.90",
 	"description": "Unified LLM API with automatic model discovery and provider configuration",
 	"type": "module",
 	"main": "./dist/index.js",

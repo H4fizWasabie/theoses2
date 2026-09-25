@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.90] - 2026-09-25
 
 - fix: a dashboard session's runtime panel now shows the live model and thinking level of its open Channel Session. A new session showed no model until its first reply wrote the session file, and the thinking level could differ from the settings.json one actually in use. Telegram sessions and unopened dashboard sessions still read the session file.
 - refactor: open sessions are looked up with `ChannelSessions.find(sessionId)`, and a failed turn's error line comes from the shared `describeFinalError`.
