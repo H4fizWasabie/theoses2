@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.89] - 2026-09-25
 
 - fix: an operation now gets exactly one `operation_finished` record, written once its retries and overflow recovery are over and before any post-turn compaction. Previously every retried attempt wrote `failed`, so a crash during a retry (or its backoff) read as a closed turn and the next prompt got no Interrupted Notice. Stopping during retry backoff now records `aborted` (was `failed`), so the next prompt gets the Abort Notice.
