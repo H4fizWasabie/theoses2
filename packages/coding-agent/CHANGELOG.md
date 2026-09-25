@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat(prompt): the default system prompt now has the agent discuss ideas and open-ended changes before acting, then carry out what was agreed without re-asking (`<collaboration>`), and report work as done only after verifying it where it is actually used (`<verification>`). Replaces `<destructive_action_caution>`; confirmation before irreversible steps is kept unless that exact step was agreed. Drops "Plan silently; do not narrate the plan." from `<efficiency>`.
+
 ## [1.0.89] - 2026-09-25
 
 - fix: an operation now gets exactly one `operation_finished` record, written once its retries and overflow recovery are over and before any post-turn compaction. Previously every retried attempt wrote `failed`, so a crash during a retry (or its backoff) read as a closed turn and the next prompt got no Interrupted Notice. Stopping during retry backoff now records `aborted` (was `failed`), so the next prompt gets the Abort Notice.

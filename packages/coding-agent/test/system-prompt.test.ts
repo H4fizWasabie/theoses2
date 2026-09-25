@@ -144,7 +144,9 @@ describe("buildSystemPrompt", () => {
 				expect(prompt).not.toContain(`<${removed}>`);
 			}
 			expect(prompt).toContain("<no_blocking_waits>");
-			expect(prompt).toContain("<destructive_action_caution>");
+			expect(prompt).toContain("<collaboration>");
+			expect(prompt).toContain("<verification>");
+			expect(prompt).not.toContain("<destructive_action_caution>");
 			expect(prompt).toContain("<remember_guidance>");
 			expect(prompt).toContain("<working_note_guidance>");
 		});
