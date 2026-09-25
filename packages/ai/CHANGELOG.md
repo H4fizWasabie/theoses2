@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.90] - 2026-09-25
 
 - feat: `createRetryBudget(getPolicy)` holds one caller's retry state (attempt count, the `baseDelayMs * 2^(attempt-1)` backoff, a cancellable sleep, and one end report per run of retries). `retryAssistantCall` now runs on it; its behavior and callbacks are unchanged.

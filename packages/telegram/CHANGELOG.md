@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.90] - 2026-09-25
 
 - fix: /stop now halts a turn that is still preparing (album wait, session load, attachment download, `/model`). It used to reply "Nothing is queued." and let the turn run.

@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.90] - 2026-09-25
 
 - change: memory consolidation now records what it has consolidated as `promoted_range` entries in the Channel Session's own log, the same record save_note uses, instead of in `consolidation-checkpoints.json`. Each deployment's progress now lives in its own session file, so two bots sharing a chat id can no longer overwrite each other's checkpoint (the 2026-09-19 incident). Compaction distillation now skips messages consolidation already covered, and consolidation skips turns the model already saved a note from. An existing checkpoint is migrated into the session log on that session's next consolidation check, and the file is deleted once empty. The failure cooldown is now kept per process.
