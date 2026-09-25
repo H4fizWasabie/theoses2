@@ -80,4 +80,4 @@ The exclusions are deliberate and path-specific: lockfiles, generated model/cata
 
 ## Maintenance frontier
 
-There is no uninspected-file frontier at this revision. Future changes should refresh Graphify/CodeGraph after source changes, re-read changed paths, update the ledger/source index/open questions, and preserve the source-authority rule: project context guides investigation but current executable source determines implemented behavior.
+There is no uninspected-file frontier at this revision. Future changes should refresh Graphify/CodeGraph after source changes, re-read changed paths, update the open questions, and preserve the source-authority rule: project context guides investigation but current executable source determines implemented behavior.

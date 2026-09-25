@@ -4,7 +4,7 @@
 
 This is a planning and reference document only. It does not authorize a rewrite, a parallel implementation, a deployment, or a cutover. The current TypeScript source remains the behavioral oracle until a replacement is explicitly approved.
 
-The Bible provides an inventory and navigation map. It does not prove behavioral parity: generated model catalogs, live provider behavior, terminal/browser behavior, Telegram delivery, deployment behavior, and every test execution still require separate evidence ([14 Coverage ledger](14-coverage-ledger.md), [10 Testing](10-testing.md)).
+The Bible describes architecture and intent. It does not prove behavioral parity: generated model catalogs, live provider behavior, terminal/browser behavior, Telegram delivery, deployment behavior, and every test execution still require separate evidence ([10 Testing](10-testing.md)).
 
 ## Recommendation
 

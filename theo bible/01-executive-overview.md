@@ -20,4 +20,4 @@ The durable unit is a channel session, not a one-shot prompt. A session manager 
 
 ## Current evidence limit
 
-The codebase-wide Bible completion gate passes for the current tracked revision: every in-scope path was inspected, while generated, vendored, lockfile, and binary artifacts are explicitly excluded with reasons. Live provider, terminal, browser, Telegram, deployment, and full-suite execution remain environment-dependent evidence gaps. See [14-coverage-ledger.md](14-coverage-ledger.md), [14-file-inventory.md](14-file-inventory.md), and [15-open-questions.md](15-open-questions.md).
+The codebase-wide Bible completion gate passes for the current tracked revision: every in-scope path was inspected, while generated, vendored, lockfile, and binary artifacts are explicitly excluded with reasons. Live provider, terminal, browser, Telegram, deployment, and full-suite execution remain environment-dependent evidence gaps. See [15-open-questions.md](15-open-questions.md).
