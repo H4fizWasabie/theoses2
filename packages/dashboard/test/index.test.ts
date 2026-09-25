@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fauxAssistantMessage, registerFauxProvider } from "theoses-ai/compat";
 import { createDashboardServer } from "../src/index.ts";
 
 async function listen(server: ReturnType<typeof createDashboardServer>): Promise<string> {
@@ -147,6 +148,57 @@ test("dashboard session runtime info is read-only and never exposes credentials"
 		assert.doesNotMatch(serialized, /apiKey|api_key|credential|oauth|refresh|access_token/i);
 	} finally {
 		await close(server);
+	}
+});
+
+test("dashboard reports a turn that fails with a provider error instead of ending silently", async () => {
+	const root = await mkdtemp(join(tmpdir(), "theoses-dashboard-failure-"));
+	const agentDir = join(root, "agent");
+	await mkdir(agentDir);
+	const faux = registerFauxProvider();
+	const model = faux.getModel();
+	await writeFile(
+		join(agentDir, "models.json"),
+		JSON.stringify({
+			providers: {
+				[model.provider]: {
+					baseUrl: model.baseUrl,
+					apiKey: "faux-key",
+					api: faux.api,
+					models: [{ id: model.id, name: model.name, reasoning: model.reasoning, input: model.input }],
+				},
+			},
+		}),
+	);
+	await writeFile(
+		join(agentDir, "settings.json"),
+		JSON.stringify({ defaultProvider: model.provider, defaultModel: model.id, retry: { enabled: false } }),
+	);
+	const previousAgentDir = process.env.THEOSES_CODING_AGENT_DIR;
+	process.env.THEOSES_CODING_AGENT_DIR = agentDir;
+	faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "Provider timed out" })]);
+	const server = createDashboardServer({ accessToken: "test-owner-token", cwd: root });
+	const base = await listen(server);
+	try {
+		const created = await fetch(`${base}/api/sessions`, {
+			method: "POST",
+			headers: { Authorization: "Bearer test-owner-token" },
+		});
+		const session = (await created.json()) as { id: string };
+
+		const reply = await fetch(`${base}/api/sessions/${encodeURIComponent(session.id)}/messages`, {
+			method: "POST",
+			headers: { Authorization: "Bearer test-owner-token", "Content-Type": "application/json" },
+			body: JSON.stringify({ message: "hi" }),
+		});
+		const stream = await reply.text();
+		assert.match(stream, /event: error\ndata: .*failed: Provider timed out/);
+		assert.doesNotMatch(stream, /event: done/);
+	} finally {
+		await close(server);
+		faux.unregister();
+		if (previousAgentDir === undefined) delete process.env.THEOSES_CODING_AGENT_DIR;
+		else process.env.THEOSES_CODING_AGENT_DIR = previousAgentDir;
 	}
 });
 

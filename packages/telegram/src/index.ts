@@ -3,15 +3,11 @@ import { join } from "node:path";
 import { Bot, type Context, InputFile } from "grammy";
 import type { Update } from "grammy/types";
 import {
-	type AgentSession,
 	type AgentSessionEvent,
 	configureHttpDispatcher,
-	createAgentSession,
-	findExactModelReferenceMatch,
+	createChannelSessions,
 	getAgentDir,
 	type PromptResult,
-	type SessionInfo,
-	SessionManager,
 } from "theoses-coding-agent";
 import { chunkHtml, formatTelegramHtml, renderToolCallBlocks, splitSections, type ToolCallEntry } from "./format.ts";
 import { createToolCallLogger } from "./tool-call-log.ts";
@@ -375,45 +371,6 @@ async function downloadFile(bot: Bot, token: string, fileId: string): Promise<Ui
 	return data;
 }
 
-async function sessionFor(
-	chat: string,
-	cwd: string,
-	sessions: Map<string, Promise<AgentSession>>,
-): Promise<AgentSession> {
-	const existing = sessions.get(chat);
-	if (existing) return existing;
-	const created = (async () => {
-		const key = { channel: CHANNEL, channelSessionId: chat };
-		const matches: SessionInfo[] = await SessionManager.list(cwd, undefined, undefined, key);
-		const sessionManager = matches[0]
-			? SessionManager.open(matches[0].path, undefined, cwd)
-			: SessionManager.create(cwd, undefined, key);
-		// No `tools:` allowlist here (unlike an earlier version of this code): passing one sets
-		// both the active set AND a hard gate that filters extension-registered tools out of the
-		// registry entirely (agent-session.ts's isAllowedTool), regardless of session age or
-		// process restarts - that's what silently kept every extension's tools (e.g. procura's
-		// four) off Telegram no matter how the extension or session were refreshed. Leaving it
-		// unset matches the dashboard channel: full SDK default tools plus every extension tool.
-		// convert_doc (needed to read Telegram document uploads stored as artifacts, see the
-		// `ctx.message.document` branch below) is already in that default active set - see issue #211.
-		//
-		// appendSystemPrompt (issues #195/#196) adds Telegram-only rich-formatting guidance -
-		// collapsible blocks and footnotes have no existing habit to build on, unlike headings/quotes,
-		// so they need explicit guidance. Channel-scoped deliberately: this cwd is Telegram-specific,
-		// so it never reaches the dashboard or CLI, which don't render rich messages the same way.
-		const { session } = await createAgentSession({
-			sessionManager,
-			appendSystemPrompt: [TELEGRAM_RICH_FORMATTING_GUIDANCE],
-		});
-		// settings.json's defaultThinkingLevel wins even over a resumed session's saved level, so the
-		// long-lived Telegram session can be retuned with a settings edit and restart. High when unset (#60).
-		session.setThinkingLevel(session.settingsManager.getDefaultThinkingLevel() ?? "high");
-		return session;
-	})();
-	sessions.set(chat, created);
-	return created;
-}
-
 export interface TelegramBotOptions {
 	token?: string;
 	ownerChatId?: string;
@@ -433,7 +390,15 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 	// which changes every release and would otherwise silently orphan the running
 	// session (and its Working Note/Active Context Window) on every update.
 	const cwd = options.cwd ?? process.env.THEOSES_TELEGRAM_CWD ?? process.cwd();
-	const sessions = new Map<string, Promise<AgentSession>>();
+	// No `tools:` allowlist: it would also hard-gate extension tools out of the registry (issue #211), and
+	// convert_doc, needed for document uploads, is in the default active set. appendSystemPrompt (issues
+	// #195/#196) adds Telegram-only rich-formatting guidance - collapsible blocks and footnotes have no
+	// existing habit to build on - scoped to this channel so it never reaches the dashboard or CLI.
+	const channelSessions = createChannelSessions({
+		channel: CHANNEL,
+		cwd,
+		appendSystemPrompt: [TELEGRAM_RICH_FORMATTING_GUIDANCE],
+	});
 	const albums = new Map<string, Array<NonNullable<Context["message"]>>>();
 	// Queue scheduling, /stop targeting, running-tool tracking and auto-resume - see turn-queue.ts.
 	const turnQueue = createTurnQueue();
@@ -492,14 +457,12 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				await bot.api.sendMessage(ctx.chat.id, "Cancelled the automatic resume.");
 				return;
 			}
-			const existing = sessions.get(chat);
-			const session = existing ? await existing : undefined;
-			if (session?.isStreaming) {
+			const session = channelSessions.list().find((open) => open.channelSessionId === chat);
+			if (session?.isRunning) {
+				// Marked before the abort, which lets the next queued turn start.
 				const queuedMessageId = turnQueue.nextQueuedMessageId(chat);
 				if (queuedMessageId !== undefined) turnQueue.requestStop(chat, queuedMessageId);
-				turnQueue.markHaltedByStop(chat);
-				const activity = turnQueue.getRunningTool(chat);
-				await session.abort();
+				const { runningTool: activity } = await session.stop();
 				await bot.api.sendMessage(
 					ctx.chat.id,
 					activity
@@ -560,7 +523,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			}
 			turnQueue.dequeue(chat, messageId);
 			if (turnQueue.consumeStopRequest(chat, messageId)) return;
-			const session = await sessionFor(chat, cwd, sessions);
+			const session = await channelSessions.open(chat);
 
 			const modelArg = parseModelCommand(messageText(ctx));
 			if (modelArg !== undefined) {
@@ -574,26 +537,11 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 					);
 					return;
 				}
-				const match = findExactModelReferenceMatch(modelArg, [...session.modelRuntime.getAvailableSnapshot()]);
-				if (!match) {
-					await bot.api.sendMessage(
-						ctx.chat.id,
-						`No exact match for "${modelArg}". Use the canonical provider/id (e.g. deepseek/deepseek-v4.1-flash).`,
-					);
-					return;
-				}
-				try {
-					// Session-only switch (mirrors the CLI TUI's `/model` default of persist: false) -
-					// this changes what this Telegram conversation uses going forward, not the global
-					// default in settings.json (which only seeds brand-new sessions).
-					await session.setModel(match, { persist: false });
-					await bot.api.sendMessage(ctx.chat.id, `Model: ${match.provider}/${match.id}`);
-				} catch (error) {
-					await bot.api.sendMessage(
-						ctx.chat.id,
-						`Couldn't switch model: ${error instanceof Error ? error.message : String(error)}`,
-					);
-				}
+				const switched = await session.switchModel(modelArg);
+				await bot.api.sendMessage(
+					ctx.chat.id,
+					"error" in switched ? switched.error : `Model: ${switched.model.provider}/${switched.model.id}`,
+				);
 				return;
 			}
 
@@ -620,7 +568,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 					if (document.mime_type?.startsWith("image/")) {
 						images.push(`data:${document.mime_type};base64,${Buffer.from(data).toString("base64")}`);
 					} else {
-						session.sessionManager.storeArtifact("telegram document", document.file_name ?? "document", data);
+						session.storeArtifact("telegram document", document.file_name ?? "document", data);
 						if (!captionText)
 							attachmentNote = noteFor(
 								document.file_name ?? "document",
@@ -639,7 +587,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 							const meta = media as { file_name?: string; mime_type?: string };
 							const name = meta.file_name ?? meta.mime_type ?? "media";
 							const mime = meta.mime_type ?? "unknown";
-							session.sessionManager.storeArtifact("telegram document", name, data);
+							session.storeArtifact("telegram document", name, data);
 							if (!captionText) attachmentNote = noteFor(name, mime, data.length, "media file");
 						} catch (e) {
 							console.error("Failed to download non-document media:", e);
@@ -699,11 +647,10 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			const toolCallEntries: ToolCallEntry[] = [];
 			const generatedImages: Buffer[] = [];
 			const toolCallLogger = createToolCallLogger();
-			const unsubscribe = session.subscribe((event) => {
+			const onEvent = (event: AgentSessionEvent) => {
 				response = assistantText(event) ?? response;
 				if (event.type === "tool_execution_start") {
 					toolCallLogger.start(event.toolCallId);
-					turnQueue.setRunningTool(chat, event.toolName);
 					if (toolCallDetailEnabled) {
 						toolCallEntries.push({ id: event.toolCallId, name: event.toolName, args: event.args });
 						setRichStatus(renderToolCallBlocks(toolCallEntries));
@@ -713,7 +660,6 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				}
 				if (event.type === "tool_execution_end") {
 					toolCallLogger.end(event);
-					turnQueue.setRunningTool(chat, undefined);
 					toolNames.push(event.toolName);
 					generatedImages.push(...extractGeneratedImages(event.result));
 					if (toolCallDetailEnabled) {
@@ -725,21 +671,23 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 						setRichStatus(renderToolCallBlocks(toolCallEntries));
 					}
 				}
-			});
+			};
 			try {
-				result = await session.prompt(captionText || attachmentNote || "", {
-					replyContext: replyText(ctx),
-					images: images.length ? images : undefined,
-					source: "extension",
-					settlementText: messageText(ctx),
-				});
+				result = await session.submit(
+					{
+						text: captionText || attachmentNote || "",
+						replyContext: replyText(ctx),
+						images: images.length ? images : undefined,
+						settlementText: messageText(ctx),
+					},
+					onEvent,
+				);
 			} finally {
-				unsubscribe();
 				releaseTyping();
-				turnQueue.setRunningTool(chat, undefined);
 			}
 			await statusPending;
-			if (turnQueue.consumeHaltedByStop(chat)) {
+			// /stop already replied; the halted turn's partial output is dropped.
+			if (result?.outcome === "aborted") {
 				if (statusMessageId !== undefined)
 					await bot.api.deleteMessage(ctx.chat.id, statusMessageId).catch(() => {});
 				return;

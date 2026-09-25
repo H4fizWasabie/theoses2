@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: an abort during a provider's lazy setup (auth resolution checks the caller's signal) now ends the stream with `stopReason: "aborted"` instead of `"error"`, matching the providers' own `signal.aborted ? "aborted" : "error"`. Stopping a turn while a tool ran hit this on the follow-up request, so the operation was recorded `failed` (no Abort Notice next turn) and could read as a provider failure.
+
 ## [1.0.88] - 2026-09-24
 
 ## [1.0.87] - 2026-09-24

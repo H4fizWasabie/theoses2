@@ -5,11 +5,11 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentMessage } from "theoses-agent-core";
 import {
-	type AgentSession,
 	type AgentSessionEvent,
+	type ChannelSession,
+	type ChannelSessions,
 	configureHttpDispatcher,
-	createAgentSession,
-	findExactModelReferenceMatch,
+	createChannelSessions,
 	getAgentDir,
 	type SessionInfo,
 	SessionManager,
@@ -27,12 +27,6 @@ const TELEGRAM_CHANNEL = "telegram";
 const DASHBOARD_TOKEN_COOKIE = "theoses_dashboard_token";
 const publicDirectory = fileURLToPath(new URL("./public/", import.meta.url));
 
-interface DashboardSession {
-	manager: SessionManager;
-	session: AgentSession;
-	queue: Promise<void>;
-}
-
 export interface DashboardServerOptions {
 	cwd?: string;
 	host?: string;
@@ -49,8 +43,6 @@ interface SessionView {
 	messageCount: number;
 	path: string;
 }
-
-const sessions = new Map<string, Promise<DashboardSession>>();
 
 function tokenMatches(candidate: string, expected: string): boolean {
 	const candidateBytes = Buffer.from(candidate);
@@ -248,63 +240,41 @@ async function visibleSessions(): Promise<SessionView[]> {
 		.map(sessionView);
 }
 
-async function findVisibleSession(id: string): Promise<SessionInfo> {
+async function findVisibleSession(id: string, channelSessions: ChannelSessions, cwd: string): Promise<SessionInfo> {
 	const info = (await SessionManager.listAll()).find(
 		(session) => session.id === id && (session.channel === DASHBOARD_CHANNEL || session.channel === TELEGRAM_CHANNEL),
 	);
 	if (info) return info;
 
 	// Not on disk yet: SessionManager only flushes a session file once it has an
-	// assistant message, so a brand-new session lives only in the in-memory map.
-	for (const [path, pending] of sessions) {
-		const record = await pending;
-		if (record.manager.getSessionId() !== id) continue;
-		const key = record.manager.getChannelSessionKey();
-		if (key.channel !== DASHBOARD_CHANNEL) continue;
-		return {
-			path,
-			id,
-			cwd: record.manager.getCwd(),
-			channel: key.channel,
-			channelSessionId: key.channelSessionId,
-			created: new Date(),
-			modified: new Date(),
-			messageCount: 0,
-			firstMessage: "",
-			allMessagesText: "",
-		};
-	}
-	throw new Error("Session not found");
-}
-
-async function dashboardSession(path: string): Promise<DashboardSession> {
-	const existing = sessions.get(path);
-	if (existing) return existing;
-	const created = (async () => {
-		const manager = SessionManager.open(path);
-		if (manager.getChannelSessionKey().channel !== DASHBOARD_CHANNEL) throw new Error("Session is read-only");
-		const { session } = await createAgentSession({ sessionManager: manager });
-		return { manager, session, queue: Promise.resolve() };
-	})();
-	sessions.set(path, created);
-	return created;
-}
-
-function setQueue(record: DashboardSession, work: Promise<void>): void {
-	record.queue = work.catch(() => {});
-}
-
-async function newDashboardSession(cwd: string): Promise<SessionView> {
-	const id = randomUUID();
-	const manager = SessionManager.create(cwd, undefined, {
+	// assistant message, so a brand-new session is only among the open Channel Sessions.
+	const open = channelSessions.list().find((session) => session.sessionId === id);
+	if (!open?.sessionFile) throw new Error("Session not found");
+	return {
+		path: open.sessionFile,
 		id,
+		cwd,
 		channel: DASHBOARD_CHANNEL,
-		channelSessionId: id,
-	});
-	const { session } = await createAgentSession({ sessionManager: manager });
-	const path = manager.getSessionFile();
+		channelSessionId: open.channelSessionId,
+		created: new Date(),
+		modified: new Date(),
+		messageCount: 0,
+		firstMessage: "",
+		allMessagesText: "",
+	};
+}
+
+/** The writable Channel Session behind a visible session; Telegram sessions are shown but never driven from here. */
+function dashboardSession(info: SessionInfo, channelSessions: ChannelSessions): Promise<ChannelSession> {
+	if (info.channel !== DASHBOARD_CHANNEL) throw new Error("Telegram sessions are read-only");
+	return channelSessions.open(info.channelSessionId ?? info.id, info.path);
+}
+
+async function newDashboardSession(channelSessions: ChannelSessions): Promise<SessionView> {
+	const session = await channelSessions.open(randomUUID());
+	const path = session.sessionFile;
 	if (!path) throw new Error("Dashboard session was not persisted");
-	sessions.set(path, Promise.resolve({ manager, session, queue: Promise.resolve() }));
+	const id = session.sessionId;
 	return {
 		id,
 		channel: DASHBOARD_CHANNEL,
@@ -329,9 +299,7 @@ function toolResultText(result: unknown): string {
 	return JSON.stringify(result);
 }
 
-async function streamChat(info: SessionInfo, request: IncomingMessage, response: ServerResponse): Promise<void> {
-	if (info.channel !== DASHBOARD_CHANNEL) throw new Error("Telegram sessions are read-only");
-	const record = await dashboardSession(info.path);
+async function streamChat(session: ChannelSession, request: IncomingMessage, response: ServerResponse): Promise<void> {
 	const input = await body(request);
 	const message = stringField(input, "message").trim();
 	if (!message) throw new Error("message is required");
@@ -344,34 +312,30 @@ async function streamChat(info: SessionInfo, request: IncomingMessage, response:
 		"X-Accel-Buffering": "no",
 	});
 
-	const work = record.queue.then(async () => {
-		const unsubscribe = record.session.subscribe((event: AgentSessionEvent) => {
-			if (event.type === "message_update" && event.message.role === "assistant") {
-				const delta = event.assistantMessageEvent;
-				if (delta.type === "text_delta") sseSend(response, "delta", { text: delta.delta });
-			} else if (event.type === "tool_execution_start") {
-				sseSend(response, "tool_call", { id: event.toolCallId, name: event.toolName, args: event.args });
-			} else if (event.type === "tool_execution_end") {
-				sseSend(response, "tool_result", {
-					id: event.toolCallId,
-					name: event.toolName,
-					result: toolResultText(event.result),
-					isError: event.isError,
-				});
-			} else if (event.type === "message_end" && event.message.role === "assistant") {
-				sseSend(response, "usage", usageSummary(event.message.usage));
-			}
-		});
-		try {
-			await record.session.prompt(message, { replyContext, source: "interactive" });
-		} finally {
-			unsubscribe();
+	const onEvent = (event: AgentSessionEvent) => {
+		if (event.type === "message_update" && event.message.role === "assistant") {
+			const delta = event.assistantMessageEvent;
+			if (delta.type === "text_delta") sseSend(response, "delta", { text: delta.delta });
+		} else if (event.type === "tool_execution_start") {
+			sseSend(response, "tool_call", { id: event.toolCallId, name: event.toolName, args: event.args });
+		} else if (event.type === "tool_execution_end") {
+			sseSend(response, "tool_result", {
+				id: event.toolCallId,
+				name: event.toolName,
+				result: toolResultText(event.result),
+				isError: event.isError,
+			});
+		} else if (event.type === "message_end" && event.message.role === "assistant") {
+			sseSend(response, "usage", usageSummary(event.message.usage));
 		}
-	});
-	setQueue(record, work);
+	};
 	try {
-		await work;
-		sseSend(response, "done", {});
+		const result = await session.submit({ text: message, replyContext }, onEvent);
+		// A turn that fails after its retries has no text to stream; without this the chat went silent (#211).
+		const failure = result?.finalError;
+		if (failure)
+			sseSend(response, "error", { message: `${failure.provider}/${failure.model} failed: ${failure.message}` });
+		else sseSend(response, "done", {});
 	} catch (error) {
 		sseSend(response, "error", { message: error instanceof Error ? error.message : String(error) });
 	} finally {
@@ -379,20 +343,10 @@ async function streamChat(info: SessionInfo, request: IncomingMessage, response:
 	}
 }
 
-async function stopChat(info: SessionInfo): Promise<void> {
-	if (info.channel !== DASHBOARD_CHANNEL) throw new Error("Telegram sessions are read-only");
-	const record = await dashboardSession(info.path);
-	await record.session.abort();
-}
-
-async function changeModel(info: SessionInfo, input: unknown): Promise<{ provider: string; id: string }> {
-	if (info.channel !== DASHBOARD_CHANNEL) throw new Error("Telegram sessions are read-only");
-	const modelArg = stringField(input, "model");
-	const record = await dashboardSession(info.path);
-	const match = findExactModelReferenceMatch(modelArg, [...record.session.modelRuntime.getAvailableSnapshot()]);
-	if (!match) throw new Error(`No exact match for "${modelArg}". Use the canonical provider/id.`);
-	await record.session.setModel(match, { persist: false });
-	return { provider: match.provider, id: match.id };
+async function changeModel(session: ChannelSession, input: unknown): Promise<{ provider: string; id: string }> {
+	const switched = await session.switchModel(stringField(input, "model"));
+	if ("error" in switched) throw new Error(switched.error);
+	return { provider: switched.model.provider, id: switched.model.id };
 }
 
 function errorStatus(error: unknown): number {
@@ -410,6 +364,7 @@ async function api(
 	response: ServerResponse,
 	url: URL,
 	cwd: string,
+	channelSessions: ChannelSessions,
 	telegramConfigPath: string,
 ): Promise<boolean> {
 	if (url.pathname === "/api/telegram" && request.method === "GET") {
@@ -432,25 +387,26 @@ async function api(
 		return true;
 	}
 	if (url.pathname === "/api/sessions" && request.method === "POST") {
-		json(response, 201, await newDashboardSession(cwd));
+		json(response, 201, await newDashboardSession(channelSessions));
 		return true;
 	}
 
 	const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)(?:\/(messages|stop|model))?$/);
 	if (sessionMatch) {
 		const id = decodeURIComponent(sessionMatch[1]);
-		const info = await findVisibleSession(id);
+		const info = await findVisibleSession(id, channelSessions, cwd);
 		if (sessionMatch[2] === "messages" && request.method === "POST") {
-			await streamChat(info, request, response);
+			await streamChat(await dashboardSession(info, channelSessions), request, response);
 			return true;
 		}
 		if (sessionMatch[2] === "stop" && request.method === "POST") {
-			await stopChat(info);
+			await (await dashboardSession(info, channelSessions)).stop();
 			json(response, 200, { ok: true });
 			return true;
 		}
 		if (sessionMatch[2] === "model" && request.method === "POST") {
-			json(response, 200, { model: await changeModel(info, await body(request)) });
+			const session = await dashboardSession(info, channelSessions);
+			json(response, 200, { model: await changeModel(session, await body(request)) });
 			return true;
 		}
 		if (request.method === "GET") {
@@ -521,6 +477,7 @@ export function createDashboardServer(options: DashboardServerOptions = {}) {
 	const cwd = options.cwd ?? process.env.THEOSES_DASHBOARD_CWD ?? process.cwd();
 	const accessToken = options.accessToken ?? process.env.THEOSES_DASHBOARD_TOKEN ?? "";
 	const telegramConfigPath = options.telegramConfigPath ?? join(getAgentDir(), "theoses.env");
+	const channelSessions = createChannelSessions({ channel: DASHBOARD_CHANNEL, cwd });
 	return createServer(async (request, response) => {
 		try {
 			const url = new URL(request.url ?? "/", "http://localhost");
@@ -530,7 +487,7 @@ export function createDashboardServer(options: DashboardServerOptions = {}) {
 					return;
 				}
 				if (!requireAccess(request, response, accessToken)) return;
-				if (await api(request, response, url, cwd, telegramConfigPath)) return;
+				if (await api(request, response, url, cwd, channelSessions, telegramConfigPath)) return;
 				json(response, 404, { error: "Not found" });
 				return;
 			}

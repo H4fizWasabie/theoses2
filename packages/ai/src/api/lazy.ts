@@ -52,8 +52,14 @@ export function lazyStream(
 	setup()
 		.then((inner) => forwardStream(outer, inner))
 		.catch((error) => {
-			const message = createSetupErrorMessage(model, error);
-			outer.push({ type: "error", reason: "error", error: message });
+			// Auth resolution checks the caller's signal, so a stop during setup lands here as an AbortError.
+			// Like the providers' own `signal.aborted ? "aborted" : "error"`, it must not read as a provider failure.
+			const aborted = error instanceof Error && error.name === "AbortError";
+			const message = {
+				...createSetupErrorMessage(model, error),
+				...(aborted ? { stopReason: "aborted" as const } : {}),
+			};
+			outer.push({ type: "error", reason: aborted ? "aborted" : "error", error: message });
 			outer.end(message);
 		});
 

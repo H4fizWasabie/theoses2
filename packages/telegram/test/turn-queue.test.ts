@@ -71,25 +71,6 @@ describe("createTurnQueue", () => {
 		expect(turnQueue.consumeStopRequest("chat", 1)).toBe(false);
 	});
 
-	it("tracks the running tool per chat, independently", () => {
-		const turnQueue = createTurnQueue();
-		expect(turnQueue.getRunningTool("chat-1")).toBeUndefined();
-		turnQueue.setRunningTool("chat-1", "bash");
-		turnQueue.setRunningTool("chat-2", "read");
-		expect(turnQueue.getRunningTool("chat-1")).toBe("bash");
-		expect(turnQueue.getRunningTool("chat-2")).toBe("read");
-		turnQueue.setRunningTool("chat-1", undefined);
-		expect(turnQueue.getRunningTool("chat-1")).toBeUndefined();
-	});
-
-	it("marks and consumes halted-by-stop once", () => {
-		const turnQueue = createTurnQueue();
-		expect(turnQueue.consumeHaltedByStop("chat")).toBe(false);
-		turnQueue.markHaltedByStop("chat");
-		expect(turnQueue.consumeHaltedByStop("chat")).toBe(true);
-		expect(turnQueue.consumeHaltedByStop("chat")).toBe(false);
-	});
-
 	it("schedules and cancels an auto-resume", () => {
 		vi.useFakeTimers();
 		try {
