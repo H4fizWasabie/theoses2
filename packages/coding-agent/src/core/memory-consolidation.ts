@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { contentText, type ToolCall, type ToolResultMessage } from "theoses-ai";
 import { getAgentDir } from "../config.ts";
@@ -57,65 +57,57 @@ export async function shouldTriggerConsolidation(
 }
 
 // ---------------------------------------------------------------------------
-// Checkpoint state: "last successfully consolidated turn" per Channel Session.
-// A lightweight JSON file rather than a new session-log record type — this is
-// internal bookkeeping, not user-visible session history, so it doesn't need
-// reducer-replay/branch-tree participation.
+// What is already in Durable Memory: the session log's own promoted_range records (ADR-0001), shared with
+// save_note and compaction distillation. A consolidated chunk is recorded as one, so nothing reaches Durable
+// Memory twice and each deployment's progress lives in its own session file (2026-09-19: production and
+// staging shared one checkpoint-file key and replayed each other's history).
 // ---------------------------------------------------------------------------
 
-interface CheckpointFile {
-	[channelSessionKey: string]: { lastEntryId: string | null; lastFailureAt?: string };
-}
-
 /**
- * Issue #177: without a cooldown, a failing checkpoint never advances (by design — see
- * writeCheckpoint's comment), which meant `turnsSinceCheckpoint` stayed >= CONSOLIDATION_TURN_CEILING
- * forever and every single subsequent turn re-triggered consolidation again, each time reprocessing
- * a larger accumulated window. Confirmed in production: this compounded into 500K+ token consolidation
- * calls firing every 1-3 minutes, hammering the same process the live chat runs on. A failure now
- * blocks re-triggering for this window instead of retrying on every turn.
+ * Issue #177: without a cooldown, a failing window never advances, so the turn ceiling stayed reached and
+ * every subsequent turn re-triggered consolidation, each time over a larger window. Confirmed in production:
+ * this compounded into 500K+ token consolidation calls firing every 1-3 minutes, hammering the same process
+ * the live chat runs on. A failure now blocks re-triggering for this long.
+ * ponytail: per process, so a restart allows one early retry; persist it if restarts ever cluster.
  */
 const CONSOLIDATION_FAILURE_COOLDOWN_MS = 15 * 60 * 1000;
-
-function checkpointPath(): string {
-	// Derived from getAgentDir() (respects THEOSES_CODING_AGENT_DIR) rather than a bare homedir()
-	// call — see episodic-store.ts's defaultEpisodicDbPath() and memory-store.ts's
-	// getMemoriesDir() for the same fix applied to the other stores in this package.
-	return (
-		process.env.THEOSES_CONSOLIDATION_CHECKPOINTS ?? join(dirname(getAgentDir()), "consolidation-checkpoints.json")
-	);
-}
+const lastFailureAt = new Map<string, number>();
 
 function channelSessionKey(channel: string, channelSessionId: string): string {
 	return `${channel}:${channelSessionId}`;
 }
 
-function readCheckpoints(): CheckpointFile {
-	const path = checkpointPath();
-	if (!existsSync(path)) return {};
+/** The checkpoint file consolidation used before promoted_range records; read once per session to migrate. */
+function legacyCheckpointPath(): string {
+	return (
+		process.env.THEOSES_CONSOLIDATION_CHECKPOINTS ?? join(dirname(getAgentDir()), "consolidation-checkpoints.json")
+	);
+}
+
+/**
+ * Moves one Channel Session's checkpoint from the legacy file into its session log as a promoted range, then
+ * drops it from the file (and the file once empty), so a session consolidated before the upgrade does not
+ * replay its history. A checkpoint id missing from the branch keeps the old rule: only the last chunk is read.
+ */
+function migrateLegacyCheckpoint(key: string, sessionManager: SessionManager): void {
+	const path = legacyCheckpointPath();
+	if (!existsSync(path)) return;
+	let all: Record<string, { lastEntryId: string | null }>;
 	try {
-		return JSON.parse(readFileSync(path, "utf8")) as CheckpointFile;
+		all = JSON.parse(readFileSync(path, "utf8"));
 	} catch {
-		return {};
+		return;
 	}
-}
-
-/** Clears any prior failure marker for this key — a successful pass means the cooldown no longer applies. */
-function writeCheckpoint(key: string, lastEntryId: string | null): void {
-	const path = checkpointPath();
-	mkdirSync(dirname(path), { recursive: true });
-	const all = readCheckpoints();
-	all[key] = { lastEntryId };
-	writeFileSync(path, JSON.stringify(all, null, 2));
-}
-
-/** Records a failure without touching lastEntryId, so the next trigger still resumes from the same window once the cooldown passes. */
-function writeFailure(key: string, at: string): void {
-	const path = checkpointPath();
-	mkdirSync(dirname(path), { recursive: true });
-	const all = readCheckpoints();
-	all[key] = { lastEntryId: all[key]?.lastEntryId ?? null, lastFailureAt: at };
-	writeFileSync(path, JSON.stringify(all, null, 2));
+	if (!(key in all)) return;
+	const lastEntryId = all[key]?.lastEntryId;
+	const branch = sessionManager.getBranch();
+	const messages = branch.filter((entry) => entry.type === "message");
+	let last = lastEntryId ? branch.find((entry) => entry.id === lastEntryId) : undefined;
+	if (lastEntryId && !last) last = messages[messages.length - CONSOLIDATION_TURN_CEILING - 1];
+	if (branch[0] && last) sessionManager.appendPromotedRange(branch[0].id, last.id);
+	delete all[key];
+	if (Object.keys(all).length === 0) rmSync(path, { force: true });
+	else writeFileSync(path, JSON.stringify(all, null, 2));
 }
 
 // ---------------------------------------------------------------------------
@@ -470,7 +462,7 @@ const inFlightConsolidations = new Set<string>();
 
 /**
  * Fire-and-forget entry point: checks the trigger, and if it fires, runs consolidation over
- * every turn since the last successful checkpoint. Never throws — callers should not await this
+ * every message not yet promoted to Durable Memory. Never throws — callers should not await this
  * in the response path; call it and let it run in the background (`.catch` is handled internally).
  */
 export function maybeRunConsolidation(options: MaybeRunConsolidationOptions): void {
@@ -587,7 +579,7 @@ async function runConsolidationPass(params: {
 	const transcript = capTranscript(entriesToTranscript(window));
 	// Issue #315: a chunk with no text (a stray tool result or custom entry) gives the model nothing to
 	// summarize, and DeepInfra answers it with `{}`. There is nothing to record, so skip the call; the
-	// caller still advances the checkpoint past these entries.
+	// caller still records these entries as promoted.
 	if (!hasConsolidationContent(transcript)) return;
 	const existingNodes = buildExistingNodesSection(memoryStore, transcript);
 
@@ -637,27 +629,21 @@ async function runConsolidationPass(params: {
 }
 
 /**
- * Picks the messages a live consolidation pass should read: everything after the checkpointed entry.
- *
- * A checkpoint id that is not in the branch used to mean "start from the beginning", so the whole session
- * history was consolidated again in 70-message chunks. That happened on 2026-09-19: the production and
- * staging bots shared one checkpoint key (`telegram:<chat id>`), each overwrote the other's entry id, and
- * staging re-consolidated its entire 25MB session (112 passes, 1,309 nodes written into the shared memory
- * store, about 376 duplicates in all). The same thing would follow a branch switch (the id sits on another
- * branch of the session) or any session rewrite. A missing id now takes at most the last
- * CONSOLIDATION_TURN_CEILING messages, one chunk; a session shorter than that is still read in full.
- * With no checkpoint at all (a session consolidation has never seen) the whole session is read, as before.
+ * Picks the messages a live consolidation pass should read: every message no promoted range covers yet, in
+ * one pass over the branch. That skips what earlier passes consolidated and turns the model already saved a
+ * note from (save_note marks its turn promoted). A session nothing has promoted is read in full.
  */
-export function selectConsolidationWindow(
-	branch: SessionEntry[],
-	lastEntryId: string | null,
-): { window: SessionMessageEntry[]; checkpointMissing: boolean } {
-	const anchor = lastEntryId ? branch.findIndex((e) => e.id === lastEntryId) : -1;
-	const messages = branch.slice(anchor + 1).filter((e): e is SessionMessageEntry => e.type === "message");
-	if (lastEntryId && anchor === -1) {
-		return { window: messages.slice(-CONSOLIDATION_TURN_CEILING), checkpointMissing: true };
+export function selectConsolidationWindow(branch: SessionEntry[]): SessionMessageEntry[] {
+	const positions = new Map(branch.map((entry, index) => [entry.id, index]));
+	const promoted = new Array<boolean>(branch.length).fill(false);
+	for (const entry of branch) {
+		if (entry.type !== "promoted_range") continue;
+		const first = positions.get(entry.firstEntryId);
+		const last = positions.get(entry.lastEntryId);
+		if (first === undefined || last === undefined) continue;
+		for (let index = first; index <= last; index++) promoted[index] = true;
 	}
-	return { window: messages, checkpointMissing: false };
+	return branch.filter((entry, index): entry is SessionMessageEntry => entry.type === "message" && !promoted[index]);
 }
 
 async function runIfTriggered(options: MaybeRunConsolidationOptions): Promise<void> {
@@ -674,28 +660,19 @@ async function runIfTriggered(options: MaybeRunConsolidationOptions): Promise<vo
 		const memoryStore = options.memoryStore ?? new FileMemoryStore();
 		const episodicStore = options.episodicStore ?? (await EpisodicStore.create());
 
-		const checkpoints = readCheckpoints();
-		const entry = checkpoints[key];
-		if (entry?.lastFailureAt && Date.now() - Date.parse(entry.lastFailureAt) < CONSOLIDATION_FAILURE_COOLDOWN_MS) {
-			return;
-		}
-		const lastEntryId = entry?.lastEntryId ?? null;
+		const failedAt = lastFailureAt.get(key);
+		if (failedAt !== undefined && Date.now() - failedAt < CONSOLIDATION_FAILURE_COOLDOWN_MS) return;
 
-		const branch = mainSessionManager.getBranch();
-		const { window, checkpointMissing } = selectConsolidationWindow(branch, lastEntryId);
-		if (checkpointMissing) {
-			console.error(
-				`[consolidation] checkpoint entry ${lastEntryId} for ${key} is not in this session's branch; consolidating only its last ${window.length} messages instead of the whole history`,
-			);
-		}
+		migrateLegacyCheckpoint(key, mainSessionManager);
+		const window = selectConsolidationWindow(mainSessionManager.getBranch());
 		if (window.length === 0) return;
 
 		if (!(await shouldTriggerConsolidation(userMessageText, window.length))) return;
 
 		// Issue #177: chunk the live trigger the same way backfillFromSessionLog already does, so a
 		// live pass can never balloon past CONSOLIDATION_TURN_CEILING messages regardless of how long
-		// a failing checkpoint left the window growing. Each chunk's checkpoint advances immediately
-		// on success, so a later chunk's failure doesn't roll back progress already made.
+		// failures left the window growing. Each chunk is recorded as promoted immediately on success,
+		// so a later chunk's failure doesn't roll back progress already made.
 		for (let start = 0; start < window.length; start += CONSOLIDATION_TURN_CEILING) {
 			const chunk = window.slice(start, start + CONSOLIDATION_TURN_CEILING);
 			try {
@@ -708,11 +685,15 @@ async function runIfTriggered(options: MaybeRunConsolidationOptions): Promise<vo
 					episodicStore,
 				});
 			} catch (error) {
-				writeFailure(key, new Date().toISOString());
+				lastFailureAt.set(key, Date.now());
 				throw error;
 			}
+			lastFailureAt.delete(key);
+			const firstChunkEntry = chunk[0];
 			const lastChunkEntry = chunk[chunk.length - 1];
-			if (lastChunkEntry) writeCheckpoint(key, lastChunkEntry.id);
+			if (firstChunkEntry && lastChunkEntry) {
+				mainSessionManager.appendPromotedRange(firstChunkEntry.id, lastChunkEntry.id);
+			}
 		}
 	} finally {
 		inFlightConsolidations.delete(key);
@@ -738,7 +719,7 @@ export interface BackfillOptions {
  * run sequentially, not in parallel: each chunk's prompt embeds a fresh keyword-narrowed read of
  * the memory store (`buildExistingNodesSection`), so it needs to see facts the prior chunk already
  * wrote, for dedup/supersession continuity within one file.
- * Does not touch the live checkpoint file — backfill is a separate, explicit operation.
+ * Records no promoted ranges — backfill is a separate, explicit operation.
  */
 export async function backfillFromSessionLog(path: string, options: BackfillOptions): Promise<void> {
 	const sessionManager = SessionManager.open(path);

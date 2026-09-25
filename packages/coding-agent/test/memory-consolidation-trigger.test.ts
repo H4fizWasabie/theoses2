@@ -1,7 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../src/core/background-call.ts", () => ({ backgroundCall: vi.fn() }));
+
+import { backgroundCall } from "../src/core/background-call.ts";
 import type { EpisodicStore } from "../src/core/episodic-store.ts";
 import {
 	CONSOLIDATION_TURN_CEILING,
@@ -70,15 +74,17 @@ describe("selectConsolidationWindow", () => {
 		);
 	}
 
-	it("returns the messages after the checkpointed entry", () => {
-		const { window, checkpointMissing } = selectConsolidationWindow(branchOf(10), "e6");
+	const range = (id: string, firstEntryId: string, lastEntryId: string) =>
+		({ id, type: "promoted_range", firstEntryId, lastEntryId }) as unknown as SessionEntry;
 
-		expect(checkpointMissing).toBe(false);
-		expect(window.map((entry) => entry.id)).toEqual(["e7", "e8", "e9"]);
+	it("reads a session nothing has promoted in full", () => {
+		expect(selectConsolidationWindow(branchOf(500))).toHaveLength(500);
 	});
 
-	it("returns nothing when the checkpoint is the last entry", () => {
-		expect(selectConsolidationWindow(branchOf(5), "e4").window).toEqual([]);
+	it("skips every message a promoted range covers, from consolidation or save_note alike", () => {
+		const branch = [...branchOf(4), range("r1", "e0", "e1"), ...branchOf(3, "f"), range("r2", "f1", "f1")];
+
+		expect(selectConsolidationWindow(branch).map((entry) => entry.id)).toEqual(["e2", "e3", "f0", "f2"]);
 	});
 
 	it("skips entries that are not messages", () => {
@@ -88,31 +94,11 @@ describe("selectConsolidationWindow", () => {
 			{ id: "c", type: "message" },
 		] as unknown as SessionEntry[];
 
-		expect(selectConsolidationWindow(branch, "a").window.map((entry) => entry.id)).toEqual(["c"]);
+		expect(selectConsolidationWindow(branch).map((entry) => entry.id)).toEqual(["a", "c"]);
 	});
 
-	it("reads a session with no checkpoint in full, as before", () => {
-		const { window, checkpointMissing } = selectConsolidationWindow(branchOf(500), null);
-
-		expect(checkpointMissing).toBe(false);
-		expect(window).toHaveLength(500);
-	});
-
-	it("takes only the last chunk when the checkpoint entry is not in the branch (another bot's checkpoint)", () => {
-		// The 2026-09-19 incident: staging saw the production bot's entry id and replayed its whole history.
-		const { window, checkpointMissing } = selectConsolidationWindow(branchOf(15000), "entry-from-the-other-bot");
-
-		expect(checkpointMissing).toBe(true);
-		expect(window).toHaveLength(CONSOLIDATION_TURN_CEILING);
-		expect(window[window.length - 1].id).toBe("e14999");
-		expect(window[0].id).toBe(`e${15000 - CONSOLIDATION_TURN_CEILING}`);
-	});
-
-	it("still reads a short session in full when its checkpoint is missing", () => {
-		const { window, checkpointMissing } = selectConsolidationWindow(branchOf(12), "gone");
-
-		expect(checkpointMissing).toBe(true);
-		expect(window).toHaveLength(12);
+	it("ignores a range whose entries are not in this branch", () => {
+		expect(selectConsolidationWindow([...branchOf(3), range("r", "elsewhere", "e1")])).toHaveLength(3);
 	});
 });
 
@@ -153,49 +139,77 @@ describe("maybeRunConsolidation cooldown and in-flight guards (issue #177)", () 
 		rmSync(checkpointDir, { recursive: true, force: true });
 	});
 
-	function fakeSessionManager(getBranch: () => never[]): SessionManager {
-		return { getBranch } as unknown as SessionManager;
+	function fakeSessionManager(getBranch: () => SessionEntry[]) {
+		return { getBranch, appendPromotedRange: vi.fn((_first: string, _last: string) => "range") };
 	}
 
-	it("does not list the session branch while a prior failure's cooldown is active", async () => {
-		writeFileSync(
-			checkpointPath,
-			JSON.stringify({ "telegram:abc": { lastEntryId: null, lastFailureAt: new Date().toISOString() } }),
-		);
-		const getBranch = vi.fn(() => []);
+	const userMessage = (id: string, text: string) =>
+		({ id, type: "message", message: { role: "user", content: text, timestamp: 1 } }) as unknown as SessionEntry;
+	/** A full turn-ceiling window, so the trigger fires without asking Jev. Empty text makes the pass skip its model call. */
+	const ceilingBranch = (text = "") =>
+		Array.from({ length: CONSOLIDATION_TURN_CEILING }, (_, i) => userMessage(`m${i}`, text));
+
+	function run(sessionManager: ReturnType<typeof fakeSessionManager>, channelSessionId: string): void {
 		maybeRunConsolidation({
 			cwd: "/tmp",
 			channel: "telegram",
-			channelSessionId: "abc",
+			channelSessionId,
 			userMessageText: "continue",
-			mainSessionManager: fakeSessionManager(getBranch),
+			mainSessionManager: sessionManager as unknown as SessionManager,
 			modelRuntime: {} as unknown as ModelRuntime,
-			memoryStore: {} as unknown as FileMemoryStore,
+			memoryStore: { remember: () => [] } as unknown as FileMemoryStore,
 			episodicStore: {} as unknown as EpisodicStore,
 		});
-		await new Promise((resolve) => setTimeout(resolve, 10));
-		expect(getBranch).not.toHaveBeenCalled();
+	}
+
+	it("records a consolidated chunk as a promoted range in the session log", async () => {
+		const manager = fakeSessionManager(() => ceilingBranch());
+		run(manager, "record");
+		await vi.waitFor(() =>
+			expect(manager.appendPromotedRange).toHaveBeenCalledWith("m0", `m${CONSOLIDATION_TURN_CEILING - 1}`),
+		);
 	});
 
-	it("lists the session branch again once the cooldown has passed", async () => {
-		const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+	it("skips passes during a failure's cooldown and runs again once it has passed", async () => {
+		vi.mocked(backgroundCall).mockRejectedValueOnce(new Error("provider down"));
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		const getBranch = vi.fn(() => ceilingBranch("remember this"));
+		const manager = fakeSessionManager(getBranch);
+		try {
+			run(manager, "cooldown");
+			await vi.waitFor(() => expect(errorSpy).toHaveBeenCalled());
+			run(manager, "cooldown");
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			expect(getBranch).toHaveBeenCalledTimes(1);
+			expect(manager.appendPromotedRange).not.toHaveBeenCalled();
+
+			const now = Date.now();
+			vi.spyOn(Date, "now").mockReturnValue(now + 20 * 60 * 1000);
+			run(manager, "cooldown");
+			await vi.waitFor(() => expect(getBranch).toHaveBeenCalledTimes(2));
+		} finally {
+			vi.restoreAllMocks();
+		}
+	});
+
+	it("moves a legacy checkpoint into the session log once, then deletes the file", async () => {
+		writeFileSync(checkpointPath, JSON.stringify({ "telegram:migrate": { lastEntryId: "m2" } }));
+		const manager = fakeSessionManager(() => ceilingBranch());
+		run(manager, "migrate");
+		await vi.waitFor(() => expect(manager.appendPromotedRange).toHaveBeenCalledWith("m0", "m2"));
+		expect(existsSync(checkpointPath)).toBe(false);
+	});
+
+	it("keeps the old last-chunk rule for a legacy checkpoint id missing from the branch", async () => {
 		writeFileSync(
 			checkpointPath,
-			JSON.stringify({ "telegram:abc": { lastEntryId: null, lastFailureAt: twentyMinutesAgo } }),
+			JSON.stringify({ "telegram:gone": { lastEntryId: "other-bot" }, "telegram:kept": { lastEntryId: "x" } }),
 		);
-		const getBranch = vi.fn(() => []);
-		maybeRunConsolidation({
-			cwd: "/tmp",
-			channel: "telegram",
-			channelSessionId: "abc",
-			userMessageText: "continue",
-			mainSessionManager: fakeSessionManager(getBranch),
-			modelRuntime: {} as unknown as ModelRuntime,
-			memoryStore: {} as unknown as FileMemoryStore,
-			episodicStore: {} as unknown as EpisodicStore,
-		});
-		await new Promise((resolve) => setTimeout(resolve, 10));
-		expect(getBranch).toHaveBeenCalledTimes(1);
+		const branch = Array.from({ length: CONSOLIDATION_TURN_CEILING + 5 }, (_, i) => userMessage(`m${i}`, ""));
+		const manager = fakeSessionManager(() => branch);
+		run(manager, "gone");
+		await vi.waitFor(() => expect(manager.appendPromotedRange).toHaveBeenCalledWith("m0", "m4"));
+		expect(JSON.parse(readFileSync(checkpointPath, "utf8"))).toEqual({ "telegram:kept": { lastEntryId: "x" } });
 	});
 
 	it("does not run two overlapping passes for the same channel session", async () => {
@@ -203,13 +217,13 @@ describe("maybeRunConsolidation cooldown and in-flight guards (issue #177)", () 
 		// block): their real construction is the first genuine async yield point in
 		// runIfTriggered, which is what makes it possible for a second call to actually interleave
 		// with the first one's still-in-flight execution and exercise the in-flight guard for real.
-		const getBranch = vi.fn(() => []);
+		const getBranch = vi.fn((): SessionEntry[] => []);
 		const options = {
 			cwd: "/tmp",
 			channel: "telegram",
 			channelSessionId: "overlap-test",
 			userMessageText: "continue",
-			mainSessionManager: fakeSessionManager(getBranch),
+			mainSessionManager: fakeSessionManager(getBranch) as unknown as SessionManager,
 			modelRuntime: {} as unknown as ModelRuntime,
 		};
 		maybeRunConsolidation(options);
