@@ -21,7 +21,7 @@ vi.mock("theoses-coding-agent", () => ({
 }));
 
 import type { AgentSessionEvent, ChannelInput, PromptResult } from "theoses-coding-agent";
-import { createTelegramBot, parseModelCommand, replyText } from "../src/index.ts";
+import { createTelegramBot, extractGeneratedImages, parseModelCommand, replyText } from "../src/index.ts";
 
 /** A fake Channel Session whose turns run `turn`; `isRunning` is true while one does. */
 function fakeChannelSession(
@@ -573,5 +573,17 @@ describe("inbound rich messages", () => {
 		const result = replyText({ message: { reply_to_message: { rich_message: report } } } as never);
 		expect(result).toContain("Paracetamol 500mg");
 		expect(result).not.toContain("table");
+	});
+});
+
+describe("extractGeneratedImages", () => {
+	const result = { content: [{ type: "image", data: Buffer.from("png").toString("base64"), mimeType: "image/png" }] };
+
+	it("delivers generate_image output", () => {
+		expect(extractGeneratedImages("generate_image", result)).toEqual([Buffer.from("png")]);
+	});
+
+	it("skips images returned by read, which the agent may already be sending itself", () => {
+		expect(extractGeneratedImages("read", result)).toEqual([]);
 	});
 });

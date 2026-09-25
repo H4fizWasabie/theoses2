@@ -216,8 +216,13 @@ function assistantText(event: AgentSessionEvent): string | undefined {
 	return text || undefined;
 }
 
-/** Pulls image attachments (e.g. from generate_image) out of a raw tool result for delivery as Telegram photos. */
-function extractGeneratedImages(result: unknown): Buffer[] {
+/**
+ * Pulls generate_image output out of a raw tool result for delivery as Telegram photos. Other tools are
+ * skipped: `read` on an image file also returns an image block, and delivering that one too duplicated
+ * the photo whenever the agent sent the file itself.
+ */
+export function extractGeneratedImages(toolName: string, result: unknown): Buffer[] {
+	if (toolName !== "generate_image") return [];
 	const content = (result as { content?: unknown } | undefined)?.content;
 	if (!Array.isArray(content)) return [];
 	return content
@@ -661,7 +666,7 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				if (event.type === "tool_execution_end") {
 					toolCallLogger.end(event);
 					toolNames.push(event.toolName);
-					generatedImages.push(...extractGeneratedImages(event.result));
+					generatedImages.push(...extractGeneratedImages(event.toolName, event.result));
 					if (toolCallDetailEnabled) {
 						const entry = toolCallEntries.find((e) => e.id === event.toolCallId);
 						if (entry) {
