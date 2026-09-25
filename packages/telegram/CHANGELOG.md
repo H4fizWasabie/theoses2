@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- fix: only `generate_image` results are delivered as Telegram photos. Images from any tool used to be sent, so reading an image file with `read` and then sending it via bash delivered the photo twice.
 - refactor: a failed turn's error now comes from `prompt()`'s `PromptResult.finalError` instead of being rebuilt from `message_end` events. No user-visible change.
 - refactor: session opening, the thinking-level default, turn submission, /stop and /model now go through the shared Channel Session module (`createChannelSessions`). `turn-queue.ts` drops `markHaltedByStop`/`consumeHaltedByStop` (a halted turn is now recognized by its `aborted` outcome) and `setRunningTool`/`getRunningTool` (reported by the session's `stop()`). The unmatched-`/model` reply no longer includes an example model id.
 
