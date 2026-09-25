@@ -14,13 +14,13 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Api, Model, ProviderHeaders, SimpleStreamOptions } from "theoses-ai";
 import { type Static, Type } from "typebox";
 import { getAgentDir } from "../config.ts";
 import { createBudgetedAgent, endedOnToolCall, lastAssistantText } from "./background-agent.ts";
 import { resolveBackgroundModel } from "./background-models.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
+import type { ProviderHooks } from "./provider-hooks.ts";
 import { wrapToolDefinition } from "./tools/tool-definition-wrapper.ts";
 import { createWebExtractToolDefinition, createWebSearchToolDefinition } from "./tools/web-search.ts";
 
@@ -83,9 +83,7 @@ export interface RunResearchOptions {
 	question: string;
 	modelRuntime: ModelRuntime;
 	signal?: AbortSignal;
-	onPayload?: SimpleStreamOptions["onPayload"];
-	onResponse?: SimpleStreamOptions["onResponse"];
-	transformHeaders?: (headers: ProviderHeaders, model?: Model<Api>) => ProviderHeaders | Promise<ProviderHeaders>;
+	providerHooks?: ProviderHooks;
 }
 
 export async function runResearch(options: RunResearchOptions): Promise<ResearchResult> {
@@ -107,9 +105,7 @@ export async function runResearch(options: RunResearchOptions): Promise<Research
 		maxTurns: RESEARCH_CAPS.maxTurns,
 		maxInputTokens: RESEARCH_CAPS.maxInputTokens,
 		signal,
-		onPayload: options.onPayload,
-		onResponse: options.onResponse,
-		transformHeaders: options.transformHeaders,
+		providerHooks: options.providerHooks,
 	});
 
 	let stats = await handle.prompt(options.question);
@@ -148,9 +144,7 @@ type ResearchInput = Static<typeof researchSchema>;
 export interface ResearchToolDeps {
 	modelRuntime: ModelRuntime;
 	jobs: ResearchJobs;
-	onPayload?: SimpleStreamOptions["onPayload"];
-	onResponse?: SimpleStreamOptions["onResponse"];
-	transformHeaders?: (headers: ProviderHeaders, model?: Model<Api>) => ProviderHeaders | Promise<ProviderHeaders>;
+	providerHooks?: ProviderHooks;
 }
 
 function saveReport(id: string, question: string, report: string): string {

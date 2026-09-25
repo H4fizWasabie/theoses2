@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- refactor: the provider hooks (`onPayload`, `onResponse`, model-aware `transformHeaders`) that route every Agent's requests through the extension runner are built once by `extensionProviderHooks` and passed as one `providerHooks` value to the main agent, explorer, researcher and `createBudgetedAgent`, instead of being built twice and threaded field by field through five option types. The main agent now reads the extension runner per request rather than at stream start, like the sub-agents already did.
+
 - refactor: the agent turn's auto-retry now keeps its state in `createRetryBudget` from theoses-ai instead of fields spread across `AgentSession`. The backoff formula lives in one place, and `auto_retry_end` is emitted through one method, at most once per run of retries. No change to events, timing or `retryAttempt`/`isRetrying`/`abortRetry()`. Removes the unused `utils/sleep.ts`.
 
 - feat(prompt): the default system prompt now has the agent discuss ideas and open-ended changes before acting, then carry out what was agreed without re-asking (`<collaboration>`), and report work as done only after verifying it where it is actually used (`<verification>`). Replaces `<destructive_action_caution>`; confirmation before irreversible steps is kept unless that exact step was agreed. Drops "Plan silently; do not narrate the plan." from `<efficiency>`.

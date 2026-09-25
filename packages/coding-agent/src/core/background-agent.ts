@@ -14,8 +14,9 @@
  */
 
 import { Agent, type AgentEvent, type AgentMessage, type AgentTool } from "theoses-agent-core";
-import type { Api, Model, ModelsRequestTransforms, ProviderHeaders, SimpleStreamOptions } from "theoses-ai";
+import type { Api, Model, ModelsRequestTransforms } from "theoses-ai";
 import type { ModelRuntime } from "./model-runtime.ts";
+import type { ProviderHooks } from "./provider-hooks.ts";
 
 export function lastAssistantText(messages: AgentMessage[]): string {
 	for (let i = messages.length - 1; i >= 0; i--) {
@@ -44,11 +45,8 @@ export interface CreateBudgetedAgentOptions {
 	maxTurns: number;
 	maxInputTokens: number;
 	signal?: AbortSignal;
-	// Issue #260/#263: provider hooks, same wiring the main session gives its Agent (sdk.ts), so
-	// cost-watch can see and route this sub-agent's traffic under its own model.
-	onPayload?: SimpleStreamOptions["onPayload"];
-	onResponse?: SimpleStreamOptions["onResponse"];
-	transformHeaders?: (headers: ProviderHeaders, model?: Model<Api>) => ProviderHeaders | Promise<ProviderHeaders>;
+	/** Issue #260/#263: the session's provider hooks, so cost-watch sees this sub-agent's traffic under its own model. */
+	providerHooks?: ProviderHooks;
 }
 
 export interface BudgetedAgentTurnStats {
@@ -74,6 +72,7 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 	let inputTokens = 0;
 	let outputTokens = 0;
 	let stoppedByBudget = false;
+	const hooks = options.providerHooks;
 
 	const agent: Agent = new Agent({
 		initialState: {
@@ -86,14 +85,13 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 			options.modelRuntime.streamSimple(streamModel, context, {
 				...streamOptions,
 				// AgentLoopConfig doesn't carry transformHeaders (the loop spreads it into streamFn
-				// options via `...config`), so inject it here like sdk.ts's wrapper does. `options.model`
-				// (this sub-agent's own resolved model) is passed through - see CreateBudgetedAgentOptions.
-				transformHeaders: options.transformHeaders
-					? (headers) => options.transformHeaders?.(headers ?? {}, options.model) ?? headers ?? {}
+				// options via `...config`), so inject it here like sdk.ts's wrapper does.
+				transformHeaders: hooks
+					? (headers) => hooks.transformHeaders(headers, streamModel)
 					: (streamOptions as ModelsRequestTransforms | undefined)?.transformHeaders,
 			}),
-		onPayload: options.onPayload,
-		onResponse: options.onResponse,
+		onPayload: hooks?.onPayload,
+		onResponse: hooks?.onResponse,
 		shouldStopAfterTurn: () => {
 			turns++;
 			if (turns >= options.maxTurns || inputTokens >= options.maxInputTokens) {
