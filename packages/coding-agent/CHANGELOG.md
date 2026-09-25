@@ -5,6 +5,7 @@
 - fix: an operation now gets exactly one `operation_finished` record, written once its retries and overflow recovery are over and before any post-turn compaction. Previously every retried attempt wrote `failed`, so a crash during a retry (or its backoff) read as a closed turn and the next prompt got no Interrupted Notice. Stopping during retry backoff now records `aborted` (was `failed`), so the next prompt gets the Abort Notice.
 - refactor: the retry decision is made once at `agent_end` (the same value `agent_end.willRetry` reports) and acted on by the post-run loop, instead of being recomputed in `_prepareRetry`. Turn Settlement and Working Note clearing run from the same one place the outcome is recorded.
 - feat: `AgentSession.prompt()` resolves to a `PromptResult` (`{ outcome, finalError? }`) for the operation it ran, `undefined` when the text was handled by a command or queued.
+- feat: `createChannelSessions({ channel, cwd, appendSystemPrompt? })` gives channel adapters one Channel Session module: open-or-create by channel key (cached; a failed open is retried rather than cached), `settings.defaultThinkingLevel ?? "high"` applied on every open, `submit()` serialized one turn at a time with its own event subscription, `stop()` reporting the running tool, and exact-match `switchModel()`. Telegram and the dashboard both use it instead of wiring `AgentSession` themselves. Channel prompts are now sent with input source `"interactive"` (Telegram sent `"extension"`).
 
 ## [1.0.88] - 2026-09-24
 

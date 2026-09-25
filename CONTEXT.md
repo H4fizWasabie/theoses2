@@ -5,7 +5,7 @@ Theoses2 adapts the coding-agent harness into a long-lived personal-assistant en
 ## Language
 
 **Channel Session**:
-The persistent conversational state for one channel (Telegram, CLI, dashboard WebUI) for one user. Each channel keeps its own history and Active Context Window; only durable memory is shared across channels.
+The persistent conversational state for one channel (Telegram, CLI, dashboard WebUI) for one user. Each channel keeps its own history and Active Context Window; only durable memory is shared across channels. Implemented for Telegram and the dashboard by `core/channel-session.ts` (open-or-create by channel key, thinking-level policy, one turn at a time, stop, model switch); adapters only render.
 _Avoid_: session (ambiguous with the engine's own session log), conversation
 
 **Active Context Window**:

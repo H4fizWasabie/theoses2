@@ -5,7 +5,7 @@
  * typing indicator, no auto-resume - are much thinner) and behavior-preserving: same state, same
  * timing, just given a narrow interface instead of ten free-floating Maps mutated throughout a
  * 460-line handler. No grammy or AgentSession imports, so it's testable with plain synchronous
- * calls.
+ * calls. What the running turn is doing, and whether it ended by /stop, comes from the Channel Session.
  */
 
 /** How long a stop request marked against a still-queued message stays live before it expires unconsumed. */
@@ -18,8 +18,6 @@ export function createTurnQueue(options: { stopRequestTtlMs?: number } = {}) {
 	const queuedMessageIds = new Map<string, number[]>();
 	const queueDepth = new Map<string, number>();
 	const stopRequested = new Map<string, { messageId: number; timer: ReturnType<typeof setTimeout> }>();
-	const haltedByStop = new Set<string>();
-	const runningTool = new Map<string, string | undefined>();
 	const pendingResumes = new Map<string, ReturnType<typeof setTimeout>>();
 
 	function removeQueuedMessage(chat: string, messageId: number): void {
@@ -92,26 +90,6 @@ export function createTurnQueue(options: { stopRequestTtlMs?: number } = {}) {
 			clearTimeout(request.timer);
 			stopRequested.delete(chat);
 			return true;
-		},
-
-		/** Set right before abort() so the in-flight turn skips sending its own (partial/empty) reply. */
-		markHaltedByStop(chat: string): void {
-			haltedByStop.add(chat);
-		},
-
-		/** True (and clears the flag) if `chat`'s in-flight turn was just aborted by /stop. */
-		consumeHaltedByStop(chat: string): boolean {
-			return haltedByStop.delete(chat);
-		},
-
-		setRunningTool(chat: string, name: string | undefined): void {
-			if (name === undefined) runningTool.delete(chat);
-			else runningTool.set(chat, name);
-		},
-
-		/** The tool name currently running for `chat`, for a /stop reply's "Was running: X" report. */
-		getRunningTool(chat: string): string | undefined {
-			return runningTool.get(chat);
 		},
 
 		/** Schedule `run` as chat's pending auto-resume; replaces (does not stack with) an existing one. */

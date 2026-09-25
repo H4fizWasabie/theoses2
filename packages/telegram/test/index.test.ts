@@ -1,20 +1,60 @@
 import type { Update } from "grammy/types";
 import { describe, expect, it, vi } from "vitest";
 
+// The bot's whole view of the agent is one Channel Session per chat; each test installs its fake here.
+const registry = vi.hoisted(() => ({ session: undefined as unknown, gate: undefined as Promise<void> | undefined }));
+
 vi.mock("theoses-coding-agent", () => ({
-	SessionManager: {
-		list: vi.fn(),
-		create: vi.fn(),
-		open: vi.fn(),
-	},
-	createAgentSession: vi.fn(),
 	configureHttpDispatcher: vi.fn(),
-	findExactModelReferenceMatch: vi.fn(),
 	getAgentDir: vi.fn(() => "/tmp/telegram-test-agent-dir"),
+	createChannelSessions: vi.fn(() => {
+		let opened = false;
+		return {
+			open: async () => {
+				await registry.gate;
+				opened = true;
+				return registry.session;
+			},
+			list: () => (opened ? [registry.session] : []),
+		};
+	}),
 }));
 
-import { createAgentSession, type PromptResult, SessionManager } from "theoses-coding-agent";
+import type { AgentSessionEvent, ChannelInput, PromptResult } from "theoses-coding-agent";
 import { createTelegramBot, parseModelCommand, replyText } from "../src/index.ts";
+
+/** A fake Channel Session whose turns run `turn`; `isRunning` is true while one does. */
+function fakeChannelSession(
+	turn: (input: ChannelInput, onEvent?: (event: AgentSessionEvent) => void) => Promise<PromptResult | undefined>,
+	stop: () => Promise<void> = async () => {},
+) {
+	let running = false;
+	const session = {
+		channelSessionId: "1",
+		model: undefined,
+		get isRunning() {
+			return running;
+		},
+		submit: vi.fn(async (input: ChannelInput, onEvent?: (event: AgentSessionEvent) => void) => {
+			running = true;
+			try {
+				return await turn(input, onEvent);
+			} finally {
+				running = false;
+			}
+		}),
+		stop: vi.fn(async () => {
+			const wasRunning = running;
+			await stop();
+			return { wasRunning };
+		}),
+		switchModel: vi.fn(),
+		storeArtifact: vi.fn(),
+	};
+	registry.session = session;
+	registry.gate = undefined;
+	return session;
+}
 
 function messageUpdate(updateId: number, messageId: number, text: string): Update {
 	return {
@@ -32,37 +72,13 @@ function messageUpdate(updateId: number, messageId: number, text: string): Updat
 describe("Telegram stop queueing", () => {
 	it("identifies and reports a queued message skipped by an active stop", async () => {
 		let releasePrompt: (() => void) | undefined;
-		let streaming = false;
-		const sessionManager = {
-			getChannelSessionKey: () => ({ channel: "telegram", channelSessionId: "1" }),
-			getCwd: () => "/tmp/telegram-test",
-		};
-		const session = {
-			get isStreaming() {
-				return streaming;
-			},
-			prompt: vi.fn(async () => {
-				streaming = true;
-				await new Promise<void>((resolve) => {
-					releasePrompt = resolve;
-				});
-			}),
-			abort: vi.fn(async () => {
-				streaming = false;
-				releasePrompt?.();
-			}),
-			subscribe: vi.fn(() => () => {}),
-			getActiveToolNames: vi.fn(() => []),
-			setActiveToolsByName: vi.fn(),
-			sessionManager,
-			settingsManager: { getDefaultThinkingLevel: (): string | undefined => undefined },
-			setThinkingLevel: vi.fn(),
-			modelRuntime: {},
-		};
-
-		vi.mocked(SessionManager.list).mockResolvedValue([]);
-		vi.mocked(SessionManager.create).mockReturnValue(sessionManager as never);
-		vi.mocked(createAgentSession).mockResolvedValue({ session } as never);
+		const session = fakeChannelSession(
+			() =>
+				new Promise((resolve) => {
+					releasePrompt = () => resolve({ outcome: "aborted" });
+				}),
+			async () => releasePrompt?.(),
+		);
 
 		const bot = createTelegramBot({ token: "test-token", ownerChatId: "1", cwd: "/tmp/telegram-test" });
 		bot.botInfo = {
@@ -79,15 +95,15 @@ describe("Telegram stop queueing", () => {
 		const sendMessage = vi.spyOn(bot.api, "sendMessage").mockResolvedValue({ message_id: 100 } as never);
 
 		const active = bot.handleUpdate(messageUpdate(1, 1, "start"));
-		await vi.waitFor(() => expect(session.isStreaming).toBe(true));
+		await vi.waitFor(() => expect(session.isRunning).toBe(true));
 		const queued = bot.handleUpdate(messageUpdate(2, 2, "queued message"));
 		const stopped = bot.handleUpdate(messageUpdate(3, 3, "/stop"));
 
 		await stopped;
 		await Promise.all([active, queued]);
 
-		expect(session.prompt).toHaveBeenCalledTimes(1);
-		expect(session.abort).toHaveBeenCalledTimes(1);
+		expect(session.submit).toHaveBeenCalledTimes(1);
+		expect(session.stop).toHaveBeenCalledTimes(1);
 		expect(sendMessage).toHaveBeenCalledWith(1, expect.stringContaining("Also skipped your next queued message."));
 	});
 });
@@ -96,31 +112,13 @@ describe("Telegram update dispatch", () => {
 	it("returns from the update handler without waiting for a long-running turn to finish (issue #209)", async () => {
 		let releasePrompt: (() => void) | undefined;
 		let promptResolved = false;
-		const sessionManager = {
-			getChannelSessionKey: () => ({ channel: "telegram", channelSessionId: "1" }),
-			getCwd: () => "/tmp/telegram-test",
-		};
-		const session = {
-			isStreaming: false,
-			prompt: vi.fn(async () => {
-				await new Promise<void>((resolve) => {
-					releasePrompt = resolve;
-				});
-				promptResolved = true;
-			}),
-			abort: vi.fn(async () => {}),
-			subscribe: vi.fn(() => () => {}),
-			getActiveToolNames: vi.fn(() => []),
-			setActiveToolsByName: vi.fn(),
-			sessionManager,
-			settingsManager: { getDefaultThinkingLevel: (): string | undefined => undefined },
-			setThinkingLevel: vi.fn(),
-			modelRuntime: {},
-		};
-
-		vi.mocked(SessionManager.list).mockResolvedValue([]);
-		vi.mocked(SessionManager.create).mockReturnValue(sessionManager as never);
-		vi.mocked(createAgentSession).mockResolvedValue({ session } as never);
+		const session = fakeChannelSession(async () => {
+			await new Promise<void>((resolve) => {
+				releasePrompt = resolve;
+			});
+			promptResolved = true;
+			return { outcome: "completed" };
+		});
 
 		const bot = createTelegramBot({ token: "test-token", ownerChatId: "1", cwd: "/tmp/telegram-test" });
 		bot.botInfo = {
@@ -142,7 +140,7 @@ describe("Telegram update dispatch", () => {
 		// dispatches updates strictly sequentially, so a handler that blocks on the full turn
 		// (which can run for minutes on a long tool call) makes every subsequent update, including
 		// a "/stop", undeliverable until the turn ends on its own.
-		await vi.waitFor(() => expect(session.prompt).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(session.submit).toHaveBeenCalledTimes(1));
 		expect(promptResolved).toBe(false);
 
 		releasePrompt?.();
@@ -153,36 +151,14 @@ describe("Telegram update dispatch", () => {
 function typingHarness(options: { sessionGate?: Promise<void> } = {}) {
 	const listeners: Array<(event: unknown) => void> = [];
 	const prompts: Array<(result?: PromptResult) => void> = [];
-	const sessionManager = {
-		getChannelSessionKey: () => ({ channel: "telegram", channelSessionId: "1" }),
-		getCwd: () => "/tmp/telegram-test",
-	};
-	const session = {
-		isStreaming: false,
-		prompt: vi.fn(
-			(_text: string, _options?: unknown) =>
-				new Promise<PromptResult | undefined>((resolve) => {
-					prompts.push(resolve);
-				}),
-		),
-		abort: vi.fn(async () => {}),
-		subscribe: vi.fn((listener: (event: unknown) => void) => {
-			listeners.push(listener);
-			return () => {};
-		}),
-		getActiveToolNames: vi.fn(() => []),
-		setActiveToolsByName: vi.fn(),
-		sessionManager,
-		settingsManager: { getDefaultThinkingLevel: (): string | undefined => undefined },
-		setThinkingLevel: vi.fn(),
-		modelRuntime: {},
-	};
-	vi.mocked(SessionManager.list).mockResolvedValue([]);
-	vi.mocked(SessionManager.create).mockReturnValue(sessionManager as never);
-	vi.mocked(createAgentSession).mockImplementation((async () => {
-		await options.sessionGate;
-		return { session };
-	}) as never);
+	const session = fakeChannelSession(
+		(_input, onEvent) =>
+			new Promise<PromptResult | undefined>((resolve) => {
+				if (onEvent) listeners.push(onEvent as (event: unknown) => void);
+				prompts.push(resolve);
+			}),
+	);
+	registry.gate = options.sessionGate;
 
 	const bot = createTelegramBot({ token: "test-token", ownerChatId: "1", cwd: "/tmp/telegram-test" });
 	bot.botInfo = {
@@ -216,12 +192,15 @@ describe("Telegram typing indicator", () => {
 			await vi.advanceTimersByTimeAsync(0);
 
 			expect(sendChatAction).toHaveBeenCalledWith(1, "typing");
-			expect(session.prompt).not.toHaveBeenCalled();
+			expect(session.submit).not.toHaveBeenCalled();
 
 			openGate();
 			await vi.advanceTimersByTimeAsync(0);
 			// Turn Settlement is the session's job now; the adapter only supplies the owner's own text.
-			expect(session.prompt).toHaveBeenCalledWith("hello", expect.objectContaining({ settlementText: "hello" }));
+			expect(session.submit).toHaveBeenCalledWith(
+				expect.objectContaining({ text: "hello", settlementText: "hello" }),
+				expect.any(Function),
+			);
 			prompts[0]?.();
 			await vi.advanceTimersByTimeAsync(0);
 		} finally {
@@ -447,12 +426,12 @@ describe("Telegram photo albums", () => {
 			await bot.handleUpdate(photoUpdate(1));
 			await bot.handleUpdate(photoUpdate(2, "compare these"));
 			await bot.handleUpdate(photoUpdate(3));
-			await vi.waitFor(() => expect(session.prompt).toHaveBeenCalledTimes(1), { timeout: 3000 });
+			await vi.waitFor(() => expect(session.submit).toHaveBeenCalledTimes(1), { timeout: 3000 });
 			prompts[0]?.();
 
-			const [text, options] = session.prompt.mock.calls[0] as unknown as [string, { images: string[] }];
-			expect(text).toBe("compare these");
-			expect(options.images).toHaveLength(3);
+			const [input] = session.submit.mock.calls[0];
+			expect(input.text).toBe("compare these");
+			expect(input.images).toHaveLength(3);
 		} finally {
 			vi.unstubAllGlobals();
 		}
@@ -513,8 +492,8 @@ describe("Telegram turn that ends on a provider error", () => {
 			expect(reply).toContain("Resuming automatically in 60s");
 
 			await vi.advanceTimersByTimeAsync(60_000);
-			expect(session.prompt).toHaveBeenCalledTimes(2);
-			expect(String(vi.mocked(session.prompt).mock.calls[1]?.[0])).toContain("[automatic resume]");
+			expect(session.submit).toHaveBeenCalledTimes(2);
+			expect(String(session.submit.mock.calls[1]?.[0].text)).toContain("[automatic resume]");
 
 			// The resume fails too: reported, but not resumed again.
 			prompts[1]?.(failTurn());
@@ -522,7 +501,7 @@ describe("Telegram turn that ends on a provider error", () => {
 			expect(outbound.at(-1)).toContain("failed: Provider timed out");
 			expect(outbound.at(-1)).not.toContain("Resuming automatically");
 			await vi.advanceTimersByTimeAsync(120_000);
-			expect(session.prompt).toHaveBeenCalledTimes(2);
+			expect(session.submit).toHaveBeenCalledTimes(2);
 		} finally {
 			vi.useRealTimers();
 		}
@@ -543,26 +522,10 @@ describe("Telegram turn that ends on a provider error", () => {
 			prompts[1]?.();
 			await vi.advanceTimersByTimeAsync(120_000);
 
-			expect(vi.mocked(session.prompt).mock.calls.map((call) => call[0])).toEqual(["Pr the skip-list", "Proceed"]);
+			expect(session.submit.mock.calls.map((call) => call[0].text)).toEqual(["Pr the skip-list", "Proceed"]);
 		} finally {
 			vi.useRealTimers();
 		}
-	});
-});
-
-describe("Telegram thinking level", () => {
-	it.each([
-		["medium", "medium"],
-		[undefined, "high"],
-	])("applies settings defaultThinkingLevel %s as %s", async (configured, expected) => {
-		const { bot, session, prompts } = typingHarness();
-		session.settingsManager.getDefaultThinkingLevel = () => configured;
-
-		await bot.handleUpdate(messageUpdate(1, 1, "hello"));
-		await vi.waitFor(() => expect(session.prompt).toHaveBeenCalledTimes(1));
-		prompts[0]?.();
-
-		expect(session.setThinkingLevel).toHaveBeenCalledWith(expected);
 	});
 });
 
@@ -596,10 +559,10 @@ describe("inbound rich messages", () => {
 				rich_message: report,
 			},
 		} as unknown as Update);
-		await vi.waitFor(() => expect(session.prompt).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(session.submit).toHaveBeenCalledTimes(1));
 		prompts[0]?.();
 
-		const prompt = String(vi.mocked(session.prompt).mock.calls[0]?.[0]);
+		const prompt = String(session.submit.mock.calls[0]?.[0].text);
 		expect(prompt).toContain("Mini Pharmacy Stock Reduction Report\nThe following medicines were returned");
 		expect(prompt).toContain("Paracetamol 500mg");
 		expect(prompt).toContain("20 boxes");

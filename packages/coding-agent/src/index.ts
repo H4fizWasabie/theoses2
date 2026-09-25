@@ -26,6 +26,13 @@ export {
 	type SessionStats,
 } from "./core/agent-session.ts";
 export { readStoredCredential } from "./core/auth-storage.ts";
+export {
+	type ChannelInput,
+	type ChannelSession,
+	type ChannelSessions,
+	type ChannelSessionsOptions,
+	createChannelSessions,
+} from "./core/channel-session.ts";
 // Compaction
 export {
 	type BranchPreparation,
