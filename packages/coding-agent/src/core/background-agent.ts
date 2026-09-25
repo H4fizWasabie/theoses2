@@ -14,9 +14,10 @@
  */
 
 import { Agent, type AgentEvent, type AgentMessage, type AgentTool } from "theoses-agent-core";
-import type { Api, Model, ModelsRequestTransforms } from "theoses-ai";
+import type { Api, AssistantMessage, Model, ModelsRequestTransforms } from "theoses-ai";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { ProviderHooks } from "./provider-hooks.ts";
+import { logServedProvider } from "./served-provider-log.ts";
 
 export function lastAssistantText(messages: AgentMessage[]): string {
 	for (let i = messages.length - 1; i >= 0; i--) {
@@ -104,6 +105,8 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 
 	agent.subscribe((event: AgentEvent) => {
 		if (event.type === "message_end" && event.message.role === "assistant") {
+			// streamSimple, unlike ModelRuntime's complete* paths, does not log the serving provider itself.
+			logServedProvider(event.message as AssistantMessage);
 			const usage = (event.message as { usage?: { input?: number; output?: number } }).usage;
 			if (usage) {
 				inputTokens += usage.input ?? 0;

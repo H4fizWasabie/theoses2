@@ -1,10 +1,9 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { contentText, retryAssistantCall, type ToolCall, type ToolResultMessage } from "theoses-ai";
-import type { Context, SimpleStreamOptions } from "theoses-ai/compat";
+import { contentText, type ToolCall, type ToolResultMessage } from "theoses-ai";
 import { getAgentDir } from "../config.ts";
+import { backgroundCall } from "./background-call.ts";
 import { describeResponseShape, recordBackgroundFailure } from "./background-failure-log.ts";
-import { resolveBackgroundModel } from "./background-models.ts";
 import { EpisodicStore } from "./episodic-store.ts";
 import { askJevChoice, askJevNoul } from "./jev-client.ts";
 import { createMemoryWriteGate, isMemoryGateEnabled } from "./memory-gate.ts";
@@ -315,21 +314,6 @@ function edgeRelationShadowLogPath(): string {
 	);
 }
 
-/**
- * Consolidation calls modelRuntime.completeSimple() directly rather than running a full agent
- * session, so its cost never lands in a session .jsonl the way a normal turn's usage does — a daily
- * cost report scanning session files misses it entirely. Logged separately here, mirroring
- * jev-client.ts's logJevCost, so a report can total it independently.
- */
-function logConsolidationCost(cost: number, model: string): void {
-	try {
-		const path = join(getAgentDir(), "consolidation-usage.jsonl");
-		appendFileSync(path, `${JSON.stringify({ timestamp: Date.now(), cost, model })}\n`);
-	} catch (error) {
-		console.error("Consolidation usage log write failed:", error instanceof Error ? error.message : error);
-	}
-}
-
 interface EdgeRelationShadowLogEntry {
 	timestamp: string;
 	from: string;
@@ -605,41 +589,26 @@ async function runConsolidationPass(params: {
 	// summarize, and DeepInfra answers it with `{}`. There is nothing to record, so skip the call; the
 	// caller still advances the checkpoint past these entries.
 	if (!hasConsolidationContent(transcript)) return;
-	const model = resolveBackgroundModel(modelRuntime, "consolidation");
 	const existingNodes = buildExistingNodesSection(memoryStore, transcript);
 
 	const promptText = `${CONSOLIDATION_INSTRUCTIONS}\n\n--- Existing memory nodes ---\n${existingNodes}\n\n--- Conversation window ---\n${transcript}`;
-	const context: Context = {
-		messages: [{ role: "user", content: [{ type: "text", text: promptText }], timestamp: Date.now() }],
-	};
-	// toolChoice: "none" and no `reasoning` option — omitting `reasoning` entirely still lands the
-	// model in its off/disabled state on the wire for every thinkingFormat branch that supports one
-	// (see openai-completions.ts's per-format reasoning handling), which is what issue #177 needed
-	// explicitly for this same model; no separate cast is needed for a single non-agentic call.
-	const streamOptions: SimpleStreamOptions = {
-		maxTokens: model.maxTokens,
-		toolChoice: "none",
+
+	if (process.env.THEOSES_DEBUG_CONSOLIDATION) {
+		console.error("CONSOLIDATION_PROMPT", promptText.slice(0, 500));
+	}
+
+	const response = await backgroundCall(modelRuntime, {
+		caller: "consolidation",
+		prompt: promptText,
+		sessionId: consolidationSessionAffinityId(channel, channelSessionId),
+		retry: CONSOLIDATION_RETRY_POLICY,
 		// Issue #250: enforce JSON-object mode at the API level. Consolidation's output is a
 		// single JSON object; leaving it to sampling is what produced the intermittent
 		// "Expected ',' or '}' after property value" production failures (checkpoint stalls,
 		// whole-window re-runs). DeepSeek supports json_object mode without schema enforcement —
 		// a nudge, not a guarantee — hence the tolerant parse + diagnostics in parseConsolidationResponse.
 		responseFormat: { type: "json_object" },
-		sessionId: consolidationSessionAffinityId(channel, channelSessionId),
-	};
-
-	if (process.env.THEOSES_DEBUG_CONSOLIDATION) {
-		console.error("CONSOLIDATION_PROMPT", promptText.slice(0, 500));
-	}
-
-	const response = await retryAssistantCall(
-		() => modelRuntime.completeSimple(model, context, streamOptions),
-		CONSOLIDATION_RETRY_POLICY,
-		undefined,
-	);
-	if (typeof response.usage?.cost?.total === "number") {
-		logConsolidationCost(response.usage.cost.total, response.responseModel ?? model.id);
-	}
+	});
 
 	if (response.stopReason === "aborted") throw new Error("Consolidation pass was aborted");
 	if (response.stopReason === "error")
@@ -655,7 +624,7 @@ async function runConsolidationPass(params: {
 	} catch (error) {
 		recordBackgroundFailure({
 			caller: "consolidation",
-			model: response.responseModel ?? model.id,
+			model: response.responseModel ?? response.model,
 			provider: response.responseProvider,
 			stopReason: response.stopReason,
 			error: error instanceof Error ? error.message.slice(0, 300) : String(error),
