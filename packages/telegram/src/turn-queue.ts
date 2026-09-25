@@ -1,117 +1,141 @@
+import type { AgentSessionEvent, ChannelInput, ChannelSession, PromptResult } from "theoses-coding-agent";
+
 /**
- * Per-chat turn scheduling and /stop bookkeeping for the Telegram adapter, extracted out of
- * createTelegramBot's closure. Deliberately Telegram-only (not shared with the dashboard
- * adapter, whose needs - one promise-chain queue, unconditional abort, no per-message stop, no
- * typing indicator, no auto-resume - are much thinner) and behavior-preserving: same state, same
- * timing, just given a narrow interface instead of ten free-floating Maps mutated throughout a
- * 460-line handler. No grammy or AgentSession imports, so it's testable with plain synchronous
- * calls. What the running turn is doing, and whether it ended by /stop, comes from the Channel Session.
+ * Per-chat turn scheduling for the Telegram adapter: ordering, /stop, busy state and Auto-Resume.
+ * Deliberately Telegram-only - the dashboard adapter needs only the Channel Session's own queue and
+ * unconditional abort. No grammy imports: the adapter supplies how to prepare and render a turn, and
+ * learns when a chat goes busy or idle (to drive the typing indicator).
+ *
+ * A turn moves queued -> preparing (the adapter's `prepare`: album wait, session open, downloads) ->
+ * running (`session.submit`) -> finishing (the adapter's `finish`). /stop halts the turn that is
+ * preparing or running and skips the next queued one; a turn that is only finishing can't be stopped.
  */
 
-/** How long a stop request marked against a still-queued message stays live before it expires unconsumed. */
-const STOP_REQUEST_TTL_MS = 30_000;
+/** What a turn submits and how its result is rendered; `undefined` from `prepare` means nothing to submit. */
+export interface PreparedTurn {
+	session: ChannelSession;
+	input: ChannelInput;
+	onEvent?: (event: AgentSessionEvent) => void;
+	finish(result: PromptResult | undefined, options: { resumeInMs?: number }): Promise<void>;
+}
 
-export function createTurnQueue(options: { stopRequestTtlMs?: number } = {}) {
-	const stopRequestTtlMs = options.stopRequestTtlMs ?? STOP_REQUEST_TTL_MS;
+/** `resume` is true for the Auto-Resume turn, which re-runs the failed turn's own `prepare`. */
+export type PrepareTurn = (signal: AbortSignal, resume: boolean) => Promise<PreparedTurn | undefined>;
 
-	const queues = new Map<string, Promise<void>>();
-	const queuedMessageIds = new Map<string, number[]>();
-	const queueDepth = new Map<string, number>();
-	const stopRequested = new Map<string, { messageId: number; timer: ReturnType<typeof setTimeout> }>();
+export type StopDecision =
+	| { kind: "cancelledResume" }
+	| { kind: "halted"; runningTool?: string; skippedQueued: boolean }
+	| { kind: "skippedQueued" }
+	| { kind: "idle" };
+
+export interface TurnQueueOptions {
+	onBusy(chat: string): void;
+	onIdle(chat: string): void;
+	/** Delay before a turn that ended on a provider error gets its one Auto-Resume. */
+	resumeDelayMs: number;
+}
+
+interface Turn {
+	prepare: PrepareTurn;
+	resume: boolean;
+	abort: AbortController;
+	/** Set once the turn is submitted; cleared when it starts finishing. */
+	session?: ChannelSession;
+	stoppable: boolean;
+}
+
+interface ChatTurns {
+	queued: Turn[];
+	current?: Turn;
+}
+
+export function createTurnQueue(options: TurnQueueOptions) {
+	const chats = new Map<string, ChatTurns>();
 	const pendingResumes = new Map<string, ReturnType<typeof setTimeout>>();
 
-	function removeQueuedMessage(chat: string, messageId: number): void {
-		const queued = queuedMessageIds.get(chat);
-		if (!queued) return;
-		const remaining = queued.filter((id) => id !== messageId);
-		if (remaining.length > 0) queuedMessageIds.set(chat, remaining);
-		else queuedMessageIds.delete(chat);
+	function cancelResume(chat: string): boolean {
+		const pending = pendingResumes.get(chat);
+		if (!pending) return false;
+		clearTimeout(pending);
+		pendingResumes.delete(chat);
+		return true;
+	}
+
+	function enqueue(chat: string, prepare: PrepareTurn, resume: boolean): void {
+		let turns = chats.get(chat);
+		if (!turns) {
+			turns = { queued: [] };
+			chats.set(chat, turns);
+			options.onBusy(chat);
+		}
+		turns.queued.push({ prepare, resume, abort: new AbortController(), stoppable: true });
+		if (!turns.current) void drain(chat, turns);
+	}
+
+	function idleIfDone(chat: string, turns: ChatTurns): void {
+		if (turns.current || turns.queued.length > 0) return;
+		chats.delete(chat);
+		options.onIdle(chat);
+	}
+
+	async function drain(chat: string, turns: ChatTurns): Promise<void> {
+		for (let turn = turns.queued.shift(); turn; turn = turns.queued.shift()) {
+			turns.current = turn;
+			try {
+				await run(chat, turn);
+			} catch (error) {
+				console.error("Telegram turn failed:", error instanceof Error ? error.message : error);
+			}
+			turns.current = undefined;
+		}
+		idleIfDone(chat, turns);
+	}
+
+	async function run(chat: string, turn: Turn): Promise<void> {
+		const prepared = await turn.prepare(turn.abort.signal, turn.resume);
+		if (!prepared || turn.abort.signal.aborted) return;
+		turn.session = prepared.session;
+		const result = await prepared.session.submit(prepared.input, prepared.onEvent);
+		turn.session = undefined;
+		turn.stoppable = false;
+		// Capped at one: a resume that fails again is reported and left for the owner.
+		const resumeInMs = result?.finalError !== undefined && !turn.resume ? options.resumeDelayMs : undefined;
+		await prepared.finish(result, { resumeInMs });
+		if (resumeInMs === undefined) return;
+		cancelResume(chat);
+		pendingResumes.set(
+			chat,
+			setTimeout(() => {
+				pendingResumes.delete(chat);
+				enqueue(chat, turn.prepare, true);
+			}, resumeInMs),
+		);
 	}
 
 	return {
+		/** Queue a turn for `chat` after any earlier one. Supersedes a pending Auto-Resume. */
+		submit(chat: string, prepare: PrepareTurn): void {
+			cancelResume(chat);
+			enqueue(chat, prepare, false);
+		},
+
 		/**
-		 * Track `messageId` as queued for `chat` and chain `job` after any prior turn queued for that
-		 * chat. The caller is responsible for calling `dequeue(chat, messageId)` from inside `job`
-		 * once it starts running (before consulting `consumeStopRequest`), and for depth bookkeeping
-		 * via `trackDepth`/`untrackDepth` around the whole turn (including turns skipped before `job`
-		 * ever runs, e.g. by `/model` or a stop request).
+		 * Cancel a pending Auto-Resume; otherwise halt the preparing or running turn, and skip the next
+		 * queued one. Marked before the abort, which would otherwise let that queued turn start.
 		 */
-		enqueue(chat: string, messageId: number, job: () => Promise<void>): Promise<void> {
-			const queued = queuedMessageIds.get(chat) ?? [];
-			queued.push(messageId);
-			queuedMessageIds.set(chat, queued);
-			const previous = queues.get(chat) ?? Promise.resolve();
-			const next = previous.then(job);
-			queues.set(
-				chat,
-				next.catch(() => {}),
-			);
-			return next;
-		},
-
-		/** Call once a queued turn starts running, before consulting `consumeStopRequest`. */
-		dequeue: removeQueuedMessage,
-
-		trackDepth(chat: string): void {
-			queueDepth.set(chat, (queueDepth.get(chat) ?? 0) + 1);
-		},
-
-		/** Call exactly once per turn queued via `enqueue`, whether it ran, was skipped, or errored. */
-		untrackDepth(chat: string): void {
-			const depth = (queueDepth.get(chat) ?? 1) - 1;
-			if (depth > 0) queueDepth.set(chat, depth);
-			else queueDepth.delete(chat);
-		},
-
-		queueDepth(chat: string): number {
-			return queueDepth.get(chat) ?? 0;
-		},
-
-		/** The message id of the next turn due to run for `chat`, if any is queued. */
-		nextQueuedMessageId(chat: string): number | undefined {
-			return queuedMessageIds.get(chat)?.[0];
-		},
-
-		/** Mark `messageId` (a still-queued turn) to be skipped when its turn comes. */
-		requestStop(chat: string, messageId: number): void {
-			const previous = stopRequested.get(chat);
-			if (previous) clearTimeout(previous.timer);
-			const timer = setTimeout(() => {
-				const request = stopRequested.get(chat);
-				if (request?.messageId === messageId) stopRequested.delete(chat);
-			}, stopRequestTtlMs);
-			stopRequested.set(chat, { messageId, timer });
-		},
-
-		/** True (and clears the request) if `messageId`'s queued turn was marked to be skipped. */
-		consumeStopRequest(chat: string, messageId: number): boolean {
-			const request = stopRequested.get(chat);
-			if (!request || request.messageId !== messageId) return false;
-			clearTimeout(request.timer);
-			stopRequested.delete(chat);
-			return true;
-		},
-
-		/** Schedule `run` as chat's pending auto-resume; replaces (does not stack with) an existing one. */
-		scheduleAutoResume(chat: string, run: () => void, delayMs: number): void {
-			const previous = pendingResumes.get(chat);
-			if (previous) clearTimeout(previous);
-			pendingResumes.set(
-				chat,
-				setTimeout(() => {
-					pendingResumes.delete(chat);
-					run();
-				}, delayMs),
-			);
-		},
-
-		/** True (and cancels it) if `chat` had a pending auto-resume. */
-		cancelAutoResume(chat: string): boolean {
-			const pending = pendingResumes.get(chat);
-			if (!pending) return false;
-			clearTimeout(pending);
-			pendingResumes.delete(chat);
-			return true;
+		async stop(chat: string): Promise<StopDecision> {
+			if (cancelResume(chat)) return { kind: "cancelledResume" };
+			const turns = chats.get(chat);
+			if (!turns) return { kind: "idle" };
+			const skippedQueued = turns.queued.shift() !== undefined;
+			const current = turns.current?.stoppable ? turns.current : undefined;
+			if (current) {
+				current.abort.abort();
+				const runningTool = current.session ? (await current.session.stop()).runningTool : undefined;
+				return { kind: "halted", runningTool, skippedQueued };
+			}
+			idleIfDone(chat, turns);
+			return skippedQueued ? { kind: "skippedQueued" } : { kind: "idle" };
 		},
 	};
 }

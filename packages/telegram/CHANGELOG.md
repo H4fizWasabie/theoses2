@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- fix: /stop now halts a turn that is still preparing (album wait, session load, attachment download, `/model`). It used to reply "Nothing is queued." and let the turn run.
+- refactor: `turn-queue.ts` now owns each turn's whole lifecycle (queued, preparing, running, finishing), /stop and Auto-Resume. The adapter hands it a `prepare` function and maps its `StopDecision` to reply text. The per-message stop request (and its 30s expiry), depth tracking and typing reference counts are gone; the typing indicator follows the queue's busy/idle state and now stays on until the final reply is sent. A pending Auto-Resume is cancelled by a new turn or /stop, no longer by the `/on tool call` toggle.
+
 ## [1.0.89] - 2026-09-25
 
 - fix: only `generate_image` results are delivered as Telegram photos. Images from any tool used to be sent, so reading an image file with `read` and then sending it via bash delivered the photo twice.

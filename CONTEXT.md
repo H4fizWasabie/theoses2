@@ -32,6 +32,10 @@ _Avoid_: stop marker, boundary marker
 The fire-and-forget work that runs after a Channel Session turn ends successfully (memory consolidation, task-boundary detection). It never blocks or fails the reply. Triggered by the Channel Session itself when an operation finishes with outcome `completed` and no retry is pending; adapters never trigger it. Only non-CLI Channel Sessions (Telegram, dashboard) settle, so plain coding runs stay out of Durable Memory.
 _Avoid_: post-turn hook (implies an event seam that doesn't exist), background turn work
 
+**Auto-Resume**:
+The one automatic follow-up a Telegram turn gets when it still ends on a provider error after the session's own retries: after 60 seconds the same task is re-prompted with an "[automatic resume]" message that settles no text. A new owner turn or /stop cancels it; a resume that fails again is reported and not resumed.
+_Avoid_: retry (that is the session's own per-request retry), auto-continue
+
 **Owner**:
 The single human who controls a Theoses2 runtime across its channels. Theoses2 has one owner, not a user directory or role hierarchy.
 _Avoid_: account, tenant, operator
