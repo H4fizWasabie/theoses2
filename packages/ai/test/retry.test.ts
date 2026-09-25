@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { fauxAssistantMessage } from "../src/providers/faux.ts";
-import { isRetryableAssistantError, type RetryPolicy, retryAssistantCall } from "../src/utils/retry.ts";
+import {
+	createRetryBudget,
+	isRetryableAssistantError,
+	type RetryPolicy,
+	retryAssistantCall,
+} from "../src/utils/retry.ts";
 
 const openAIExplicitRetryMessage =
 	"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID req_******** in your message.";
@@ -240,5 +245,53 @@ describe("retryAssistantCall", () => {
 		expect(res.errorMessage).toBeUndefined();
 		expect(produce).toHaveBeenCalledTimes(1);
 		expect(onRetryFinished).toHaveBeenCalledWith(false, 1, "terminated");
+	});
+});
+
+describe("createRetryBudget", () => {
+	const failed = fauxAssistantMessage("", { stopReason: "error", errorMessage: "503 overloaded" });
+
+	it("backs off exponentially, reads the policy on every check, and reports one end per run", () => {
+		let policy: RetryPolicy = { enabled: true, maxRetries: 2, baseDelayMs: 100 };
+		const budget = createRetryBudget(() => policy);
+
+		expect(budget.finish(true)).toBeUndefined();
+		expect(budget.next(failed)).toEqual({ attempt: 1, maxAttempts: 2, delayMs: 100, errorMessage: "503 overloaded" });
+		expect(budget.next(failed).delayMs).toBe(200);
+		expect(budget.exhausted).toBe(true);
+		policy = { ...policy, maxRetries: 5 };
+		expect(budget.exhausted).toBe(false);
+
+		expect(budget.finish(false, "gave up")).toEqual({ success: false, attempt: 2, finalError: "gave up" });
+		expect(budget.finish(false, "again")).toBeUndefined();
+		expect(budget.attempt).toBe(0);
+	});
+
+	it("is exhausted from the start without an enabled policy", () => {
+		expect(createRetryBudget(() => undefined).exhausted).toBe(true);
+		expect(createRetryBudget(() => ({ enabled: false, maxRetries: 3, baseDelayMs: 1 })).exhausted).toBe(true);
+	});
+
+	it("cancels its backoff sleep through cancel() or the caller's signal", async () => {
+		vi.useFakeTimers();
+		try {
+			const budget = createRetryBudget(() => ({ enabled: true, maxRetries: 3, baseDelayMs: 1000 }));
+			const cancelled = budget.sleep(1000);
+			expect(budget.isSleeping).toBe(true);
+			budget.cancel();
+			expect(await cancelled).toBe(false);
+			expect(budget.isSleeping).toBe(false);
+
+			const controller = new AbortController();
+			const aborted = budget.sleep(1000, controller.signal);
+			controller.abort();
+			expect(await aborted).toBe(false);
+
+			const slept = budget.sleep(1000);
+			await vi.advanceTimersByTimeAsync(1000);
+			expect(await slept).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

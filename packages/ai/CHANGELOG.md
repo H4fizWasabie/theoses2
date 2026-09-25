@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: `createRetryBudget(getPolicy)` holds one caller's retry state (attempt count, the `baseDelayMs * 2^(attempt-1)` backoff, a cancellable sleep, and one end report per run of retries). `retryAssistantCall` now runs on it; its behavior and callbacks are unchanged.
+
 ## [1.0.89] - 2026-09-25
 
 - fix: an abort during a provider's lazy setup (auth resolution checks the caller's signal) now ends the stream with `stopReason: "aborted"` instead of `"error"`, matching the providers' own `signal.aborted ? "aborted" : "error"`. Stopping a turn while a tool ran hit this on the follow-up request, so the operation was recorded `failed` (no Abort Notice next turn) and could read as a provider failure.

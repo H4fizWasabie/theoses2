@@ -37,18 +37,19 @@ import type {
 import {
 	clampThinkingLevel,
 	cleanupSessionResources,
+	createRetryBudget,
 	getSupportedThinkingLevels,
 	isContextOverflow,
 	isRecoverableLength,
 	isRetryableAssistantError,
 	modelsAreEqual,
 	type RetryCallbacks,
+	type RetryEnd,
 	resetApiProviders,
 	streamSimple,
 } from "theoses-ai/compat";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
-import { sleep } from "../utils/sleep.ts";
 import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
@@ -406,8 +407,7 @@ export class AgentSession {
 	private _branchSummaryAbortController: AbortController | undefined = undefined;
 
 	// Retry state
-	private _retryAbortController: AbortController | undefined = undefined;
-	private _retryAttempt = 0;
+	private readonly _retry = createRetryBudget(() => this.settingsManager.getRetrySettings());
 	/** Set on agent_end by _willRetryAfterAgentEnd, consumed by _handlePostAgentRun. */
 	private _retryPending = false;
 	/** What the latest operation ended with; returned by prompt(). */
@@ -765,23 +765,13 @@ export class AgentSession {
 
 				// Reset retry counter immediately on successful assistant response
 				// This prevents accumulation across multiple LLM calls within a turn
-				if (assistantMsg.stopReason !== "error" && this._retryAttempt > 0) {
-					this._emit({
-						type: "auto_retry_end",
-						success: true,
-						attempt: this._retryAttempt,
-					});
-					this._retryAttempt = 0;
-				}
+				if (assistantMsg.stopReason !== "error") this._emitRetryEnd(this._retry.finish(true));
 			}
 		}
 	};
 
 	private _willRetryAfterAgentEnd(event: Extract<AgentEvent, { type: "agent_end" }>): boolean {
-		const settings = this.settingsManager.getRetrySettings();
-		if (!settings.enabled || this._retryAttempt >= settings.maxRetries) {
-			return false;
-		}
+		if (this._retry.exhausted) return false;
 
 		for (let i = event.messages.length - 1; i >= 0; i--) {
 			const message = event.messages[i];
@@ -1000,7 +990,7 @@ export class AgentSession {
 
 	/** Current retry attempt (0 if not retrying) */
 	get retryAttempt(): number {
-		return this._retryAttempt;
+		return this._retry.attempt;
 	}
 
 	/**
@@ -1220,15 +1210,7 @@ export class AgentSession {
 			outcome = "aborted";
 		}
 
-		if (msg.stopReason === "error" && this._retryAttempt > 0) {
-			this._emit({
-				type: "auto_retry_end",
-				success: false,
-				attempt: this._retryAttempt,
-				finalError: msg.errorMessage,
-			});
-			this._retryAttempt = 0;
-		}
+		if (msg.stopReason === "error") this._emitRetryEnd(this._retry.finish(false, msg.errorMessage));
 
 		// The operation ends before any post-turn compaction (a crash there must not read as an
 		// interrupted task), but not before overflow recovery, which continues the same operation.
@@ -3240,17 +3222,8 @@ export class AgentSession {
 	 */
 	private async _prepareRetry(message: AssistantMessage): Promise<boolean> {
 		// Whether to retry was already decided at agent_end (_willRetryAfterAgentEnd); this only runs it.
-		const settings = this.settingsManager.getRetrySettings();
-		this._retryAttempt++;
-		const delayMs = settings.baseDelayMs * 2 ** (this._retryAttempt - 1);
-
-		this._emit({
-			type: "auto_retry_start",
-			attempt: this._retryAttempt,
-			maxAttempts: settings.maxRetries,
-			delayMs,
-			errorMessage: message.errorMessage || "Unknown error",
-		});
+		const retry = this._retry.next(message);
+		this._emit({ type: "auto_retry_start", ...retry });
 
 		// Remove error message from agent state (keep in session for history)
 		const messages = this.agent.state.messages;
@@ -3259,37 +3232,27 @@ export class AgentSession {
 		}
 
 		// Wait with exponential backoff (abortable)
-		this._retryAbortController = new AbortController();
-		try {
-			await sleep(delayMs, this._retryAbortController.signal);
-		} catch {
-			// Aborted during sleep - emit end event so UI can clean up
-			const attempt = this._retryAttempt;
-			this._retryAttempt = 0;
-			this._emit({
-				type: "auto_retry_end",
-				success: false,
-				attempt,
-				finalError: "Retry cancelled",
-			});
-			return false;
-		} finally {
-			this._retryAbortController = undefined;
-		}
+		if (await this._retry.sleep(retry.delayMs)) return true;
+		// Aborted during sleep - emit end event so UI can clean up
+		this._emitRetryEnd(this._retry.finish(false, "Retry cancelled"));
+		return false;
+	}
 
-		return true;
+	/** The one place a run of retries is reported as ended; `finish` returns undefined when nothing was retried. */
+	private _emitRetryEnd(end: RetryEnd | undefined): void {
+		if (end) this._emit({ type: "auto_retry_end", ...end });
 	}
 
 	/**
 	 * Cancel in-progress retry.
 	 */
 	abortRetry(): void {
-		this._retryAbortController?.abort();
+		this._retry.cancel();
 	}
 
 	/** Whether auto-retry is currently in progress */
 	get isRetrying(): boolean {
-		return this._retryAbortController !== undefined;
+		return this._retry.isSleeping;
 	}
 
 	/** Whether auto-retry is enabled */
