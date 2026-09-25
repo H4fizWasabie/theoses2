@@ -34,9 +34,8 @@
  * `[compaction] resetting chain` lines under THEOSES_DEBUG_TASK_BOUNDARY show what was decided and applied.
  */
 
-import { contentText, retryAssistantCall } from "theoses-ai";
-import type { Context, SimpleStreamOptions } from "theoses-ai/compat";
-import { resolveBackgroundModel } from "./background-models.ts";
+import { contentText } from "theoses-ai";
+import { backgroundCall } from "./background-call.ts";
 import { askJevNouls } from "./jev-client.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { CustomEntry, SessionEntry, SessionManager } from "./session-manager.ts";
@@ -265,34 +264,26 @@ async function callSummaryModel(
 	related: boolean,
 	sessionAffinityId: string,
 ): Promise<string | undefined> {
-	// Reuses the consolidation model (same cheap/fast tier and cost-strict routing) until issue #186 picks a
-	// dedicated one; the related/unrelated judgment itself goes to Jev (see callJevRelated).
-	const model = resolveBackgroundModel(modelRuntime, "consolidation");
+	// Reuses the consolidation model (same cheap/fast tier and cost-strict routing, via backgroundCall) until
+	// issue #186 picks a dedicated one; the related/unrelated judgment itself goes to Jev (see callJevRelated).
 	const instructions = related ? TASK_SUMMARY_INSTRUCTIONS_RELATED : TASK_SUMMARY_INSTRUCTIONS_NEW;
 	// The previous reply is what lets a terse message ("Check", "Go") be described as the concrete
 	// task it refers to; without it the descriptor freezes on stale text (seen live: a "strawberry"
 	// descriptor survived a whole conversation about the intent router).
 	const replyLine = previousReply ? `\n\nAssistant's previous reply: ${previousReply}` : "";
 	const promptText = `${instructions}\n\nCurrent task: ${currentDescriptor || "(none tracked yet)"}${replyLine}\n\nNew message: ${newUserMessage}`;
-	const context: Context = {
-		messages: [{ role: "user", content: [{ type: "text", text: promptText }], timestamp: Date.now() }],
-	};
-	const streamOptions: SimpleStreamOptions = {
-		maxTokens: model.maxTokens,
-		toolChoice: "none",
-		sessionId: sessionAffinityId,
-	};
 
 	if (process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
 		console.error("TASK_BOUNDARY_SUMMARY_PROMPT", promptText.slice(0, 500));
 	}
 
 	try {
-		const response = await retryAssistantCall(
-			() => modelRuntime.completeSimple(model, context, streamOptions),
-			TASK_BOUNDARY_RETRY_POLICY,
-			undefined,
-		);
+		const response = await backgroundCall(modelRuntime, {
+			caller: "task-boundary",
+			prompt: promptText,
+			sessionId: sessionAffinityId,
+			retry: TASK_BOUNDARY_RETRY_POLICY,
+		});
 		if (response.stopReason === "aborted" || response.stopReason === "error") return undefined;
 		const summary = cleanSummary(contentText(response.content));
 		if (isMetaSummary(summary)) {

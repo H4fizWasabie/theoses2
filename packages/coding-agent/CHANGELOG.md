@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- fix: the task-boundary summary call, which runs after every Telegram and dashboard turn, now logs its cost to `consolidation-usage.jsonl` like memory consolidation does, so the daily cost report counts it. Each line now carries a `caller` field (`consolidation` or `task-boundary`).
+- fix: explorer and researcher sub-agents now write the `[provider] served ...` journal line (and the stop-without-tool-call diagnostic) for each model call, like the main agent and consolidation already did.
+- refactor: `backgroundCall` (`core/background-call.ts`) is the one module for a non-agentic background model call: model resolution, one tool-less user message, retry and cost logging. Memory consolidation and the task-boundary summary use it; prompt wording and Jev thresholds stay with each caller (ADR-0004).
+
 - refactor: the provider hooks (`onPayload`, `onResponse`, model-aware `transformHeaders`) that route every Agent's requests through the extension runner are built once by `extensionProviderHooks` and passed as one `providerHooks` value to the main agent, explorer, researcher and `createBudgetedAgent`, instead of being built twice and threaded field by field through five option types. The main agent now reads the extension runner per request rather than at stream start, like the sub-agents already did.
 
 - refactor: the agent turn's auto-retry now keeps its state in `createRetryBudget` from theoses-ai instead of fields spread across `AgentSession`. The backoff formula lives in one place, and `auto_retry_end` is emitted through one method, at most once per run of retries. No change to events, timing or `retryAttempt`/`isRetrying`/`abortRetry()`. Removes the unused `utils/sleep.ts`.
