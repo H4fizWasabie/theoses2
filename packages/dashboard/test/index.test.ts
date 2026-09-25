@@ -202,6 +202,54 @@ test("dashboard reports a turn that fails with a provider error instead of endin
 	}
 });
 
+test("dashboard shows a new session's live model before its file is written", async () => {
+	const root = await mkdtemp(join(tmpdir(), "theoses-dashboard-live-model-"));
+	const agentDir = join(root, "agent");
+	await mkdir(agentDir);
+	const faux = registerFauxProvider();
+	const model = faux.getModel();
+	await writeFile(
+		join(agentDir, "models.json"),
+		JSON.stringify({
+			providers: {
+				[model.provider]: {
+					baseUrl: model.baseUrl,
+					apiKey: "faux-key",
+					api: faux.api,
+					models: [{ id: model.id, name: model.name, reasoning: model.reasoning, input: model.input }],
+				},
+			},
+		}),
+	);
+	await writeFile(
+		join(agentDir, "settings.json"),
+		JSON.stringify({ defaultProvider: model.provider, defaultModel: model.id }),
+	);
+	const previousAgentDir = process.env.THEOSES_CODING_AGENT_DIR;
+	process.env.THEOSES_CODING_AGENT_DIR = agentDir;
+	const server = createDashboardServer({ accessToken: "test-owner-token", cwd: root });
+	const base = await listen(server);
+	try {
+		const created = await fetch(`${base}/api/sessions`, {
+			method: "POST",
+			headers: { Authorization: "Bearer test-owner-token" },
+		});
+		const session = (await created.json()) as { id: string };
+
+		const opened = await fetch(`${base}/api/sessions/${encodeURIComponent(session.id)}`, {
+			headers: { Authorization: "Bearer test-owner-token" },
+		});
+		const body = (await opened.json()) as { runtime: { provider: string | null; modelId: string | null } };
+		assert.equal(body.runtime.provider, model.provider);
+		assert.equal(body.runtime.modelId, model.id);
+	} finally {
+		await close(server);
+		faux.unregister();
+		if (previousAgentDir === undefined) delete process.env.THEOSES_CODING_AGENT_DIR;
+		else process.env.THEOSES_CODING_AGENT_DIR = previousAgentDir;
+	}
+});
+
 test("dashboard rejects a model switch to an unknown provider/id", async () => {
 	const root = await mkdtemp(join(tmpdir(), "theoses-dashboard-model-"));
 	const server = createDashboardServer({ accessToken: "test-owner-token", cwd: root });

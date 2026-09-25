@@ -32,6 +32,7 @@ export {
 	type ChannelSessions,
 	type ChannelSessionsOptions,
 	createChannelSessions,
+	describeFinalError,
 } from "./core/channel-session.ts";
 // Compaction
 export {

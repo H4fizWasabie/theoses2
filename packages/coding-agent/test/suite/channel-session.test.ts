@@ -85,10 +85,10 @@ describe("Channel Session", () => {
 		const session = await first.open("chat-1");
 		expect(await first.open("chat-1")).toBe(session);
 		await session.submit({ text: "hi" });
-		expect(first.list()).toEqual([session]);
+		expect(first.find(session.sessionId)).toBe(session);
 
 		const restarted = registry();
-		expect(restarted.list()).toEqual([]);
+		expect(restarted.find(session.sessionId)).toBeUndefined();
 		const reopened = await restarted.open("chat-1");
 		expect(reopened.sessionId).toBe(session.sessionId);
 		expect((await restarted.open("chat-2")).sessionId).not.toBe(session.sessionId);

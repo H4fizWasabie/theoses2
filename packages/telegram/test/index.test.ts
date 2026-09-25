@@ -4,23 +4,19 @@ import { describe, expect, it, vi } from "vitest";
 // The bot's whole view of the agent is one Channel Session per chat; each test installs its fake here.
 const registry = vi.hoisted(() => ({ session: undefined as unknown, gate: undefined as Promise<void> | undefined }));
 
-vi.mock("theoses-coding-agent", () => ({
+vi.mock("theoses-coding-agent", async (importOriginal) => ({
+	describeFinalError: (await importOriginal<{ describeFinalError: typeof describeFinalError }>()).describeFinalError,
 	configureHttpDispatcher: vi.fn(),
 	getAgentDir: vi.fn(() => "/tmp/telegram-test-agent-dir"),
-	createChannelSessions: vi.fn(() => {
-		let opened = false;
-		return {
-			open: async () => {
-				await registry.gate;
-				opened = true;
-				return registry.session;
-			},
-			list: () => (opened ? [registry.session] : []),
-		};
-	}),
+	createChannelSessions: vi.fn(() => ({
+		open: async () => {
+			await registry.gate;
+			return registry.session;
+		},
+	})),
 }));
 
-import type { AgentSessionEvent, ChannelInput, PromptResult } from "theoses-coding-agent";
+import type { AgentSessionEvent, ChannelInput, describeFinalError, PromptResult } from "theoses-coding-agent";
 import { createTelegramBot } from "../src/index.ts";
 
 /** A fake Channel Session whose turns run `turn`; `isRunning` is true while one does. */

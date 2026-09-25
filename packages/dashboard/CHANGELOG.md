@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- fix: a dashboard session's runtime panel now shows the live model and thinking level of its open Channel Session. A new session showed no model until its first reply wrote the session file, and the thinking level could differ from the settings.json one actually in use. Telegram sessions and unopened dashboard sessions still read the session file.
+- refactor: open sessions are looked up with `ChannelSessions.find(sessionId)`, and a failed turn's error line comes from the shared `describeFinalError`.
+
 ## [1.0.89] - 2026-09-25
 
 - fix: a chat turn that fails with a provider error after its retries now ends with an SSE `error` event (`provider/model failed: message`), shown in the chat status line, instead of `done` with no text. Telegram had this since #211; the dashboard was silent.

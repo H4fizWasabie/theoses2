@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- change: `ChannelSessions.list()` is replaced by `find(sessionId)`, which returns the open Channel Session with that engine session id (including one not yet written to disk). `ChannelSession` exposes `thinkingLevel`. New `describeFinalError(result)` gives the owner-facing "provider/model failed: message" line both channel adapters show.
+
 - fix: the task-boundary summary call, which runs after every Telegram and dashboard turn, now logs its cost to `consolidation-usage.jsonl` like memory consolidation does, so the daily cost report counts it. Each line now carries a `caller` field (`consolidation` or `task-boundary`).
 - fix: explorer and researcher sub-agents now write the `[provider] served ...` journal line (and the stop-without-tool-call diagnostic) for each model call, like the main agent and consolidation already did.
 - refactor: `backgroundCall` (`core/background-call.ts`) is the one module for a non-agentic background model call: model resolution, one tool-less user message, retry and cost logging. Memory consolidation and the task-boundary summary use it; prompt wording and Jev thresholds stay with each caller (ADR-0004).

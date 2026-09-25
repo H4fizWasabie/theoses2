@@ -1,3 +1,4 @@
+import type { ThinkingLevel } from "theoses-agent-core";
 import type { Api, Model } from "theoses-ai";
 import type { AgentSessionEvent, PromptOptions, PromptResult } from "./agent-session.ts";
 import { findExactModelReferenceMatch } from "./model-resolver.ts";
@@ -14,6 +15,7 @@ export interface ChannelSession {
 	readonly sessionId: string;
 	readonly sessionFile: string | undefined;
 	readonly model: Model<Api> | undefined;
+	readonly thinkingLevel: ThinkingLevel;
 	/** A turn is in progress, including retry backoff. */
 	readonly isRunning: boolean;
 	/** Runs one turn after any earlier submit finishes. `onEvent` sees only this turn's events. */
@@ -31,6 +33,12 @@ export interface ChannelInput {
 	replyContext?: string;
 	/** See PromptOptions.settlementText. */
 	settlementText?: string;
+}
+
+/** The owner-facing line for a turn that still failed after its retries (#211), or undefined if it didn't. */
+export function describeFinalError(result: PromptResult | undefined): string | undefined {
+	const failure = result?.finalError;
+	return failure && `${failure.provider}/${failure.model} failed: ${failure.message}`;
 }
 
 export interface ChannelSessionsOptions {
@@ -84,6 +92,9 @@ export function createChannelSessions(options: ChannelSessionsOptions) {
 			},
 			get model() {
 				return session.model;
+			},
+			get thinkingLevel() {
+				return session.thinkingLevel;
 			},
 			get isRunning() {
 				return session.isStreaming;
@@ -150,9 +161,12 @@ export function createChannelSessions(options: ChannelSessionsOptions) {
 			return created;
 		},
 
-		/** Sessions opened so far, including new ones not yet written to disk. Never opens one. */
-		list(): readonly ChannelSession[] {
-			return open;
+		/**
+		 * The open Channel Session with this engine session id, including a new one not yet written to disk
+		 * (a session file is only flushed once it has an assistant message). Never opens one.
+		 */
+		find(sessionId: string): ChannelSession | undefined {
+			return open.find((session) => session.sessionId === sessionId);
 		},
 	};
 }

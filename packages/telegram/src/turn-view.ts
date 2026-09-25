@@ -1,4 +1,4 @@
-import type { AgentSessionEvent, PromptResult } from "theoses-coding-agent";
+import { type AgentSessionEvent, describeFinalError, type PromptResult } from "theoses-coding-agent";
 import { chunkHtml, formatTelegramHtml, renderToolCallBlocks, splitSections, type ToolCallEntry } from "./format.ts";
 import { createToolCallLogger } from "./tool-call-log.ts";
 
@@ -94,10 +94,10 @@ export function createTurnView(outbox: Outbox, options: TurnViewOptions) {
 			const editTarget = toolCallDetail ? undefined : statusMessageId;
 			// Issue #211: a failed turn has no text for assistantText() to find, so without this the bot went
 			// silent on provider failures. finalError is the last attempt's, after all retries.
-			const failure = result?.finalError;
+			const failure = describeFinalError(result);
 			const errorText =
 				failure &&
-				`${failure.provider}/${failure.model} failed: ${failure.message}` +
+				failure +
 					(resumeInMs === undefined
 						? ""
 						: `\nResuming automatically in ${resumeInMs / 1000}s. Send any message to cancel.`);
