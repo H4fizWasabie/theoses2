@@ -15,7 +15,7 @@ async function createWaitingHarness(
 ): Promise<{
 	harness: Harness;
 	releaseToolExecution: () => void;
-	promptPromise: Promise<void>;
+	promptPromise: Promise<unknown>;
 	waitForToolStart: Promise<void>;
 }> {
 	let releaseToolExecution: (() => void) | undefined;

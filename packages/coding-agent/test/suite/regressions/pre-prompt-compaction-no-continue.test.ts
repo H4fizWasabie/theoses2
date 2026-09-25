@@ -61,7 +61,7 @@ describe("pre-prompt compaction regression", () => {
 		harness.setResponses([fauxAssistantMessage("answered next prompt")]);
 		const continueSpy = vi.spyOn(harness.session.agent, "continue");
 
-		await expect(harness.session.prompt("next prompt")).resolves.toBeUndefined();
+		await expect(harness.session.prompt("next prompt")).resolves.toMatchObject({ outcome: "completed" });
 
 		expect(continueSpy).not.toHaveBeenCalled();
 		expect(harness.eventsOfType("compaction_end").at(-1)).toMatchObject({

@@ -176,7 +176,7 @@ describe("AgentSession compaction characterization", () => {
 		seedCompactableSession(harness);
 		harness.setResponses([fauxAssistantMessage("queued response")]);
 
-		let queuedPrompt: Promise<void> | undefined;
+		let queuedPrompt: Promise<unknown> | undefined;
 		harness.session.subscribe((event) => {
 			if (event.type === "compaction_end" && event.reason === "manual" && event.result) {
 				expect(harness.session.isCompacting).toBe(false);
@@ -571,7 +571,7 @@ describe("AgentSession compaction characterization", () => {
 		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("completed answer")]);
 
-		await expect(harness.session.prompt("hello")).resolves.toBeUndefined();
+		await expect(harness.session.prompt("hello")).resolves.toMatchObject({ outcome: "completed" });
 
 		const compactionEnd = harness.eventsOfType("compaction_end").at(-1);
 		expect(compactionEnd).toMatchObject({

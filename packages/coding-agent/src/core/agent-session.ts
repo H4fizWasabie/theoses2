@@ -123,6 +123,7 @@ import {
 	type CompactionEntry,
 	getLatestCompactionEntry,
 	limitActiveContextMessages,
+	type OperationFinishedEntry,
 	type SessionEntry,
 	type SessionManager,
 } from "./session-manager.ts";
@@ -286,6 +287,13 @@ export interface PromptOptions {
 	settlementText?: string;
 }
 
+/** How the operation a prompt() ran ended, after retries and overflow recovery. */
+export interface PromptResult {
+	outcome: OperationFinishedEntry["outcome"];
+	/** The final provider error, only when outcome is "failed". */
+	finalError?: { message: string; provider: string; model: string };
+}
+
 const REPLY_CONTEXT_CAP = 2000;
 /** Issue #173: bounds one auto-logged bash command line in the Working Note (the command, not its output — the how, not the what). */
 const BASH_AUTO_LOG_COMMAND_CAP = 200;
@@ -400,6 +408,10 @@ export class AgentSession {
 	// Retry state
 	private _retryAbortController: AbortController | undefined = undefined;
 	private _retryAttempt = 0;
+	/** Set on agent_end by _willRetryAfterAgentEnd, consumed by _handlePostAgentRun. */
+	private _retryPending = false;
+	/** What the latest operation ended with; returned by prompt(). */
+	private _lastOperationResult: PromptResult | undefined = undefined;
 
 	/** Turn Settlement input: the latest prompt's user text (or its settlementText override). */
 	private _settlementText = "";
@@ -715,36 +727,10 @@ export class AgentSession {
 		await this._emitExtensionEvent(event);
 
 		// Notify all listeners
+		// The retry decision is made once, here: agent_end reports it and _handlePostAgentRun acts on it.
 		const willRetry = event.type === "agent_end" && this._willRetryAfterAgentEnd(event);
+		if (event.type === "agent_end") this._retryPending = willRetry;
 		this._emit(event.type === "agent_end" ? { ...event, willRetry } : event);
-		if (event.type === "agent_end") {
-			const assistant = [...event.messages].reverse().find((message) => message.role === "assistant") as
-				| AssistantMessage
-				| undefined;
-			const outcome =
-				assistant?.stopReason === "aborted"
-					? "aborted"
-					: assistant?.stopReason === "error"
-						? "failed"
-						: "completed";
-			this.sessionManager.appendOperationFinished(outcome);
-			// Issue #173: the Working Note is a scratchpad for the operation in
-			// progress, not a cross-operation memory — the harness owns clearing
-			// it so stale context from a finished task never bleeds into an
-			// unrelated later one, instead of relying on the model to remember
-			// to call working_note({ clear: true }). Left in place on
-			// "aborted"/"failed" so a retry or the WORKING_NOTE_STALE_TURNS
-			// backstop can still make use of it.
-			if (outcome === "completed" && this.sessionManager.getWorkingNote()) {
-				this.sessionManager.clearWorkingNote();
-			}
-			// Turn Settlement: only a finished, non-retrying turn of a non-CLI Channel Session (every header
-			// defaults to channel "cli"; plain coding runs stay out of Durable Memory). Failed and aborted
-			// turns are never distilled into memory.
-			if (outcome === "completed" && !willRetry && this.sessionManager.getChannelSessionKey().channel !== "cli") {
-				settleTurn(this, this._settlementText);
-			}
-		}
 
 		// Handle session persistence
 		if (event.type === "message_end") {
@@ -1185,8 +1171,9 @@ export class AgentSession {
 	// Prompting
 	// =========================================================================
 
-	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
+	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<PromptResult | undefined> {
 		this._isAgentRunActive = true;
+		this._lastOperationResult = undefined;
 		try {
 			// A model or thinking-level switch also rebuilds, so the reasoning budget note never states the old cap.
 			const { model, thinkingLevel } = this.agent.state;
@@ -1206,6 +1193,7 @@ export class AgentSession {
 			while (await this._handlePostAgentRun()) {
 				await this.agent.continue();
 			}
+			return this._lastOperationResult;
 		} finally {
 			this._systemPromptOverride = undefined;
 			this._flushPendingBashMessages();
@@ -1217,11 +1205,19 @@ export class AgentSession {
 		const msg = this._lastAssistantMessage;
 		this._lastAssistantMessage = undefined;
 		if (!msg) {
+			this._finishOperation("completed", undefined);
 			return false;
 		}
 
-		if (this._isRetryableError(msg) && (await this._prepareRetry(msg))) {
-			return true;
+		let outcome: OperationFinishedEntry["outcome"] =
+			msg.stopReason === "aborted" ? "aborted" : msg.stopReason === "error" ? "failed" : "completed";
+		if (this._retryPending) {
+			this._retryPending = false;
+			if (await this._prepareRetry(msg)) {
+				return true;
+			}
+			// _prepareRetry only declines when stop cancelled the backoff sleep.
+			outcome = "aborted";
 		}
 
 		if (msg.stopReason === "error" && this._retryAttempt > 0) {
@@ -1234,9 +1230,18 @@ export class AgentSession {
 			this._retryAttempt = 0;
 		}
 
-		if (await this._checkCompaction(msg)) {
+		// The operation ends before any post-turn compaction (a crash there must not read as an
+		// interrupted task), but not before overflow recovery, which continues the same operation.
+		let finished = false;
+		const finishOperation = () => {
+			if (finished) return;
+			finished = true;
+			this._finishOperation(outcome, msg);
+		};
+		if (await this._checkCompaction(msg, true, finishOperation)) {
 			return true;
 		}
+		finishOperation();
 
 		if (this.sessionManager.isWorkingNoteStale()) {
 			this.sessionManager.clearWorkingNote();
@@ -1245,6 +1250,33 @@ export class AgentSession {
 		// The agent loop drains both queues before emitting agent_end. Any messages
 		// here were queued by agent_end extension handlers and need a continuation.
 		return this.agent.hasQueuedMessages();
+	}
+
+	/** Records the one outcome of an operation: retries and overflow recovery happen inside it, never after it. */
+	private _finishOperation(outcome: OperationFinishedEntry["outcome"], msg: AssistantMessage | undefined): void {
+		this.sessionManager.appendOperationFinished(outcome);
+		const finalError =
+			outcome === "failed" && msg?.errorMessage
+				? { message: msg.errorMessage, provider: msg.provider, model: msg.model }
+				: undefined;
+		this._lastOperationResult = { outcome, finalError };
+		if (outcome !== "completed") return;
+		// Issue #173: the Working Note is a scratchpad for the operation in
+		// progress, not a cross-operation memory — the harness owns clearing
+		// it so stale context from a finished task never bleeds into an
+		// unrelated later one, instead of relying on the model to remember
+		// to call working_note({ clear: true }). Left in place on
+		// "aborted"/"failed" so the WORKING_NOTE_STALE_TURNS backstop can
+		// still make use of it.
+		if (this.sessionManager.getWorkingNote()) {
+			this.sessionManager.clearWorkingNote();
+		}
+		// Turn Settlement: only a completed operation of a non-CLI Channel Session (every header defaults
+		// to channel "cli"; plain coding runs stay out of Durable Memory). Failed and aborted operations
+		// are never distilled into memory.
+		if (this.sessionManager.getChannelSessionKey().channel !== "cli") {
+			settleTurn(this, this._settlementText);
+		}
 	}
 
 	/**
@@ -1256,7 +1288,7 @@ export class AgentSession {
 	 * @throws Error if streaming and no streamingBehavior specified
 	 * @throws Error if no model selected or no API key available (when not streaming)
 	 */
-	async prompt(text: string, options?: PromptOptions): Promise<void> {
+	async prompt(text: string, options?: PromptOptions): Promise<PromptResult | undefined> {
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		const preflightResult = options?.preflightResult;
 		let messages: AgentMessage[] | undefined;
@@ -1457,7 +1489,7 @@ export class AgentSession {
 		}
 
 		preflightResult?.(true);
-		await this._runAgentPrompt(messages);
+		return this._runAgentPrompt(messages);
 	}
 
 	/**
@@ -2280,9 +2312,14 @@ export class AgentSession {
 	 *
 	 * @param assistantMessage The assistant message to check
 	 * @param skipAbortedCheck If false, include aborted messages (for pre-prompt check). Default: true
+	 * @param beforeCompaction Called just before a compaction that does not continue the turn (cases 2 and 3)
 	 * @returns Whether the post-run loop should call `agent.continue()` for overflow recovery or queued messages
 	 */
-	private async _checkCompaction(assistantMessage: AssistantMessage, skipAbortedCheck = true): Promise<boolean> {
+	private async _checkCompaction(
+		assistantMessage: AssistantMessage,
+		skipAbortedCheck = true,
+		beforeCompaction?: () => void,
+	): Promise<boolean> {
 		const settings = this.settingsManager.getCompactionSettings();
 		if (!settings.enabled) return false;
 
@@ -2319,6 +2356,7 @@ export class AgentSession {
 			// Case 2: the response completed successfully. Compact, but do not retry because
 			// agent.continue() cannot continue from a completed assistant response.
 			if (!willRetry) {
+				beforeCompaction?.();
 				return await this._runAutoCompaction("overflow", false);
 			}
 
@@ -2383,6 +2421,7 @@ export class AgentSession {
 			contextTokens = directContextTokens;
 		}
 		if (shouldCompact(contextTokens, contextWindow, settings)) {
+			beforeCompaction?.();
 			return await this._runAutoCompaction("threshold", false);
 		}
 		const branch = this.sessionManager.getBranch();
@@ -2399,6 +2438,7 @@ export class AgentSession {
 				);
 			}
 			if (deferred) return false;
+			beforeCompaction?.();
 			return await this._runAutoCompaction("turns", false);
 		}
 		return false;
@@ -3199,19 +3239,9 @@ export class AgentSession {
 	 * @returns true if the caller should continue the agent, false otherwise
 	 */
 	private async _prepareRetry(message: AssistantMessage): Promise<boolean> {
+		// Whether to retry was already decided at agent_end (_willRetryAfterAgentEnd); this only runs it.
 		const settings = this.settingsManager.getRetrySettings();
-		if (!settings.enabled) {
-			return false;
-		}
-
 		this._retryAttempt++;
-
-		if (this._retryAttempt > settings.maxRetries) {
-			// Preserve the completed attempt count so post-run handling can emit the final failure.
-			this._retryAttempt--;
-			return false;
-		}
-
 		const delayMs = settings.baseDelayMs * 2 ** (this._retryAttempt - 1);
 
 		this._emit({
