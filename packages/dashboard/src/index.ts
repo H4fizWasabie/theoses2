@@ -10,6 +10,7 @@ import {
 	type ChannelSessions,
 	configureHttpDispatcher,
 	createChannelSessions,
+	describeFinalError,
 	getAgentDir,
 	type SessionInfo,
 	SessionManager,
@@ -174,15 +175,32 @@ interface RuntimeSummary {
 	lastUsage: UsageSummary | null;
 }
 
-/** Read-only runtime info for display. Never exposes or accepts credentials. */
-function runtimeSummary(manager: SessionManager, history: HistoryTurn[]): RuntimeSummary {
-	const context = manager.buildSessionContext();
+/**
+ * Read-only runtime info for display. Never exposes or accepts credentials. An open Channel Session's
+ * live model and thinking level win over the session file's: a new session's file isn't written until
+ * its first reply, and the settings.json thinking level overrides the saved one on open.
+ */
+function runtimeSummary(
+	manager: SessionManager,
+	history: HistoryTurn[],
+	live: ChannelSession | undefined,
+): RuntimeSummary {
 	const lastAssistantTurn = [...history].reverse().find((turn) => turn.role === "assistant" && turn.usage);
+	const lastUsage = lastAssistantTurn?.usage ?? null;
+	if (live) {
+		return {
+			provider: live.model?.provider ?? null,
+			modelId: live.model?.id ?? null,
+			thinkingLevel: live.thinkingLevel,
+			lastUsage,
+		};
+	}
+	const context = manager.buildSessionContext();
 	return {
 		provider: context.model?.provider ?? null,
 		modelId: context.model?.modelId ?? null,
 		thinkingLevel: context.thinkingLevel,
-		lastUsage: lastAssistantTurn?.usage ?? null,
+		lastUsage,
 	};
 }
 
@@ -246,9 +264,8 @@ async function findVisibleSession(id: string, channelSessions: ChannelSessions, 
 	);
 	if (info) return info;
 
-	// Not on disk yet: SessionManager only flushes a session file once it has an
-	// assistant message, so a brand-new session is only among the open Channel Sessions.
-	const open = channelSessions.list().find((session) => session.sessionId === id);
+	// Not on disk yet, so a brand-new session is only among the open Channel Sessions.
+	const open = channelSessions.find(id);
 	if (!open?.sessionFile) throw new Error("Session not found");
 	return {
 		path: open.sessionFile,
@@ -332,9 +349,8 @@ async function streamChat(session: ChannelSession, request: IncomingMessage, res
 	try {
 		const result = await session.submit({ text: message, replyContext }, onEvent);
 		// A turn that fails after its retries has no text to stream; without this the chat went silent (#211).
-		const failure = result?.finalError;
-		if (failure)
-			sseSend(response, "error", { message: `${failure.provider}/${failure.model} failed: ${failure.message}` });
+		const failure = describeFinalError(result);
+		if (failure) sseSend(response, "error", { message: failure });
 		else sseSend(response, "done", {});
 	} catch (error) {
 		sseSend(response, "error", { message: error instanceof Error ? error.message : String(error) });
@@ -412,7 +428,8 @@ async function api(
 		if (request.method === "GET") {
 			const manager = SessionManager.open(info.path);
 			const history = sessionHistory(manager);
-			json(response, 200, { session: sessionView(info), history, runtime: runtimeSummary(manager, history) });
+			const live = info.channel === DASHBOARD_CHANNEL ? channelSessions.find(info.id) : undefined;
+			json(response, 200, { session: sessionView(info), history, runtime: runtimeSummary(manager, history, live) });
 			return true;
 		}
 	}
