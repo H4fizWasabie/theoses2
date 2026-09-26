@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.91] - 2026-09-26
 
 - fix: compaction no longer distills turns into Durable Memory twice. Compaction distillation never recorded a `promoted_range`, so the next Turn Settlement consolidated the same turns again. Compaction now hands its dropped entries to the same consolidation pipeline settlement uses (background model, deduplicated against existing memory nodes, chunked, one promoted range per successful chunk), without the Jev trigger. CLI sessions still distill on compaction. A pass already running for the same Channel Session makes the other trigger skip; the failure cooldown and legacy-checkpoint migration apply to both.
