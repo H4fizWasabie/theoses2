@@ -470,3 +470,44 @@ describe("inbound rich messages", () => {
 		expect(prompt).toContain("Following this adjustment");
 	});
 });
+
+describe("Telegram /model", () => {
+	function botWithSession() {
+		const session = fakeChannelSession(async () => ({ outcome: "completed" }));
+		const bot = createTelegramBot({ token: "test-token", ownerChatId: "1", cwd: "/tmp/telegram-test" });
+		bot.botInfo = {
+			id: 99,
+			is_bot: true,
+			first_name: "Test",
+			username: "test_bot",
+			can_join_groups: false,
+			can_read_all_group_messages: false,
+			supports_inline_queries: false,
+			can_connect_to_business: false,
+			has_main_web_app: false,
+		};
+		const sendMessage = vi.spyOn(bot.api, "sendMessage").mockResolvedValue({ message_id: 100 } as never);
+		return { session, bot, sendMessage };
+	}
+
+	it("reports the current model without running a turn", async () => {
+		const { session, bot, sendMessage } = botWithSession();
+
+		await bot.handleUpdate(messageUpdate(1, 1, "/model"));
+
+		await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledWith(1, expect.stringContaining("No model set yet.")));
+		expect(session.submit).not.toHaveBeenCalled();
+		expect(session.switchModel).not.toHaveBeenCalled();
+	});
+
+	it("switches to the named model and confirms it", async () => {
+		const { session, bot, sendMessage } = botWithSession();
+		session.switchModel.mockResolvedValue({ model: { provider: "openrouter", id: "some/model" } });
+
+		await bot.handleUpdate(messageUpdate(1, 1, "/model openrouter/some/model"));
+
+		await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledWith(1, "Model: openrouter/some/model"));
+		expect(session.switchModel).toHaveBeenCalledWith("openrouter/some/model");
+		expect(session.submit).not.toHaveBeenCalled();
+	});
+});

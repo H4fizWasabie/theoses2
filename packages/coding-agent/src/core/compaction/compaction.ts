@@ -9,7 +9,6 @@ import type { AgentMessage, StreamFn, ThinkingLevel } from "theoses-agent-core";
 import { contentText, type RetryCallbacks, type RetryPolicy, retryAssistantCall, uuidv7 } from "theoses-ai";
 import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "theoses-ai/compat";
 import { completeSimple } from "theoses-ai/compat";
-import { recordBackgroundFailure } from "../background-failure-log.ts";
 import { convertToLlm } from "../messages.ts";
 import {
 	buildSessionContext,
@@ -17,7 +16,6 @@ import {
 	type SessionEntry,
 	sessionEntryToContextMessages,
 } from "../session-manager.ts";
-import { parseStructuredJson } from "../structured-output.ts";
 import { TASK_BOUNDARY_CUSTOM_TYPE, type TaskBoundaryData } from "../task-boundary-detector.ts";
 import {
 	capSummaryLength,
@@ -680,13 +678,6 @@ const UPDATE_SUMMARIZATION_PROMPT = `The messages above are NEW conversation mes
 
 ${UPDATE_SUMMARIZATION_INSTRUCTIONS}`;
 
-const DISTILLATION_PROMPT = `Extract durable memory from the conversation above.
-
-Return ONLY a JSON array with this shape:
-[{"fact":"one durable fact","confidence":0.0},{"episode":"one sentence describing this batch"}]
-
-Keep only facts about the user, their people, projects, or preferences that are worth remembering in a month. Skip chit-chat, routine work, and one-offs. Confidence must be at least 0.85. The episode is a single concise description of what this batch was about, not a new fact or explanation.`;
-
 function createSummarizationOptions(
 	model: Model<any>,
 	maxTokens: number,
@@ -858,94 +849,6 @@ export async function generateSummaryWithUsage(
 	const textContent = contentText(response.content);
 
 	return { text: textContent, usage: response.usage };
-}
-
-export interface DistilledMemoryFact {
-	fact: string;
-	confidence: number;
-}
-
-export interface DistilledMemoryResult {
-	facts: DistilledMemoryFact[];
-	episode?: string;
-}
-
-/** Extract durable facts from messages about to leave active context. */
-export async function distillMemory(
-	currentMessages: AgentMessage[],
-	model: Model<any>,
-	reserveTokens: number,
-	apiKey: string | undefined,
-	headers?: Record<string, string>,
-	signal?: AbortSignal,
-	thinkingLevel?: ThinkingLevel,
-	streamFn?: StreamFn,
-	env?: Record<string, string>,
-	retry?: RetryPolicy,
-	callbacks?: RetryCallbacks,
-	sessionId?: string,
-): Promise<DistilledMemoryResult> {
-	const conversationText = serializeConversation(convertToLlm(currentMessages));
-	const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${DISTILLATION_PROMPT}`;
-	const response = await completeSummarization(
-		model,
-		buildSummarizationContext(promptText),
-		createSummarizationOptions(
-			model,
-			Math.min(Math.floor(0.8 * reserveTokens), model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY),
-			apiKey,
-			headers,
-			env,
-			signal,
-			thinkingLevel,
-			sessionId,
-		),
-		streamFn,
-		retry,
-		callbacks,
-	);
-	if (response.stopReason === "error" || response.stopReason === "aborted") return { facts: [] };
-	const replyText = contentText(response.content);
-	try {
-		const parsed: unknown = parseStructuredJson(replyText, "Memory distillation");
-		const values = Array.isArray(parsed)
-			? parsed
-			: typeof parsed === "object" && parsed !== null && Array.isArray((parsed as { facts?: unknown }).facts)
-				? (parsed as { facts: unknown[] }).facts
-				: [];
-		const facts = values.filter(
-			(value): value is DistilledMemoryFact =>
-				typeof value === "object" &&
-				value !== null &&
-				typeof (value as { fact?: unknown }).fact === "string" &&
-				typeof (value as { confidence?: unknown }).confidence === "number" &&
-				(value as { confidence: number }).confidence >= 0.85,
-		);
-		const episodeValue = Array.isArray(parsed)
-			? parsed.find((value) => typeof value === "object" && value !== null && "episode" in value)
-			: parsed;
-		const episode =
-			typeof episodeValue === "object" &&
-			episodeValue !== null &&
-			typeof (episodeValue as { episode?: unknown }).episode === "string"
-				? (episodeValue as { episode: string }).episode.trim()
-				: undefined;
-		return { facts, ...(episode ? { episode } : {}) };
-	} catch (error) {
-		recordBackgroundFailure({
-			caller: "distillation",
-			model: response.responseModel ?? model.id,
-			provider: response.responseProvider,
-			stopReason: response.stopReason,
-			error: error instanceof Error ? error.message.slice(0, 300) : String(error),
-			reply: replyText,
-		});
-		// parseStructuredJson already logged position + raw-text snippet (issue #250). Distillation
-		// is best-effort — dropping this pass loses one window's memory candidates, so we only skip
-		// after the repair layers had their chance.
-		console.warn("Memory distillation returned invalid JSON; skipping this pass.");
-		return { facts: [] };
-	}
 }
 
 // ============================================================================

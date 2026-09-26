@@ -258,7 +258,6 @@ export type ReadonlySessionManager = Pick<
 	| "storeArtifact"
 	| "getArtifactDirectory"
 	| "getArtifactCatalog"
-	| "hasPromotedRange"
 	| "getLeafId"
 	| "getLeafEntry"
 	| "getEntry"
@@ -1293,25 +1292,6 @@ export class SessionManager {
 			lines.unshift(line);
 		}
 		return lines.length > 0 ? `Live document artifacts:\n${lines.join("\n")}` : "";
-	}
-
-	isEntryPromoted(entryId: string): boolean {
-		return this.hasPromotedRange([entryId]);
-	}
-
-	hasPromotedRange(entryIds: string[]): boolean {
-		const branch = this.getBranch();
-		const positions = new Map(branch.map((entry, index) => [entry.id, index]));
-		return branch.some((entry) => {
-			if (entry.type !== "promoted_range") return false;
-			const first = positions.get(entry.firstEntryId);
-			const last = positions.get(entry.lastEntryId);
-			if (first === undefined || last === undefined) return false;
-			return entryIds.some((id) => {
-				const position = positions.get(id);
-				return position !== undefined && position >= first && position <= last;
-			});
-		});
 	}
 
 	getSessionFile(): string | undefined {

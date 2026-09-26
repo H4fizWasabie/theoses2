@@ -63,7 +63,6 @@ import {
 	collectEntriesForBranchSummary,
 	compact,
 	countUserTurnsSince,
-	distillMemory,
 	estimateContextTokens,
 	estimateTokens,
 	generateBranchSummary,
@@ -126,13 +125,14 @@ import {
 	getLatestCompactionEntry,
 	limitActiveContextMessages,
 	type OperationFinishedEntry,
+	type OperationOutcome,
 	type SessionEntry,
 	type SessionManager,
 } from "./session-manager.ts";
+import { createSessionSystemPrompt, type SessionSystemPrompt } from "./session-system-prompt.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
-import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createDeferredToolDefinitions } from "./tools/deferred-dispatch.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
@@ -321,6 +321,27 @@ function addReplyContext(text: string, replyContext: string | undefined): string
 	return `[Quoted message context]\n${replyContext.slice(0, REPLY_CONTEXT_CAP)}\n[/Quoted message context]\n\n${text}`;
 }
 
+/**
+ * Decorates the user's prompt text with everything prompt() prepends/appends before it reaches the agent: an
+ * Abort/Interrupted Notice when the prior operation didn't finish cleanly (never both — only the most recent
+ * outcome applies), quoted-reply context, and the clock annotation. Pure and exported so it can be tested and
+ * reused without an AgentSession instance.
+ */
+export function decoratePromptText(
+	text: string,
+	lastOutcome: OperationOutcome | undefined,
+	replyContext: string | undefined,
+	clockAnnotation: string,
+): string {
+	const notice =
+		lastOutcome === "aborted"
+			? `${ABORT_NOTICE}\n\n`
+			: lastOutcome === "interrupted"
+				? `${INTERRUPTED_NOTICE}\n\n`
+				: "";
+	return `${notice}${addReplyContext(text, replyContext)}${clockAnnotation}`;
+}
+
 /** Options for model/thinking mutations. */
 export interface ModelMutationOptions {
 	/** Persist the new value to global defaults. Defaults to session-only. */
@@ -455,22 +476,35 @@ export class AgentSession {
 	private _toolPromptGuidelines: Map<string, string[]> = new Map();
 	private _deferredToolUsage: Map<string, number> = new Map();
 
-	// Base system prompt (without extension appends) - used to apply fresh appends each turn
+	// Base system prompt for the current operation (without extension appends), refreshed once per
+	// prompt()/sendCustomMessage() call from _systemPrompt below.
 	private _baseSystemPrompt = "";
-	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
+	private readonly _systemPrompt: SessionSystemPrompt;
 	private _systemPromptOverride?: string;
 
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
-		this._memoryPromotion = createMemoryPromotion(this._memoryStore, this.sessionManager);
 		this.settingsManager = config.settingsManager;
 		this._scopedModels = config.scopedModels ?? [];
 		this._resourceLoader = config.resourceLoader;
 		this._customTools = config.customTools ?? [];
 		this._externalTools = config.externalTools ?? [];
 		this._cwd = config.cwd;
+		this._systemPrompt = createSessionSystemPrompt({
+			cwd: this._cwd,
+			resourceLoader: this._resourceLoader,
+			sessionManager: this.sessionManager,
+			settingsManager: this.settingsManager,
+			getToolPromptSnippets: () => this._toolPromptSnippets,
+			getToolPromptGuidelines: () => this._toolPromptGuidelines,
+		});
 		this._modelRuntime = config.modelRuntime;
+		this._memoryPromotion = createMemoryPromotion({
+			sessionManager: this.sessionManager,
+			modelRuntime: this._modelRuntime,
+			memoryStore: this._memoryStore,
+		});
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
@@ -492,6 +526,11 @@ export class AgentSession {
 
 	get modelRuntime(): ModelRuntime {
 		return this._modelRuntime;
+	}
+
+	/** Turn Settlement's route into Durable Memory (see turn-settlement.ts, memory-promotion.ts). */
+	get memoryPromotion(): MemoryPromotion {
+		return this._memoryPromotion;
 	}
 
 	private async _getRequiredRequestAuth(model: Model<any>): Promise<{
@@ -989,6 +1028,27 @@ export class AgentSession {
 		return this.agent.state.systemPrompt;
 	}
 
+	/** A tool-set or resource change: rebuild now, so the prompt the getter returns is always the one the model sees. */
+	private _rebuildSystemPromptNow(): void {
+		this._systemPrompt.invalidate();
+		this._baseSystemPrompt = this._systemPrompt.refresh(this._systemPromptRefreshInput());
+		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+	}
+
+	private _systemPromptRefreshInput(): {
+		model: Model<any>;
+		thinkingLevel: ThinkingLevel;
+		activeTools: string[];
+		cacheWarm: boolean;
+	} {
+		return {
+			model: this.agent.state.model,
+			thinkingLevel: this.agent.state.thinkingLevel,
+			activeTools: this.getActiveToolNames(),
+			cacheWarm: this._isPromptCacheWarm(),
+		};
+	}
+
 	/** Current retry attempt (0 if not retrying) */
 	get retryAttempt(): number {
 		return this._retry.attempt;
@@ -1027,19 +1087,12 @@ export class AgentSession {
 	 */
 	setActiveToolsByName(toolNames: string[]): void {
 		const tools: AgentTool[] = [];
-		const validToolNames: string[] = [];
 		for (const name of toolNames) {
 			const tool = this._toolRegistry.get(name);
-			if (tool) {
-				tools.push(tool);
-				validToolNames.push(name);
-			}
+			if (tool) tools.push(tool);
 		}
 		this.agent.state.tools = tools;
-
-		// Rebuild base system prompt with new tool set
-		this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames);
-		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+		this._rebuildSystemPromptNow();
 	}
 
 	/** Whether compaction or branch summarization is currently running */
@@ -1120,44 +1173,6 @@ export class AgentSession {
 		return Array.from(unique);
 	}
 
-	private _rebuildSystemPrompt(toolNames: string[]): string {
-		const validToolNames = toolNames.filter((name) => this._toolRegistry.has(name));
-		const toolSnippets: Record<string, string> = {};
-		const promptGuidelines: string[] = [];
-		for (const name of validToolNames) {
-			const snippet = this._toolPromptSnippets.get(name);
-			if (snippet) {
-				toolSnippets[name] = snippet;
-			}
-
-			const toolGuidelines = this._toolPromptGuidelines.get(name);
-			if (toolGuidelines) {
-				promptGuidelines.push(...toolGuidelines);
-			}
-		}
-
-		const loaderSystemPrompt = this._resourceLoader.getSystemPrompt();
-		const loaderAppendSystemPrompt = this._resourceLoader.getAppendSystemPrompt();
-		const appendSystemPrompt =
-			loaderAppendSystemPrompt.length > 0 ? loaderAppendSystemPrompt.join("\n\n") : undefined;
-		const loadedSkills = this._resourceLoader.getSkills().skills;
-		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
-
-		this._baseSystemPromptOptions = {
-			cwd: this._cwd,
-			skills: loadedSkills,
-			contextFiles: loadedContextFiles,
-			customPrompt: loaderSystemPrompt,
-			appendSystemPrompt,
-			selectedTools: validToolNames,
-			toolSnippets,
-			promptGuidelines,
-			workingNote: this.sessionManager.getWorkingNote(),
-			artifactCatalog: this.sessionManager.getArtifactCatalog(),
-		};
-		return buildSystemPrompt(this._baseSystemPromptOptions);
-	}
-
 	// =========================================================================
 	// Prompting
 	// =========================================================================
@@ -1166,19 +1181,8 @@ export class AgentSession {
 		this._isAgentRunActive = true;
 		this._lastOperationResult = undefined;
 		try {
-			// A model or thinking-level switch also rebuilds, so the reasoning budget note never states the old cap.
-			const { model, thinkingLevel } = this.agent.state;
-			if (
-				!this._isPromptCacheWarm() ||
-				this._baseSystemPromptOptions.model !== model ||
-				this._baseSystemPromptOptions.thinkingLevel !== thinkingLevel
-			) {
-				this._baseSystemPromptOptions.artifactCatalog = this.sessionManager.getArtifactCatalog();
-				this._baseSystemPromptOptions.model = model;
-				this._baseSystemPromptOptions.thinkingLevel = thinkingLevel;
-				this._baseSystemPromptOptions.thinkingBudgets = this.settingsManager.getThinkingBudgets();
-				this._baseSystemPrompt = buildSystemPrompt(this._baseSystemPromptOptions);
-			}
+			// The caller (prompt()/sendCustomMessage()) already refreshed _baseSystemPrompt once for this
+			// operation; no rebuild here, just apply whichever prompt is current.
 			this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
 			await this.agent.prompt(messages);
 			while (await this._handlePostAgentRun()) {
@@ -1255,8 +1259,8 @@ export class AgentSession {
 			this.sessionManager.clearWorkingNote();
 		}
 		// Turn Settlement: only a completed operation of a non-CLI Channel Session (every header defaults
-		// to channel "cli"; plain coding runs stay out of Durable Memory). Failed and aborted operations
-		// are never distilled into memory.
+		// to channel "cli"). CLI still reaches Durable Memory, but only through compaction distilling the
+		// turns it drops (see CONTEXT.md's Turn Settlement entry) — settlement itself never runs for it.
 		if (this.sessionManager.getChannelSessionKey().channel !== "cli") {
 			settleTurn(this, this._settlementText);
 		}
@@ -1320,14 +1324,12 @@ export class AgentSession {
 				expandedText = this._expandSkillCommand(expandedText);
 				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 			}
-			const lastOutcome = this.sessionManager.getLastOperationOutcome();
-			const abortNotice =
-				lastOutcome === "aborted"
-					? `${ABORT_NOTICE}\n\n`
-					: lastOutcome === "interrupted"
-						? `${INTERRUPTED_NOTICE}\n\n`
-						: "";
-			const contextualText = `${abortNotice}${addReplyContext(expandedText, options?.replyContext)}${formatClockAnnotation()}`;
+			const contextualText = decoratePromptText(
+				expandedText,
+				this.sessionManager.getLastOperationOutcome(),
+				options?.replyContext,
+				formatClockAnnotation(),
+			);
 			// Last prompt wins: one agent_end can cover queued follow-ups, and settlement wants the newest intent.
 			this._settlementText = options?.settlementText ?? text;
 
@@ -1408,9 +1410,8 @@ export class AgentSession {
 						`(${pruned.stats.charsRemoved} chars of text)`,
 				);
 			}
-			if (!this._isPromptCacheWarm()) {
-				this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-			}
+			// One rebuild for this operation, before extensions see the prompt (before_agent_start below).
+			this._baseSystemPrompt = this._systemPrompt.refresh(this._systemPromptRefreshInput());
 
 			// Build messages array (custom message if any, then user message)
 			messages = [];
@@ -1437,7 +1438,7 @@ export class AgentSession {
 				contextualText,
 				currentImages,
 				this._baseSystemPrompt,
-				this._baseSystemPromptOptions,
+				this._systemPrompt.options(),
 			);
 			// Add all custom messages from extensions
 			if (result?.messages) {
@@ -1659,6 +1660,8 @@ export class AgentSession {
 				this.agent.steer(appMessage);
 			}
 		} else if (options?.triggerTurn) {
+			// One rebuild for this operation, same rule as prompt().
+			this._baseSystemPrompt = this._systemPrompt.refresh(this._systemPromptRefreshInput());
 			await this._runAgentPrompt(appMessage);
 		} else {
 			this.agent.state.messages.push(appMessage);
@@ -2056,32 +2059,6 @@ export class AgentSession {
 		);
 	}
 
-	private _distillDroppedMemory(
-		messages: AgentMessage[],
-		messageEntryIds: string[] | undefined,
-		requestModel: Model<any>,
-		apiKey: string | undefined,
-		headers: Record<string, string> | undefined,
-		signal: AbortSignal,
-		env: Record<string, string> | undefined,
-	): void {
-		this._memoryPromotion.distillDropped(messages, messageEntryIds, (unpromoted) =>
-			distillMemory(
-				unpromoted,
-				requestModel,
-				this.settingsManager.getCompactionSettings().reserveTokens,
-				apiKey,
-				headers,
-				signal,
-				this.thinkingLevel,
-				this.agent.streamFunction,
-				env,
-				this.settingsManager.getRetrySettings(),
-				this._summarizationRetryCallbacks({ source: "compaction", reason: "manual" }),
-			),
-		);
-	}
-
 	/**
 	 * Manually compact the session context.
 	 *
@@ -2127,15 +2104,7 @@ export class AgentSession {
 				}
 				throw new Error("Nothing to compact (session too small)");
 			}
-			this._distillDroppedMemory(
-				preparation.messagesToSummarize,
-				preparation.messagesToSummarizeEntryIds,
-				requestModel,
-				apiKey,
-				headers,
-				this._compactionAbortController.signal,
-				env,
-			);
+			this._memoryPromotion.promoteDropped(preparation.messagesToSummarizeEntryIds);
 
 			let extensionCompaction: CompactionResult | undefined;
 
@@ -2462,15 +2431,7 @@ export class AgentSession {
 			}
 			this._emit({ type: "compaction_start", reason });
 			this._autoCompactionAbortController = new AbortController();
-			this._distillDroppedMemory(
-				preparation.messagesToSummarize,
-				preparation.messagesToSummarizeEntryIds,
-				requestModel,
-				apiKey,
-				headers,
-				this._autoCompactionAbortController.signal,
-				env,
-			);
+			this._memoryPromotion.promoteDropped(preparation.messagesToSummarizeEntryIds);
 			started = true;
 
 			let extensionCompaction: CompactionResult | undefined;
@@ -2692,8 +2653,7 @@ export class AgentSession {
 		};
 
 		this._resourceLoader.extendResources(extensionPaths);
-		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-		this.agent.state.systemPrompt = this._baseSystemPrompt;
+		this._rebuildSystemPromptNow();
 	}
 
 	private buildExtensionResourcePaths(entries: Array<{ path: string; extensionPath: string }>): Array<{
@@ -2853,7 +2813,7 @@ export class AgentSession {
 					})();
 				},
 				getSystemPrompt: () => this.systemPrompt,
-				getSystemPromptOptions: () => this._baseSystemPromptOptions,
+				getSystemPromptOptions: () => this._systemPrompt.options(),
 			},
 			{
 				registerProvider: (name, config) => {
