@@ -30,8 +30,8 @@ import type {
 } from "../types.ts";
 import type { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { shortHash } from "../utils/hash.ts";
-import { parseCompleteJson, parseStreamingJson } from "../utils/json-parse.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
+import { StreamingJsonAccumulator } from "../utils/streaming-json.ts";
 import {
 	appendGrammarToolInputJsonDelta,
 	type GrammarToolInputJsonBuffer,
@@ -400,7 +400,6 @@ export function convertResponsesTools(tools: readonly Tool[], options?: ConvertR
 // =============================================================================
 
 type StreamingToolCall = ToolCall & {
-	partialJson?: string;
 	customInput?: {
 		property: string;
 		jsonBuffer: GrammarToolInputJsonBuffer;
@@ -425,7 +424,13 @@ function appendCustomToolCallInput(block: StreamingToolCall, nextInput: string, 
 type ResponsesOutputSlot =
 	| { type: "thinking"; block: ThinkingContent; contentIndex: number }
 	| { type: "text"; block: TextContent; contentIndex: number }
-	| { type: "toolCall"; block: StreamingToolCall; contentIndex: number };
+	| {
+			type: "toolCall";
+			block: StreamingToolCall;
+			contentIndex: number;
+			/** Streaming JSON scratch state for a `function_call` slot; absent for `custom_tool_call`. */
+			jsonAccumulator?: StreamingJsonAccumulator;
+	  };
 
 type ToolCallOutputSlot = Extract<ResponsesOutputSlot, { type: "toolCall" }>;
 
@@ -489,13 +494,15 @@ export async function processResponsesStream<TApi extends Api>(
 				name: item.name,
 				arguments: {},
 				...(item.namespace !== undefined ? { namespace: item.namespace } : {}),
-				partialJson: item.arguments || "",
 			};
 			output.content.push(block);
+			const jsonAccumulator = new StreamingJsonAccumulator();
+			if (item.arguments) jsonAccumulator.append(item.arguments);
 			const slot = {
 				type: "toolCall",
 				block,
 				contentIndex: output.content.length - 1,
+				jsonAccumulator,
 			} satisfies ResponsesOutputSlot;
 			outputSlots.set(outputIndex, slot);
 			stream.push({ type: "toolcall_start", contentIndex: slot.contentIndex, partial: output });
@@ -651,19 +658,17 @@ export async function processResponsesStream<TApi extends Api>(
 			});
 		} else if (event.type === "response.function_call_arguments.delta") {
 			const slot = getSlot(event.output_index, "toolCall");
-			if (!slot || slot.block.partialJson === undefined) continue;
-			slot.block.partialJson += event.delta;
-			slot.block.arguments = parseStreamingJson(slot.block.partialJson);
+			if (!slot || !slot.jsonAccumulator) continue;
+			slot.block.arguments = slot.jsonAccumulator.append(event.delta);
 			pushToolCallDelta(slot, event.delta);
 		} else if (event.type === "response.function_call_arguments.done") {
 			const slot = getSlot(event.output_index, "toolCall");
-			if (!slot || slot.block.partialJson === undefined) continue;
-			const previousPartialJson = slot.block.partialJson;
-			slot.block.partialJson = event.arguments;
-			slot.block.arguments = parseCompleteJson(slot.block.partialJson);
+			if (!slot || !slot.jsonAccumulator) continue;
+			const previousBuffer = slot.jsonAccumulator.buffer;
+			slot.block.arguments = slot.jsonAccumulator.finish(event.arguments);
 
-			if (event.arguments.startsWith(previousPartialJson)) {
-				const delta = event.arguments.slice(previousPartialJson.length);
+			if (event.arguments.startsWith(previousBuffer)) {
+				const delta = event.arguments.slice(previousBuffer.length);
 				if (delta.length > 0) pushToolCallDelta(slot, delta);
 			}
 		} else if (event.type === "response.custom_tool_call_input.delta") {
@@ -705,16 +710,9 @@ export async function processResponsesStream<TApi extends Api>(
 					partial: output,
 				});
 				outputSlots.delete(event.output_index);
-			} else if (
-				item.type === "function_call" &&
-				slot?.type === "toolCall" &&
-				slot.block.partialJson !== undefined
-			) {
-				slot.block.arguments = parseCompleteJson(item.arguments || slot.block.partialJson);
+			} else if (item.type === "function_call" && slot?.type === "toolCall" && slot.jsonAccumulator) {
+				slot.block.arguments = slot.jsonAccumulator.finish(item.arguments || undefined);
 				if (item.namespace !== undefined) slot.block.namespace = item.namespace;
-				// Finalize in-place and strip the scratch buffer so replay only
-				// carries parsed arguments.
-				delete slot.block.partialJson;
 				stream.push({
 					type: "toolcall_end",
 					contentIndex: slot.contentIndex,

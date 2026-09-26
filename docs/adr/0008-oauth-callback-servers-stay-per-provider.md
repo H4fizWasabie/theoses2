@@ -1,0 +1,7 @@
+# OAuth callback servers stay per provider
+
+theoses-ai runs four hand-rolled loopback callback servers for OAuth logins: `auth/oauth/anthropic.ts`, `openai-codex.ts`, `openrouter.ts` and `radius.ts`. They handle the same edge cases differently. A provider `error=` parameter is ignored by Codex, answered with 400 by Anthropic (which keeps waiting), rejected by OpenRouter and resolved as null by Radius. When the port bind fails, Codex and Radius silently return a server that never produces a code, while the other two reject. Only OpenRouter has a timeout and replay protection, and Radius hardcodes `127.0.0.1` instead of honouring `THEOSES_OAUTH_CALLBACK_HOST`. An architecture review proposed one loopback callback module owning listen, state check, error handling, single use, abort and timeout. We decided not to do it now.
+
+No deployment uses OAuth. On 2026-09-26 every `auth.json` (production, staging, root and the owner's local one) was empty: the runtime authenticates with API keys from the environment, and nobody outside the owner runs these login flows. Unifying the servers, or even fixing the two silent-hang cases, would change code nothing exercises and that no test in daily use would catch regressing.
+
+Revisit when an OAuth login is actually used (the owner or a Delegated Coding Agent logs in with one of these providers), or when a fifth OAuth provider is added. At that point, start with the silent-hang cases: Codex and Radius should reject when the port bind fails, and Radius should honour `THEOSES_OAUTH_CALLBACK_HOST`.

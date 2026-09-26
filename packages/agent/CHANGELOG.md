@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: `proxy.ts`'s `processProxyEvent` throttles re-parsing a large accumulated tool-call argument (via `theoses-ai`'s `StreamingJsonAccumulator`) instead of re-parsing the whole buffer on every `toolcall_delta`, which pegged the event loop for a large `write` call streamed in many small deltas. The scratch buffer also no longer lives on the persisted `ToolCall` block.
+
 ## [1.0.90] - 2026-09-25
 
 ## [1.0.89] - 2026-09-25

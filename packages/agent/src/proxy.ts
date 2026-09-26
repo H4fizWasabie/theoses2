@@ -10,9 +10,9 @@ import {
 	type Context,
 	EventStream,
 	type Model,
-	parseStreamingJson,
 	type SimpleStreamOptions,
 	type StopReason,
+	StreamingJsonAccumulator,
 	type ToolCall,
 } from "theoses-ai";
 
@@ -137,6 +137,9 @@ export function streamProxy(model: Model<any>, context: Context, options: ProxyS
 			},
 			timestamp: Date.now(),
 		};
+		// Streaming JSON scratch state for tool-call blocks, keyed by content index; never
+		// stored on the block itself, so nothing needs to be stripped before replay.
+		const jsonAccumulators = new Map<number, StreamingJsonAccumulator>();
 
 		let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
@@ -199,7 +202,7 @@ export function streamProxy(model: Model<any>, context: Context, options: ProxyS
 						const data = line.slice(6).trim();
 						if (data) {
 							const proxyEvent = JSON.parse(data) as ProxyAssistantMessageEvent;
-							const event = processProxyEvent(proxyEvent, partial);
+							const event = processProxyEvent(proxyEvent, partial, jsonAccumulators);
 							if (event) {
 								stream.push(event);
 							}
@@ -240,6 +243,7 @@ export function streamProxy(model: Model<any>, context: Context, options: ProxyS
 function processProxyEvent(
 	proxyEvent: ProxyAssistantMessageEvent,
 	partial: AssistantMessage,
+	jsonAccumulators: Map<number, StreamingJsonAccumulator>,
 ): AssistantMessageEvent | undefined {
 	switch (proxyEvent.type) {
 		case "start":
@@ -315,15 +319,15 @@ function processProxyEvent(
 				id: proxyEvent.id,
 				name: proxyEvent.toolName,
 				arguments: {},
-				partialJson: "",
-			} satisfies ToolCall & { partialJson: string } as ToolCall;
+			} satisfies ToolCall;
+			jsonAccumulators.set(proxyEvent.contentIndex, new StreamingJsonAccumulator());
 			return { type: "toolcall_start", contentIndex: proxyEvent.contentIndex, partial };
 
 		case "toolcall_delta": {
 			const content = partial.content[proxyEvent.contentIndex];
 			if (content?.type === "toolCall") {
-				(content as any).partialJson += proxyEvent.delta;
-				content.arguments = parseStreamingJson((content as any).partialJson) || {};
+				const accumulator = jsonAccumulators.get(proxyEvent.contentIndex);
+				if (accumulator) content.arguments = accumulator.append(proxyEvent.delta);
 				partial.content[proxyEvent.contentIndex] = { ...content }; // Trigger reactivity
 				return {
 					type: "toolcall_delta",
@@ -339,7 +343,7 @@ function processProxyEvent(
 			const content = partial.content[proxyEvent.contentIndex];
 			if (content?.type === "toolCall") {
 				Object.assign(content, proxyEvent.toolCall);
-				delete (content as any).partialJson;
+				jsonAccumulators.delete(proxyEvent.contentIndex);
 				return {
 					type: "toolcall_end",
 					contentIndex: proxyEvent.contentIndex,
