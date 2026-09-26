@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.91] - 2026-09-26
 
 - fix: compaction no longer distills turns into Durable Memory twice. Compaction distillation never recorded a `promoted_range`, so the next Turn Settlement consolidated the same turns again. Compaction now hands its dropped entries to the same consolidation pipeline settlement uses (background model, deduplicated against existing memory nodes, chunked, one promoted range per successful chunk), without the Jev trigger. CLI sessions still distill on compaction. A pass already running for the same Channel Session makes the other trigger skip; the failure cooldown and legacy-checkpoint migration apply to both.
 - refactor: `core/memory-promotion.ts` is the one module for how turns reach Durable Memory: `promoteDropped` (compaction), `settle` (Turn Settlement) and `recordSaved` (save_note). It owns the promoted-range ledger scan, single-flight, cooldown, chunking and migration; `memory-consolidation.ts` keeps the distiller and backfill. Removes `distillMemory` and its prompt from compaction, `SessionManager.isEntryPromoted`/`hasPromotedRange`, and the `MaybeRunConsolidationOptions` export; exports the `MemoryPromotion` type.
