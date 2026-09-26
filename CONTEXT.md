@@ -13,7 +13,7 @@ The last three turns (six user/assistant messages) of a Channel Session's histor
 _Avoid_: active context, recent history
 
 **Working Note**:
-A bounded, per-Channel-Session, curated text artifact holding facts a turn must not re-discover (confirmed paths, methods, open discrepancies). Written only by explicit model action; injected every turn labeled non-authoritative ("verify only if contradictory"). Distinct from the Active Context Window (raw recent turns) and from Durable Memory (the shared, pull-based fact store) — the Working Note is the narrow, curated middle layer between them.
+A bounded, per-Channel-Session, curated text artifact holding facts a turn must not re-discover (confirmed paths, methods, open discrepancies). Written by explicit model action, plus one automatic `ran: <command>` entry per bash command; injected every turn labeled non-authoritative ("verify only if contradictory"). Distinct from the Active Context Window (raw recent turns) and from Durable Memory (the shared, pull-based fact store) — the Working Note is the narrow, curated middle layer between them.
 _Avoid_: current working context (the ticket's working title, not the canonical term — CWC is the Active Context Window plus the Working Note together, not a thing in itself), session note, scratchpad
 
 **Durable Memory**:
@@ -29,7 +29,7 @@ A rendering rule, not stored state: when the most recent operation's outcome is 
 _Avoid_: stop marker, boundary marker
 
 **Turn Settlement**:
-The fire-and-forget work that runs after a Channel Session turn ends successfully (memory consolidation, task-boundary detection). It never blocks or fails the reply. Triggered by the Channel Session itself when an operation finishes with outcome `completed` and no retry is pending; adapters never trigger it. Only non-CLI Channel Sessions (Telegram, dashboard) settle, so plain coding runs stay out of Durable Memory.
+The fire-and-forget work that runs after a Channel Session turn ends successfully (memory consolidation, task-boundary detection). It never blocks or fails the reply. Triggered by the Channel Session itself when an operation finishes with outcome `completed` and no retry is pending; adapters never trigger it. Only non-CLI Channel Sessions (Telegram, dashboard) settle. Plain CLI coding runs still reach Durable Memory, but only through compaction distillation of the turns compaction drops.
 _Avoid_: post-turn hook (implies an event seam that doesn't exist), background turn work
 
 **Auto-Resume**:

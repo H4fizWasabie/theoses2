@@ -1,5 +1,4 @@
 import type { AgentSession } from "./agent-session.ts";
-import { maybeRunConsolidation } from "./memory-consolidation.ts";
 import { findLastUserMessageEntryId, maybeDetectTaskBoundary } from "./task-boundary-detector.ts";
 
 /**
@@ -11,19 +10,15 @@ import { findLastUserMessageEntryId, maybeDetectTaskBoundary } from "./task-boun
  * stored (Telegram passes "" via PromptOptions.settlementText for attachment-only turns while the
  * stored message carries the attachment note).
  */
-export function settleTurn(session: Pick<AgentSession, "sessionManager" | "modelRuntime">, userText: string): void {
-	const { sessionManager: mainSessionManager, modelRuntime } = session;
+export function settleTurn(
+	session: Pick<AgentSession, "sessionManager" | "modelRuntime" | "memoryPromotion">,
+	userText: string,
+): void {
+	const { sessionManager: mainSessionManager, modelRuntime, memoryPromotion } = session;
 	const { channel, channelSessionId } = mainSessionManager.getChannelSessionKey();
-	maybeRunConsolidation({
-		cwd: mainSessionManager.getCwd(),
-		channel,
-		channelSessionId,
-		userMessageText: userText,
-		mainSessionManager,
-		modelRuntime,
-	});
+	memoryPromotion.settle(userText);
 	// Issue #186, shadow mode: task-closure/topic-shift detection, separate from
-	// consolidation's phrase-trigger above — see task-boundary-detector.ts.
+	// consolidation's Jev trigger above — see task-boundary-detector.ts.
 	const userMessageEntryId = findLastUserMessageEntryId(mainSessionManager.getBranch());
 	if (userMessageEntryId) {
 		maybeDetectTaskBoundary({

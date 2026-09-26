@@ -142,9 +142,9 @@ export {
 	type BackfillOptions,
 	backfillFromSessionLog,
 	CONSOLIDATION_TURN_CEILING,
-	type MaybeRunConsolidationOptions,
 	shouldTriggerConsolidation,
 } from "./memory-consolidation.ts";
+export type { MemoryPromotion } from "./memory-promotion.ts";
 export {
 	EDGE_RELATIONS,
 	type EdgeRelation,
