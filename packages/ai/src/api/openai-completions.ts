@@ -61,11 +61,11 @@ const DEFAULT_STREAM_DURATION_MS = (() => {
 
 import { shortHash } from "../utils/hash.ts";
 import { hasHeader, headersToRecord } from "../utils/headers.ts";
-import { parseCompleteJson, parseStreamingJson } from "../utils/json-parse.ts";
 import { getPiUserAgent } from "../utils/pi-user-agent.ts";
 import { getProviderEnvValue, resolveCacheRetention } from "../utils/provider-env.ts";
 import { retryProviderRequest } from "../utils/provider-retry.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
+import { StreamingJsonAccumulator } from "../utils/streaming-json.ts";
 import { logCachePrefixDiff } from "./cache-prefix-debug.ts";
 import {
 	appendGrammarToolInputJsonDelta,
@@ -348,19 +348,15 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 			stream.push({ type: "start", partial: output });
 
 			interface StreamingToolCallBlock extends ToolCall {
-				partialArgs?: string;
-				/** Length of partialArgs the last time it was re-parsed, so we can throttle re-parses on large payloads. */
-				lastParsedArgsLength?: number;
 				customInput?: {
 					property: string;
 					jsonBuffer: GrammarToolInputJsonBuffer;
 				};
 				streamIndex?: number;
 			}
-			// Re-parsing partialArgs from scratch on every delta is O(length) per call, so for a large
-			// argument streamed in many small deltas the total cost is O(length^2). The live "partial"
-			// preview doesn't need every single token, so throttle re-parses once the buffer is non-trivial.
-			const STREAMING_ARGS_REPARSE_THROTTLE_CHARS = 2000;
+			// Scratch state for streaming JSON tool-call arguments, keyed by block; never
+			// stored on the block itself, so nothing needs to be stripped before replay.
+			const jsonAccumulators = new Map<StreamingToolCallBlock, StreamingJsonAccumulator>();
 			type StreamingBlock = TextContent | ThinkingContent | StreamingToolCallBlock;
 			type StreamingToolCallDelta = {
 				index?: number;
@@ -432,12 +428,10 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 							});
 						}
 					} else {
-						block.arguments = parseCompleteJson(block.partialArgs);
+						block.arguments = jsonAccumulators.get(block)?.finish() ?? {};
 					}
-					// Finalize in-place and strip the scratch buffers so replay only
+					// Finalize in-place and strip the scratch fields so replay only
 					// carries parsed arguments.
-					delete block.partialArgs;
-					delete block.lastParsedArgsLength;
 					delete block.customInput;
 					delete block.streamIndex;
 					stream.push({
@@ -486,12 +480,14 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 						id: toolCall.id || "",
 						name,
 						arguments: hasCustomInput ? { [customInputProperty]: "" } : {},
-						partialArgs: hasCustomInput ? undefined : "",
 						customInput: hasCustomInput
 							? { property: customInputProperty, jsonBuffer: { input: "", started: false, closed: false } }
 							: undefined,
 						streamIndex,
 					};
+					if (!hasCustomInput) {
+						jsonAccumulators.set(block, new StreamingJsonAccumulator());
+					}
 					if (streamIndex !== undefined) {
 						toolCallBlocksByIndex.set(streamIndex, block);
 					}
@@ -522,8 +518,7 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 						property: customInputProperty,
 						jsonBuffer: { input: "", started: false, closed: false },
 					};
-					delete block.partialArgs;
-					delete block.lastParsedArgsLength;
+					jsonAccumulators.delete(block);
 				}
 				return block;
 			};
@@ -628,14 +623,9 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 							let delta = "";
 							if (toolCall.function?.arguments) {
 								delta = toolCall.function.arguments;
-								block.partialArgs = (block.partialArgs ?? "") + toolCall.function.arguments;
-								const lastParsedLength = block.lastParsedArgsLength ?? 0;
-								if (
-									block.partialArgs.length - lastParsedLength >= STREAMING_ARGS_REPARSE_THROTTLE_CHARS ||
-									lastParsedLength === 0
-								) {
-									block.arguments = parseStreamingJson(block.partialArgs);
-									block.lastParsedArgsLength = block.partialArgs.length;
+								const accumulator = jsonAccumulators.get(block);
+								if (accumulator) {
+									block.arguments = accumulator.append(toolCall.function.arguments);
 								}
 							} else if (toolCall.custom?.input) {
 								const nextInput = getCustomToolCallInput(block) + toolCall.custom.input;
@@ -716,8 +706,6 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 			for (const block of output.content) {
 				delete (block as { index?: number }).index;
 				// Streaming scratch buffers are only used during parsing; never persist them.
-				delete (block as { partialArgs?: string }).partialArgs;
-				delete (block as { lastParsedArgsLength?: number }).lastParsedArgsLength;
 				delete (block as { customInput?: unknown }).customInput;
 				delete (block as { streamIndex?: number }).streamIndex;
 			}

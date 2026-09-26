@@ -32,11 +32,12 @@ import type {
 import { splitDeferredTools } from "../utils/deferred-tools.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { hasHeader, headersToRecord } from "../utils/headers.ts";
-import { parseCompleteJson, parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
+import { parseJsonWithRepair } from "../utils/json-parse.ts";
 import { getPiUserAgent } from "../utils/pi-user-agent.ts";
 import { resolveCacheRetention } from "../utils/provider-env.ts";
 import { retryProviderRequest } from "../utils/provider-retry.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
+import { StreamingJsonAccumulator } from "../utils/streaming-json.ts";
 
 import { getJsonSchemaToolParameters, resolveJsonSchemaStrictSampling } from "./constrained-sampling.ts";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.ts";
@@ -564,8 +565,11 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 			stream.push({ type: "start", partial: output });
 
-			type Block = (ThinkingContent | TextContent | (ToolCall & { partialJson: string })) & { index: number };
+			type Block = (ThinkingContent | TextContent | ToolCall) & { index: number };
 			const blocks = output.content as Block[];
+			// Streaming JSON scratch state for tool-call blocks, keyed by block; never stored
+			// on the block itself, so nothing needs to be stripped before replay.
+			const jsonAccumulators = new WeakMap<Block, StreamingJsonAccumulator>();
 
 			for await (const event of iterateAnthropicEvents(response, options?.signal)) {
 				if (event.type === "message_start") {
@@ -625,10 +629,10 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 								? fromClaudeCodeName(event.content_block.name, context.tools)
 								: event.content_block.name,
 							arguments: (event.content_block.input as Record<string, any>) ?? {},
-							partialJson: "",
 							index: event.index,
 						};
 						output.content.push(block);
+						jsonAccumulators.set(block, new StreamingJsonAccumulator());
 						stream.push({ type: "toolcall_start", contentIndex: output.content.length - 1, partial: output });
 					}
 				} else if (event.type === "content_block_delta") {
@@ -660,8 +664,8 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 						const index = blocks.findIndex((b) => b.index === event.index);
 						const block = blocks[index];
 						if (block && block.type === "toolCall") {
-							block.partialJson += event.delta.partial_json;
-							block.arguments = parseStreamingJson(block.partialJson);
+							const accumulator = jsonAccumulators.get(block);
+							if (accumulator) block.arguments = accumulator.append(event.delta.partial_json);
 							stream.push({
 								type: "toolcall_delta",
 								contentIndex: index,
@@ -697,10 +701,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 								partial: output,
 							});
 						} else if (block.type === "toolCall") {
-							block.arguments = parseCompleteJson(block.partialJson);
-							// Finalize in-place and strip the scratch buffer so replay only
-							// carries parsed arguments.
-							delete (block as { partialJson?: string }).partialJson;
+							block.arguments = jsonAccumulators.get(block)?.finish() ?? {};
 							stream.push({
 								type: "toolcall_end",
 								contentIndex: index,
@@ -765,8 +766,6 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 		} catch (error) {
 			for (const block of output.content) {
 				delete (block as { index?: number }).index;
-				// partialJson is only a streaming scratch buffer; never persist it.
-				delete (block as { partialJson?: string }).partialJson;
 			}
 			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
 			output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);

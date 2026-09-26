@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: the streaming tool-call-argument throttle from #8b6478d86 (re-parse the accumulated buffer at most once per ~2000 new chars instead of on every delta, which pegged the event loop for a large `write` call streamed in many small deltas) now also covers Anthropic, OpenAI Responses (and Azure/Codex, which share the same stream processor), Bedrock, and Mistral, plus the two stream consumers that rebuild tool-call arguments from replayed events (the theoses-messages client and `packages/agent`'s proxy). All seven now share one `StreamingJsonAccumulator` (`packages/ai/src/utils/streaming-json.ts`, exported from `theoses-ai`); the live argument preview still updates every ~2000 chars, and the final arguments are unchanged, still a strict parse. The accumulator's scratch state also no longer lives on the persisted `ToolCall` block (previously `partialJson`/`partialArgs`/`lastParsedArgsLength` fields that had to be stripped before replay); it's kept in the adapter's own per-block bookkeeping instead.
+
 ## [1.0.90] - 2026-09-25
 
 - feat: `createRetryBudget(getPolicy)` holds one caller's retry state (attempt count, the `baseDelayMs * 2^(attempt-1)` backoff, a cancellable sleep, and one end report per run of retries). `retryAssistantCall` now runs on it; its behavior and callbacks are unchanged.

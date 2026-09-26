@@ -25,8 +25,8 @@ import type {
 import { appendAssistantMessageDiagnostic, createAssistantMessageDiagnostic } from "../utils/diagnostics.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { headersToRecord, providerHeadersToRecord } from "../utils/headers.ts";
-import { parseStreamingJson } from "../utils/json-parse.ts";
 import { getProviderEnvValue } from "../utils/provider-env.ts";
+import { StreamingJsonAccumulator } from "../utils/streaming-json.ts";
 
 export interface TheosesMessagesOptions extends StreamOptions {
 	reasoning?: ThinkingLevel;
@@ -184,7 +184,9 @@ function createEventConverter(model: Model<"theoses-messages">) {
 		stopReason: "pending",
 		timestamp: Date.now(),
 	};
-	const toolJson = new Map<number, string>();
+	// Streaming JSON scratch state for tool-call blocks, keyed by content index; never
+	// stored on the block itself, so nothing needs to be stripped before replay.
+	const jsonAccumulators = new Map<number, StreamingJsonAccumulator>();
 
 	return (event: TheosesMessagesEvent): AssistantMessageEvent => {
 		switch (event.type) {
@@ -239,18 +241,20 @@ function createEventConverter(model: Model<"theoses-messages">) {
 					name: event.toolName,
 					arguments: {},
 				};
-				toolJson.set(event.contentIndex, "");
+				jsonAccumulators.set(event.contentIndex, new StreamingJsonAccumulator());
 				break;
 			case "toolcall_delta": {
-				const json = `${toolJson.get(event.contentIndex) ?? ""}${event.delta}`;
-				toolJson.set(event.contentIndex, json);
-				(partial.content[event.contentIndex] as ToolCall).arguments =
-					parseStreamingJson<ToolCall["arguments"]>(json);
+				const accumulator = jsonAccumulators.get(event.contentIndex);
+				if (accumulator) {
+					(partial.content[event.contentIndex] as ToolCall).arguments = accumulator.append<ToolCall["arguments"]>(
+						event.delta,
+					);
+				}
 				break;
 			}
 			case "toolcall_end":
 				Object.assign(partial.content[event.contentIndex]!, event.toolCall);
-				toolJson.delete(event.contentIndex);
+				jsonAccumulators.delete(event.contentIndex);
 				return {
 					type: "toolcall_end",
 					contentIndex: event.contentIndex,

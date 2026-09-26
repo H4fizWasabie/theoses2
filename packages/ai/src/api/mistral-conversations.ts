@@ -17,9 +17,9 @@ import { safeJsonStringify } from "../utils/error-body.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { shortHash } from "../utils/hash.ts";
 import { headersToRecord } from "../utils/headers.ts";
-import { parseCompleteJson, parseStreamingJson } from "../utils/json-parse.ts";
 import { getPiUserAgent } from "../utils/pi-user-agent.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
+import { StreamingJsonAccumulator } from "../utils/streaming-json.ts";
 import { getJsonSchemaToolParameters, resolveJsonSchemaStrictSampling } from "./constrained-sampling.ts";
 import { buildBaseOptions } from "./simple-options.ts";
 import { transformMessages } from "./transform-messages.ts";
@@ -162,10 +162,6 @@ export const stream: StreamFunction<"mistral-conversations", MistralOptions> = (
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {
-			for (const block of output.content) {
-				// partialArgs is only a streaming scratch buffer; never persist it.
-				delete (block as { partialArgs?: string }).partialArgs;
-			}
 			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
 			output.errorMessage = formatMistralError(error);
 			stream.push({ type: "error", reason: output.stopReason, error: output });
@@ -557,6 +553,9 @@ async function consumeChatStream(
 	const blocks = output.content;
 	const blockIndex = () => blocks.length - 1;
 	const toolBlocksByKey = new Map<string, number>();
+	// Streaming JSON scratch state for tool-call blocks, keyed by content index; never
+	// stored on the block itself, so nothing needs to be stripped before replay.
+	const jsonAccumulators = new Map<number, StreamingJsonAccumulator>();
 
 	const finishCurrentBlock = (block?: typeof currentBlock) => {
 		if (!block) return;
@@ -687,12 +686,12 @@ async function consumeChatStream(
 					: deriveMistralToolCallId(`toolcall:${toolCall.index ?? 0}`, 0);
 			const key = `${callId}:${toolCall.index || 0}`;
 			const existingIndex = toolBlocksByKey.get(key);
-			let block: (ToolCall & { partialArgs?: string }) | undefined;
+			let block: ToolCall | undefined;
 
 			if (existingIndex !== undefined) {
 				const existing = output.content[existingIndex];
 				if (existing?.type === "toolCall") {
-					block = existing as ToolCall & { partialArgs?: string };
+					block = existing;
 				}
 			}
 
@@ -702,22 +701,24 @@ async function consumeChatStream(
 					id: callId,
 					name: toolCall.function.name,
 					arguments: {},
-					partialArgs: "",
 				};
 				output.content.push(block);
-				toolBlocksByKey.set(key, output.content.length - 1);
-				stream.push({ type: "toolcall_start", contentIndex: output.content.length - 1, partial: output });
+				const contentIndex = output.content.length - 1;
+				toolBlocksByKey.set(key, contentIndex);
+				jsonAccumulators.set(contentIndex, new StreamingJsonAccumulator());
+				stream.push({ type: "toolcall_start", contentIndex, partial: output });
 			}
 
 			const argsDelta =
 				typeof toolCall.function.arguments === "string"
 					? toolCall.function.arguments
 					: JSON.stringify(toolCall.function.arguments || {});
-			block.partialArgs = (block.partialArgs || "") + argsDelta;
-			block.arguments = parseStreamingJson<Record<string, unknown>>(block.partialArgs);
+			const contentIndex = toolBlocksByKey.get(key)!;
+			const accumulator = jsonAccumulators.get(contentIndex);
+			if (accumulator) block.arguments = accumulator.append<Record<string, unknown>>(argsDelta);
 			stream.push({
 				type: "toolcall_delta",
-				contentIndex: toolBlocksByKey.get(key)!,
+				contentIndex,
 				delta: argsDelta,
 				partial: output,
 			});
@@ -728,15 +729,11 @@ async function consumeChatStream(
 	for (const index of toolBlocksByKey.values()) {
 		const block = output.content[index];
 		if (block.type !== "toolCall") continue;
-		const toolBlock = block as ToolCall & { partialArgs?: string };
-		toolBlock.arguments = parseCompleteJson<Record<string, unknown>>(toolBlock.partialArgs);
-		// Finalize in-place and strip the scratch buffer so replay only
-		// carries parsed arguments.
-		delete toolBlock.partialArgs;
+		block.arguments = jsonAccumulators.get(index)?.finish<Record<string, unknown>>() ?? {};
 		stream.push({
 			type: "toolcall_end",
 			contentIndex: index,
-			toolCall: toolBlock,
+			toolCall: block,
 			partial: output,
 		});
 	}

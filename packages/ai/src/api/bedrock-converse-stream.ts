@@ -52,10 +52,10 @@ import { appendAssistantMessageDiagnostic } from "../utils/diagnostics.ts";
 import { normalizeProviderError } from "../utils/error-body.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { providerHeadersToRecord } from "../utils/headers.ts";
-import { parseCompleteJson, parseStreamingJson } from "../utils/json-parse.ts";
 import { resolveHttpProxyUrlForTarget } from "../utils/node-http-proxy.ts";
 import { getProviderEnvValue, resolveCacheRetention } from "../utils/provider-env.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
+import { StreamingJsonAccumulator } from "../utils/streaming-json.ts";
 import { getJsonSchemaToolParameters, resolveJsonSchemaStrictSampling } from "./constrained-sampling.ts";
 import {
 	adjustMaxTokensForThinking,
@@ -103,10 +103,15 @@ export interface BedrockOptions extends StreamOptions {
 
 type Block = (TextContent | ThinkingContent | ToolCall) & {
 	index?: number;
-	partialJson?: string;
 	/** Scratch buffer for encrypted reasoning deltas, joined into `thinkingSignature`. */
 	redactedChunks?: Uint8Array[];
 };
+
+/**
+ * Streaming JSON scratch state for tool-call blocks, keyed by block. Never stored on
+ * the block itself, so nothing needs to be stripped from it before replay.
+ */
+type JsonAccumulators = WeakMap<Block, StreamingJsonAccumulator>;
 
 const EMPTY_TEXT_PLACEHOLDER = "<empty>";
 
@@ -140,6 +145,7 @@ export const stream: StreamFunction<"bedrock-converse-stream", BedrockOptions> =
 		};
 
 		const blocks = output.content as Block[];
+		const jsonAccumulators: JsonAccumulators = new WeakMap();
 
 		// A profile explicitly configured through pi's auth flow (the `profile`
 		// option or scoped `AWS_PROFILE` on the stored credential's env) must win
@@ -283,11 +289,11 @@ export const stream: StreamFunction<"bedrock-converse-stream", BedrockOptions> =
 					}
 					stream.push({ type: "start", partial: output });
 				} else if (item.contentBlockStart) {
-					handleContentBlockStart(item.contentBlockStart, blocks, output, stream);
+					handleContentBlockStart(item.contentBlockStart, blocks, output, stream, jsonAccumulators);
 				} else if (item.contentBlockDelta) {
-					handleContentBlockDelta(item.contentBlockDelta, blocks, output, stream);
+					handleContentBlockDelta(item.contentBlockDelta, blocks, output, stream, jsonAccumulators);
 				} else if (item.contentBlockStop) {
-					handleContentBlockStop(item.contentBlockStop, blocks, output, stream);
+					handleContentBlockStop(item.contentBlockStop, blocks, output, stream, jsonAccumulators);
 				} else if (item.messageStop) {
 					output.rawStopReason = item.messageStop.stopReason;
 					const { stopReason, errorMessage } = mapStopReason(item.messageStop.stopReason);
@@ -564,6 +570,7 @@ function handleContentBlockStart(
 	blocks: Block[],
 	output: AssistantMessage,
 	stream: AssistantMessageEventStream,
+	jsonAccumulators: JsonAccumulators,
 ): void {
 	const index = event.contentBlockIndex!;
 	const start = event.start;
@@ -574,10 +581,10 @@ function handleContentBlockStart(
 			id: start.toolUse.toolUseId || "",
 			name: start.toolUse.name || "",
 			arguments: {},
-			partialJson: "",
 			index,
 		};
 		output.content.push(block);
+		jsonAccumulators.set(block, new StreamingJsonAccumulator());
 		stream.push({ type: "toolcall_start", contentIndex: blocks.length - 1, partial: output });
 	}
 }
@@ -587,6 +594,7 @@ function handleContentBlockDelta(
 	blocks: Block[],
 	output: AssistantMessage,
 	stream: AssistantMessageEventStream,
+	jsonAccumulators: JsonAccumulators,
 ): void {
 	const contentBlockIndex = event.contentBlockIndex!;
 	const delta = event.delta;
@@ -607,8 +615,8 @@ function handleContentBlockDelta(
 			stream.push({ type: "text_delta", contentIndex: index, delta: delta.text, partial: output });
 		}
 	} else if (delta?.toolUse && block?.type === "toolCall") {
-		block.partialJson = (block.partialJson || "") + (delta.toolUse.input || "");
-		block.arguments = parseStreamingJson(block.partialJson);
+		const accumulator = jsonAccumulators.get(block);
+		if (accumulator) block.arguments = accumulator.append(delta.toolUse.input || "");
 		stream.push({ type: "toolcall_delta", contentIndex: index, delta: delta.toolUse.input || "", partial: output });
 	} else if (delta?.reasoningContent) {
 		let thinkingBlock = block;
@@ -677,8 +685,6 @@ function flushRedactedContent(block: Block): void {
  */
 function finalizeStreamingBlock(block: Block): void {
 	delete block.index;
-	// partialJson is only a streaming scratch buffer; never persist it.
-	delete block.partialJson;
 	flushRedactedContent(block);
 }
 
@@ -704,6 +710,7 @@ function handleContentBlockStop(
 	blocks: Block[],
 	output: AssistantMessage,
 	stream: AssistantMessageEventStream,
+	jsonAccumulators: JsonAccumulators,
 ): void {
 	const index = blocks.findIndex((b) => b.index === event.contentBlockIndex);
 	const block = blocks[index];
@@ -719,10 +726,7 @@ function handleContentBlockStop(
 			stream.push({ type: "thinking_end", contentIndex: index, content: block.thinking, partial: output });
 			break;
 		case "toolCall":
-			block.arguments = parseCompleteJson(block.partialJson);
-			// Finalize in-place and strip the scratch buffer so replay only
-			// carries parsed arguments.
-			delete (block as Block).partialJson;
+			block.arguments = jsonAccumulators.get(block)?.finish() ?? {};
 			stream.push({ type: "toolcall_end", contentIndex: index, toolCall: block, partial: output });
 			break;
 	}
