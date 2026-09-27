@@ -24,6 +24,7 @@ export const MAX_PLAN_ITEMS = 12;
 export const MAX_STOP_PUSHES = 2;
 /** Fix-item notes shorter than this are a tick, not an analysis. */
 const MIN_FIX_NOTE_CHARS = 20;
+const REOPENED_NOTE = "reopened: files changed after this was closed";
 
 export type PlanKind = "change" | "fix";
 export type PlanItemKind = "step" | "verify" | "root-cause" | "siblings" | "fix-scope";
@@ -212,7 +213,11 @@ export function applyPlanAction(
 			const item = current.items.find((i) => i.id === input.id);
 			if (!item) return { error: `No item ${input.id}.\n${formatPlan(current)}` };
 			const status = input.status ?? item.status;
-			const note = input.note?.trim() || item.note;
+			// Issue #388: a note written for a closed status (a deferral reason) or by a reopen is stale once
+			// the status changes; a note written while open (e.g. fix analysis) carries into the close.
+			const carried =
+				status === item.status || (item.status === "open" && item.note !== REOPENED_NOTE) ? item.note : undefined;
+			const note = input.note?.trim() || carried;
 			if (status === "deferred" && !input.note?.trim()) {
 				return { error: "Deferring needs a `note` with the reason." };
 			}
@@ -266,7 +271,7 @@ export function planStopCheck(plan: TaskPlan | undefined, runMessages: AgentMess
 	if (runs.some(runChangesFiles) && verifyEvidenceProblem(runMessages)) {
 		const reopened = plan.items.map((item) =>
 			item.kind === "verify" && item.status !== "open"
-				? { ...item, status: "open" as const, note: "reopened: files changed after this was closed" }
+				? { ...item, status: "open" as const, note: REOPENED_NOTE }
 				: item,
 		);
 		if (reopened.some((item, i) => item !== plan.items[i])) next = { ...plan, items: reopened };

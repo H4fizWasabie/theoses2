@@ -112,6 +112,33 @@ describe("createBudgetedAgent", () => {
 		expect(stats.stoppedByBudget).toBe(true);
 	});
 
+	it("counts cached input toward inputTokens and the budget (#390)", async () => {
+		const cached = assistant("still working", {
+			usage: {
+				input: 18,
+				output: 50,
+				cacheRead: 900,
+				cacheWrite: 100,
+				totalTokens: 1068,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+		});
+		const { runtime } = fakeRuntime(cached);
+		const handle = createBudgetedAgent({
+			systemPrompt: "test",
+			model,
+			tools: [],
+			modelRuntime: runtime,
+			maxTurns: 100,
+			maxInputTokens: 1000,
+		});
+
+		const stats = await handle.prompt("question");
+
+		expect(stats.inputTokens).toBe(1018);
+		expect(stats.stoppedByBudget).toBe(true);
+	});
+
 	it("accumulates turns/tokens across repeat prompt() calls on the same handle", async () => {
 		const { runtime } = fakeRuntime(assistant("first"), assistant("second"));
 		const handle = createBudgetedAgent({

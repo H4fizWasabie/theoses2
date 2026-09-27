@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 - fix: the Fireworks default model is now `accounts/fireworks/models/glm-5p3`. Fireworks removed the previous default `kimi-k2p6`, and 1.0.92 silently switched to `kimi-k3` (about 3x the price) without a changelog entry.
+- fix: background sub-agents (reviewer, explorer, researcher) now count cached input toward `maxInputTokens` and the reported `inputTokens` (#390). Before, only uncached input counted, so the caps barely stopped anything and `review-log.jsonl` showed `inputTokens: 18` for a full review.
+- fix: `task_plan update` drops a deferral reason or the "reopened" marker when the item's status changes without a new note (#388). A published item still read "Blocked on abah's OK".
+- fix: Plan Review gets deferred items in a separate `<accepted_deferrals>` block and is told they are not findings even when the request asks for them (#386). It had flagged an approval-gated publish as must-fix.
+- fix: claim-check, task-plan-check and plan-review push-backs tell the worker that its next reply replaces the one being corrected, so that reply must be the full answer (#389). Telegram shows only the last reply, so "Part 02 is live" + links had been replaced by "the reopened verify item was just bookkeeping".
 
 ## [1.0.92] - 2026-09-27
 

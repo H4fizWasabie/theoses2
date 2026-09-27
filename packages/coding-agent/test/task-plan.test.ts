@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "theoses-agent-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PLAN_REVIEW_CUSTOM_TYPE, parseReview, type ReviewOutcome } from "../src/core/plan-reviewer.ts";
+import { buildPrompt, PLAN_REVIEW_CUSTOM_TYPE, parseReview, type ReviewOutcome } from "../src/core/plan-reviewer.ts";
 import {
 	applyPlanAction,
 	formatPlanStatus,
@@ -174,6 +174,24 @@ describe("applyPlanAction", () => {
 		expect(deferred.plan?.items[2]).toMatchObject({ status: "deferred", note: "real publish at 02:00" });
 	});
 
+	it("drops a deferral reason when the item is later closed without a note (#388)", () => {
+		const plan = created();
+		const deferred = act(plan, { action: "update", id: 2, status: "deferred", note: "blocked on abah's OK" }).plan;
+		if (!deferred) throw new Error("defer failed");
+		expect(act(deferred, { action: "update", id: 2, status: "done" }).plan?.items[1]).toEqual({
+			id: 2,
+			kind: "step",
+			text: "run.sh",
+			status: "done",
+			note: undefined,
+		});
+		const withNote = act(plan, { action: "update", id: 1, note: "carousel gate at line 105" }).plan;
+		if (!withNote) throw new Error("note failed");
+		expect(act(withNote, { action: "update", id: 1, status: "done" }).plan?.items[0].note).toBe(
+			"carousel gate at line 105",
+		);
+	});
+
 	it("caps the plan size", () => {
 		const items = Array.from({ length: 12 }, (_, i) => `step ${i}`);
 		expect(act(undefined, { action: "create", goal: "g", items, verify: "v" }).error).toContain("At most 12");
@@ -241,6 +259,24 @@ describe("formatPlanStatus / needsReview", () => {
 		expect(needsReview(close(created()))).toBe(true);
 		expect(needsReview(created())).toBe(false);
 		expect(needsReview({ ...close(created()), review: { skipped: "timeout" } })).toBe(false);
+	});
+});
+
+describe("buildPrompt", () => {
+	it("lists deferred items as accepted deferrals for the reviewer (#386)", () => {
+		const plan = created();
+		const closed: TaskPlan = {
+			...plan,
+			items: plan.items.map((i) =>
+				i.id === 2
+					? { ...i, status: "deferred" as const, note: "waiting for abah's OK" }
+					: { ...i, status: "done" as const },
+			),
+		};
+		expect(buildPrompt(closed, "", undefined)).toContain(
+			"<accepted_deferrals>\n- [2] run.sh — reason: waiting for abah's OK\n</accepted_deferrals>",
+		);
+		expect(buildPrompt(plan, "", undefined)).not.toContain("<accepted_deferrals>");
 	});
 });
 
