@@ -167,7 +167,7 @@ function createFireworksModel(
 	compat: Model<"anthropic-messages">["compat"] = FIREWORKS_ANTHROPIC_COMPAT,
 ): Model<"anthropic-messages"> {
 	return {
-		id: "accounts/fireworks/models/kimi-k2p6",
+		id: "accounts/fireworks/models/glm-5p3",
 		name: "Kimi K2.6",
 		api: "anthropic-messages",
 		provider: "fireworks",
