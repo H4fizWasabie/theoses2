@@ -63,6 +63,14 @@ describe("Turn View", () => {
 		expect(calls).toEqual(["send plain #100 ->7: Running bash...", "edit rich #100: done"]);
 	});
 
+	it("appends the task plan status line to the answer", async () => {
+		const { outbox, calls } = recordingOutbox();
+		const view = createTurnView(outbox, { replyTo: 7, toolCallDetail: false });
+		view.onEvent(answer("done"));
+		await view.finish({ outcome: "completed", planStatus: "✓ run.sh · reviewed by luna: no gaps" });
+		expect(calls).toEqual(["send rich #100 ->7: done\n\n✓ run.sh · reviewed by luna: no gaps"]);
+	});
+
 	it("falls back from rich to HTML to plain when editing the status, then to a fresh threaded send", async () => {
 		const edits = recordingOutbox(["edit:rich", "edit:html"]);
 		const view = createTurnView(edits.outbox, { replyTo: 7, toolCallDetail: false });

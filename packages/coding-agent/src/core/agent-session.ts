@@ -112,6 +112,7 @@ import { FileMemoryStore } from "./memory-store.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
+import { reviewPlan } from "./plan-reviewer.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import { extensionProviderHooks } from "./provider-hooks.ts";
 import { createResearchToolDefinition, ResearchJobs } from "./researcher.ts";
@@ -133,8 +134,11 @@ import { createSessionSystemPrompt, type SessionSystemPrompt } from "./session-s
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
+import { TaskPlanGuard } from "./task-plan-guard.ts";
+import { currentRunMessages } from "./tool-runs.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createDeferredToolDefinitions } from "./tools/deferred-dispatch.ts";
+import { generateUnifiedPatch } from "./tools/edit-diff.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { spillPrunedText } from "./tools/output-shaping.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
@@ -294,6 +298,8 @@ export interface PromptResult {
 	outcome: OperationFinishedEntry["outcome"];
 	/** The final provider error, only when outcome is "failed". */
 	finalError?: { message: string; provider: string; model: string };
+	/** One-line Task Plan status when this operation created or changed the plan (issue #382). */
+	planStatus?: string;
 }
 
 const REPLY_CONTEXT_CAP = 2000;
@@ -468,6 +474,7 @@ export class AgentSession {
 	private _modelRuntime: ModelRuntime;
 	private readonly _memoryStore = new FileMemoryStore();
 	private readonly _memoryPromotion: MemoryPromotion;
+	private readonly _taskPlanGuard: TaskPlanGuard;
 
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
@@ -504,6 +511,23 @@ export class AgentSession {
 			sessionManager: this.sessionManager,
 			modelRuntime: this._modelRuntime,
 			memoryStore: this._memoryStore,
+		});
+		this._taskPlanGuard = new TaskPlanGuard({
+			cwd: this._cwd,
+			getPlan: () => this.sessionManager.getTaskPlan(),
+			setPlan: (plan) => this.sessionManager.setTaskPlan(plan),
+			// Without the task_plan tool active the model could never satisfy the gate.
+			enabled: () => this.settingsManager.getTaskPlanEnabled() && this.getActiveToolNames().includes("task_plan"),
+			runMessages: () => currentRunMessages(this.agent.state.messages),
+			review: (input) =>
+				reviewPlan({
+					...input,
+					cwd: this._cwd,
+					modelRuntime: this._modelRuntime,
+					providerHooks: extensionProviderHooks(() => this._extensionRunner),
+					signal: this.agent.signal,
+				}),
+			generatePatch: generateUnifiedPatch,
 		});
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
@@ -605,6 +629,8 @@ export class AgentSession {
 	 */
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
+			const planGate = this._taskPlanGuard.beforeToolCall(toolCall.name, args as Record<string, unknown>);
+			if (planGate) return planGate;
 			const runner = this._extensionRunner;
 			if (!runner.hasHandlers("tool_call")) {
 				return undefined;
@@ -624,6 +650,8 @@ export class AgentSession {
 				throw new Error(`Extension failed, blocking execution: ${String(err)}`);
 			}
 		};
+
+		this.agent.beforeStop = () => this._taskPlanGuard.beforeStop();
 
 		this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
 			const runner = this._extensionRunner;
@@ -1180,6 +1208,7 @@ export class AgentSession {
 	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<PromptResult | undefined> {
 		this._isAgentRunActive = true;
 		this._lastOperationResult = undefined;
+		this._taskPlanGuard.startOperation();
 		try {
 			// The caller (prompt()/sendCustomMessage()) already refreshed _baseSystemPrompt once for this
 			// operation; no rebuild here, just apply whichever prompt is current.
@@ -1246,7 +1275,7 @@ export class AgentSession {
 			outcome === "failed" && msg?.errorMessage
 				? { message: msg.errorMessage, provider: msg.provider, model: msg.model }
 				: undefined;
-		this._lastOperationResult = { outcome, finalError };
+		this._lastOperationResult = { outcome, finalError, planStatus: this._taskPlanGuard.planStatus() };
 		if (outcome !== "completed") return;
 		// Issue #173: the Working Note is a scratchpad for the operation in
 		// progress, not a cross-operation memory — the harness owns clearing
@@ -3005,6 +3034,11 @@ export class AgentSession {
 					bash: { commandPrefix: shellCommandPrefix, shellPath },
 					workingNote: (note) => this.sessionManager.appendWorkingNote(note),
 					workingNoteClear: () => this.sessionManager.clearWorkingNote(),
+					taskPlan: {
+						get: () => this.sessionManager.getTaskPlan(),
+						set: (plan) => this.sessionManager.setTaskPlan(plan),
+						runMessages: () => currentRunMessages(this.agent.state.messages),
+					},
 					memory: this._memoryStore,
 					onMemorySaved: () => this._memoryPromotion.recordSaved(),
 				});
@@ -3063,6 +3097,7 @@ export class AgentSession {
 					"edit",
 					"write",
 					"working_note",
+					"task_plan",
 					"note_operations",
 					"remember",
 					"save_note",

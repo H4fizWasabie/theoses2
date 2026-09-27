@@ -119,6 +119,7 @@ import { createOperationalNotesToolDefinition } from "./operational-notes.ts";
 import { createPowerShellToolDefinition, type PowerShellToolOptions } from "./powershell.ts";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
 import { createRecallTurnsToolDefinition } from "./recall-turns.ts";
+import { createTaskPlanToolDefinition, type TaskPlanToolDeps } from "./task-plan.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import { createWebSearchToolDefinition, type WebSearchOperations } from "./web-search.ts";
 import { createWorkingNoteToolDefinition } from "./working-note.ts";
@@ -136,6 +137,7 @@ export type ToolName =
 	| "find"
 	| "ls"
 	| "working_note"
+	| "task_plan"
 	| "note_operations"
 	| "remember"
 	| "save_note"
@@ -153,6 +155,7 @@ export const allToolNames: Set<ToolName> = new Set([
 	"find",
 	"ls",
 	"working_note",
+	"task_plan",
 	"note_operations",
 	"remember",
 	"save_note",
@@ -173,6 +176,7 @@ export interface ToolsOptions {
 	ls?: LsToolOptions;
 	workingNote?: (note: string) => void;
 	workingNoteClear?: () => void;
+	taskPlan?: TaskPlanToolDeps;
 	operationalNotes?: { path?: string };
 	memory?: MemoryStore;
 	onMemorySaved?: () => void;
@@ -209,6 +213,9 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		working_note: createWorkingNoteToolDefinition(
 			options?.workingNote ?? (() => {}),
 			options?.workingNoteClear ?? (() => {}),
+		),
+		task_plan: createTaskPlanToolDefinition(
+			options?.taskPlan ?? { get: () => undefined, set: () => {}, runMessages: () => [] },
 		),
 		note_operations: createOperationalNotesToolDefinition(options?.operationalNotes),
 		remember: rememberTool!,

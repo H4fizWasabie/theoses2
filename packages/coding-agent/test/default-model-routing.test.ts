@@ -3,7 +3,11 @@ import { type BackgroundModelName, resolveBackgroundModel } from "../src/core/ba
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
 
 const DEFAULT_MODEL_ID = "deepseek/deepseek-v4-flash-0731";
-const MAX_TOKENS: Record<BackgroundModelName, number> = { consolidation: 32000, explorer: 8000, research: 16000 };
+const MAX_TOKENS: Partial<Record<BackgroundModelName, number>> = {
+	consolidation: 32000,
+	explorer: 8000,
+	research: 16000,
+};
 const NAMES = Object.keys(MAX_TOKENS) as BackgroundModelName[];
 
 function runtimeWithModel(): { runtime: ModelRuntime; getModel: ReturnType<typeof vi.fn> } {
@@ -48,5 +52,17 @@ describe("default DeepSeek V4 Flash 0731 routing", () => {
 		const runtime = { getModel: () => undefined } as unknown as ModelRuntime;
 
 		expect(() => resolveBackgroundModel(runtime, name)).toThrow(/not found in the OpenRouter catalog/);
+	});
+});
+
+describe("reviewer routing", () => {
+	it("defaults to GPT-6 Luna via OpenAI with no quantization filter and no fallbacks", () => {
+		const { runtime, getModel } = runtimeWithModel();
+
+		const model = resolveBackgroundModel(runtime, "reviewer");
+
+		expect(getModel).toHaveBeenCalledWith("openrouter", "openai/gpt-6-luna");
+		expect(routingOf(model)).toEqual({ order: ["OpenAI"], allow_fallbacks: false });
+		expect(model.maxTokens).toBe(8000);
 	});
 });

@@ -257,6 +257,15 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	getFollowUpMessages?: () => Promise<AgentMessage[]>;
 
 	/**
+	 * Last check before the agent stops, after follow-up messages are exhausted. Receives every
+	 * message this run produced; returned messages are injected and the agent continues. Callers
+	 * must bound this themselves (e.g. return [] once they have pushed back), or the run never ends.
+	 *
+	 * Contract: must not throw or reject. Return [] to let the agent stop.
+	 */
+	beforeStop?: (newMessages: AgentMessage[]) => Promise<AgentMessage[]>;
+
+	/**
 	 * Tool execution mode.
 	 * - "sequential": execute tool calls one by one
 	 * - "parallel": preflight tool calls sequentially, then execute allowed tools concurrently;

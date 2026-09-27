@@ -62,6 +62,7 @@ describe("regression #5109: exclude tools", () => {
 				"remember",
 				"research",
 				"save_note",
+				"task_plan",
 				"web_search",
 				"working_note",
 				"write",

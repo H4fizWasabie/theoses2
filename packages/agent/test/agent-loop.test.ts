@@ -1660,3 +1660,37 @@ describe("agentLoopContinue with AgentMessage", () => {
 		expect(messages[0].role).toBe("assistant");
 	});
 });
+
+describe("beforeStop", () => {
+	it("injects its messages and continues, then stops once it returns []", async () => {
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [] };
+		const seenLengths: number[] = [];
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			beforeStop: async (newMessages) => {
+				seenLengths.push(newMessages.length);
+				return seenLengths.length === 1 ? [createUserMessage("check your claim")] : [];
+			},
+		};
+
+		let llmCalls = 0;
+		const stream = agentLoop([createUserMessage("do it")], context, config, undefined, () => {
+			llmCalls++;
+			const mockStream = new MockAssistantStream();
+			queueMicrotask(() => {
+				const message = createAssistantMessage([{ type: "text", text: `reply ${llmCalls}` }]);
+				mockStream.push({ type: "done", reason: "stop", message });
+			});
+			return mockStream;
+		});
+		for await (const _event of stream) {
+			// consume
+		}
+
+		const messages = await stream.result();
+		expect(llmCalls).toBe(2);
+		expect(seenLengths).toEqual([2, 4]);
+		expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+	});
+});

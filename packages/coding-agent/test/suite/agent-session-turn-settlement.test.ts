@@ -27,7 +27,7 @@ describe("AgentSession Turn Settlement", () => {
 
 	it("settles a completed Channel Session turn with the prompt text", async () => {
 		const h = await harness();
-		h.setResponses([fauxAssistantMessage("done")]);
+		h.setResponses([fauxAssistantMessage("The bug is in the parser.")]);
 		await h.session.prompt("fix the bug");
 		expect(settleTurn).toHaveBeenCalledTimes(1);
 		expect(settleTurn).toHaveBeenCalledWith(h.session, "fix the bug");

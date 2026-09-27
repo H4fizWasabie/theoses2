@@ -317,6 +317,11 @@ function findNearMiss(content: string, oldText: string): NearMiss | undefined {
 	return { line: bestStart + 1, whitespaceOnly, snippet };
 }
 
+/** Multi-edit calls are validated in full before anything is written, so one bad edit rejects them all. */
+function noneApplied(totalEdits: number): string {
+	return `No changes applied: all ${totalEdits} edits were rejected. `;
+}
+
 function getNotFoundError(path: string, editIndex: number, totalEdits: number, nearMiss?: NearMiss): Error {
 	let hint = "";
 	if (nearMiss) {
@@ -331,7 +336,7 @@ function getNotFoundError(path: string, editIndex: number, totalEdits: number, n
 		);
 	}
 	return new Error(
-		`Could not find edits[${editIndex}] in ${path}. The oldText must match exactly including all whitespace and newlines.${hint}`,
+		`${noneApplied(totalEdits)}Could not find edits[${editIndex}] in ${path}. The oldText must match exactly including all whitespace and newlines.${hint}`,
 	);
 }
 
@@ -342,7 +347,7 @@ function getDuplicateError(path: string, editIndex: number, totalEdits: number, 
 		);
 	}
 	return new Error(
-		`Found ${occurrences} occurrences of edits[${editIndex}] in ${path}. Each oldText must be unique. Please provide more context to make it unique.`,
+		`${noneApplied(totalEdits)}Found ${occurrences} occurrences of edits[${editIndex}] in ${path}. Each oldText must be unique. Please provide more context to make it unique.`,
 	);
 }
 
@@ -350,7 +355,7 @@ function getEmptyOldTextError(path: string, editIndex: number, totalEdits: numbe
 	if (totalEdits === 1) {
 		return new Error(`oldText must not be empty in ${path}.`);
 	}
-	return new Error(`edits[${editIndex}].oldText must not be empty in ${path}.`);
+	return new Error(`${noneApplied(totalEdits)}edits[${editIndex}].oldText must not be empty in ${path}.`);
 }
 
 function getNoChangeError(path: string, totalEdits: number): Error {
@@ -418,7 +423,7 @@ export function applyEditsToNormalizedContent(
 		const current = matchedEdits[i];
 		if (previous.matchIndex + previous.matchLength > current.matchIndex) {
 			throw new Error(
-				`edits[${previous.editIndex}] and edits[${current.editIndex}] overlap in ${path}. Merge them into one edit or target disjoint regions.`,
+				`${noneApplied(matchedEdits.length)}edits[${previous.editIndex}] and edits[${current.editIndex}] overlap in ${path}. Merge them into one edit or target disjoint regions.`,
 			);
 		}
 	}
