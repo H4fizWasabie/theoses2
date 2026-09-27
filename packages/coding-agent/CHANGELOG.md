@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.92] - 2026-09-27
 
 - change: memory consolidation no longer asks Jev to classify every new memory edge. The call ran in shadow mode (its answer was logged to `edge-relation-shadow-log.jsonl` and discarded) and made up about half of all Jev calls. Removes `askJevChoice`, `EDGE_RELATION_DESCRIPTIONS` and the `THEOSES_EDGE_RELATION_SHADOW_LOG` log.
 - feat: claim check before the agent stops (`core/claim-check.ts`). Before a run ends, the final reply is compared with the run's tool results, and the agent is pushed back once with a `claim-check` message if: an `edit`/`write` failed and no later change to that path succeeded; the reply claims it tested or verified the change but no check command ran after the last file change, or the last one failed (reading and search commands such as grep, cat and git status never count, so grep's exit 1 on no match is not a failed test); or the user asked for a change and the reply says it is done without any tool call. On 2026-09-26 a multi-block edit to a workspace script failed, none of its blocks landed, and the reply still said "Done and verified"; the next scheduled run failed on the unchanged code. Each push is logged as `[claim-check] ...`.

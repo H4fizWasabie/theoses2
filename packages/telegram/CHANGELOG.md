@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.92] - 2026-09-27
 
 - feat: the final reply ends with the Task Plan status line (`PromptResult.planStatus`) when the turn created or changed a plan.
 
