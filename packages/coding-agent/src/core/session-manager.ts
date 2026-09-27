@@ -28,6 +28,7 @@ import {
 } from "./messages.ts";
 import { type SessionLookupKey, sessionLookupKey } from "./session-cwd.ts";
 import { externalizeImages, hydrateImages } from "./session-images.ts";
+import { TASK_PLAN_ENTRY_TYPE, type TaskPlan } from "./task-plan.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
 
@@ -1137,6 +1138,21 @@ export class SessionManager {
 			channel: header?.channel ?? "cli",
 			channelSessionId: header?.channelSessionId ?? this.cwd,
 		};
+	}
+
+	/** The current Task Plan (issue #382): the latest `task_plan` custom entry on this branch. */
+	getTaskPlan(): TaskPlan | undefined {
+		// Walks back from the leaf and stops at the first plan entry: read on every file-changing tool call.
+		let entry = this.leafId ? this.byId.get(this.leafId) : undefined;
+		while (entry) {
+			if (entry.type === "custom" && entry.customType === TASK_PLAN_ENTRY_TYPE) return entry.data as TaskPlan;
+			entry = entry.parentId ? this.byId.get(entry.parentId) : undefined;
+		}
+		return undefined;
+	}
+
+	setTaskPlan(plan: TaskPlan): string {
+		return this.appendCustomEntry(TASK_PLAN_ENTRY_TYPE, plan);
 	}
 
 	getWorkingNote(): string {

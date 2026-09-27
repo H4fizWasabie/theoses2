@@ -171,10 +171,11 @@ describe("openai-completions prompt caching", () => {
 		expect(headers["x-session-affinity"]).toBe("session-affinity");
 	});
 
-	it.each(["accounts/fireworks/models/glm-5p2", "accounts/fireworks/routers/glm-5p2-fast"] as const)(
+	it.each(["accounts/fireworks/models/kimi-k3", "accounts/fireworks/routers/kimi-k3-fast"] as const)(
 		"sends Fireworks session affinity for %s",
 		async (modelId) => {
 			const model = getModel("fireworks", modelId);
+			if (model.api !== "openai-completions") throw new Error("Expected an OpenAI-compatible Fireworks model");
 			const { headers } = await captureRequest({ sessionId: "fireworks-session" }, model);
 
 			expect(headers["x-session-affinity"]).toBe("fireworks-session");

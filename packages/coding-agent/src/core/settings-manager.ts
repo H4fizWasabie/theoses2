@@ -114,6 +114,8 @@ export interface Settings {
 	// for task-boundary summaries) and the explorer sub-agent. Each entry overrides the code defaults in
 	// background-models.ts; read once at startup.
 	backgroundModels?: BackgroundModelConfig;
+	// Task Plan enforcement and its reviewer (issue #382); `enabled: false` is the kill switch. Default: on.
+	taskPlan?: { enabled?: boolean };
 	defaultThinkingLevel?: ThinkingLevel;
 	modelThinkingLevels?: Record<string, ThinkingLevel>; // per-model default thinking level overrides keyed by "provider/modelId"
 	transport?: TransportSetting; // default: "auto"
@@ -1258,6 +1260,10 @@ export class SettingsManager {
 		this.globalSettings.fullscreenScrollbar = mode;
 		this.markModified("fullscreenScrollbar");
 		this.save();
+	}
+
+	getTaskPlanEnabled(): boolean {
+		return this.settings.taskPlan?.enabled ?? true;
 	}
 
 	getImageAutoResize(): boolean {

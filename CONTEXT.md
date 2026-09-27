@@ -32,6 +32,14 @@ _Avoid_: stop marker, boundary marker
 The fire-and-forget work that runs after a Channel Session turn ends successfully (memory consolidation, task-boundary detection). It never blocks or fails the reply. Triggered by the Channel Session itself when an operation finishes with outcome `completed` and no retry is pending; adapters never trigger it. Only non-CLI Channel Sessions (Telegram, dashboard) settle. Plain CLI coding runs still reach Durable Memory, but only through compaction distillation of the turns compaction drops.
 _Avoid_: post-turn hook (implies an event seam that doesn't exist), background turn work
 
+**Task Plan**:
+The list of every piece of a change plus the check that proves it, kept by the model through the `task_plan` tool and enforced by the harness: no file change without an open plan, no end of the run while items are open, and a verify item closes only after a check command passed since the last file change. A `fix` plan starts with root cause, siblings and fix scope. Persisted as `task_plan` custom entries in the session log (latest wins), so it survives restarts. Distinct from the Working Note, which records facts; the Task Plan records obligations.
+_Avoid_: todo list (implies optional), checklist
+
+**Plan Review**:
+One independent review of a finished Task Plan (fixes and multi-item changes), by a sub-agent with fresh context and a different model family (`backgroundModels.reviewer`), which can read the codebase. Must-fix findings go back to the worker once; the result shows in the plan status line.
+_Avoid_: code review (that is the human PR review), second opinion
+
 **Auto-Resume**:
 The one automatic follow-up a Telegram turn gets when it still ends on a provider error after the session's own retries: after 60 seconds the same task is re-prompted with an "[automatic resume]" message that settles no text. A new owner turn or /stop cancels it; a resume that fails again is reported and not resumed.
 _Avoid_: retry (that is the session's own per-request retry), auto-continue

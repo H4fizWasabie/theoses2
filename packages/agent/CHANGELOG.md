@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: `beforeStop` loop option (also on `Agent`). Called when the agent would stop, after follow-up messages are exhausted, with every message the run produced; messages it returns are injected and the run continues.
+
 ## [1.0.91] - 2026-09-26
 
 - fix: `proxy.ts`'s `processProxyEvent` throttles re-parsing a large accumulated tool-call argument (via `theoses-ai`'s `StreamingJsonAccumulator`) instead of re-parsing the whole buffer on every `toolcall_delta`, which pegged the event loop for a large `write` call streamed in many small deltas. The scratch buffer also no longer lives on the persisted `ToolCall` block.

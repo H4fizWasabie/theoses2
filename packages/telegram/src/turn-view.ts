@@ -104,7 +104,9 @@ export function createTurnView(outbox: Outbox, options: TurnViewOptions) {
 			if (response) {
 				// Narration from before the failure must not hide it (2026-09-24: the owner saw only "Now
 				// proving it works..." and assumed the model stopped without calling a tool).
-				const reply = errorText ? `${response}\n\n${errorText}` : response;
+				// Issue #382: the Task Plan status, so the owner sees what was done, deferred and reviewed.
+				const withStatus = result?.planStatus ? `${response}\n\n${result.planStatus}` : response;
+				const reply = errorText ? `${withStatus}\n\n${errorText}` : withStatus;
 				await sendReply(outbox, reply, toolCallDetail ? [] : toolNames, replyTo, editTarget);
 			} else if (errorText) {
 				if (editTarget !== undefined) await outbox.edit(editTarget, errorText, "plain").catch(() => {});

@@ -1,12 +1,11 @@
 /**
  * Thin client for TypeSafe's Jev "System One" model, called via OpenRouter's decisions endpoint
- * (see task-boundary-detector.ts and memory-consolidation.ts for its two call sites). Not modeled
- * as a `Model<Api>` in packages/ai: Jev's request/response shape (typed `state` + `questions` ->
- * typed `answers`) shares nothing with the streaming chat-completion shape every other provider in
- * packages/ai implements, and OpenRouter gates it behind a dedicated /api/alpha/decisions endpoint
- * rather than /chat/completions — confirmed live: the plain chat-completions path either 404s
- * ("No endpoints found that support tool use") or 500s on every request shape tried, since this
- * model was never meant to be called that way.
+ * (callers: task-boundary-detector.ts, memory-consolidation.ts, memory-relevance.ts, memory-gate.ts). Not modeled as a `Model<Api>` in packages/ai:
+ * Jev's request/response shape (typed `state` + `questions` -> typed `answers`) shares nothing with
+ * the streaming chat-completion shape every other provider in packages/ai implements, and OpenRouter
+ * gates it behind a dedicated /api/alpha/decisions endpoint rather than /chat/completions — confirmed
+ * live: the plain chat-completions path either 404s ("No endpoints found that support tool use") or
+ * 500s on every request shape tried, since this model was never meant to be called that way.
  *
  * Jev calls never go through the agent loop (they're fire-and-forget from internal detectors, not
  * tool calls), so they never land in a session .jsonl the way model usage does. Cost is instead
@@ -59,8 +58,8 @@ function logJevCost(cost: number, label: string | undefined): void {
 
 /** Posts a set of named questions to the Jev decisions endpoint and returns the parsed JSON body,
  * or undefined on any failure (missing API key, network error, timeout, non-2xx response, malformed
- * body) — the single failure path shared by askJevNoul, askJevNouls and askJevChoice. Questions in
- * one request are evaluated in parallel by Jev, so several atomic questions cost one round trip. */
+ * body) — the single failure path shared by askJevNoul and askJevNouls. Questions in one request
+ * are evaluated in parallel by Jev, so several atomic questions cost one round trip. */
 async function askJev(
 	state: JevState,
 	questions: Record<string, Record<string, unknown>>,
@@ -135,30 +134,4 @@ export async function askJevNouls<K extends string>(
 		result[name] = noul;
 	}
 	return result;
-}
-
-export interface JevChoiceResult {
-	choice: string;
-	/** 0-1, how concentrated Jev's probability mass was on `choice` — low values mean the
-	 * category was ambiguous and callers should prefer their own fallback over trusting it. */
-	confidence: number;
-}
-
-/**
- * Asks Jev to pick one of `criteria`'s keys for `state`. `criteria` maps each option name to a
- * short description of what it covers (same shape TypeSafe's Choice primitive expects). Returns
- * undefined on any failure, or if the returned choice isn't one of the keys offered — same
- * "skip this decision for now" contract as askJevNoul.
- */
-export async function askJevChoice(
-	state: JevState,
-	instructions: string,
-	criteria: Record<string, string>,
-	options?: JevCallOptions,
-): Promise<JevChoiceResult | undefined> {
-	const parsed = await askJev(state, { answer: { type: "choice", instructions, criteria } }, options);
-	const answer = parsed?.answers?.answer;
-	if (typeof answer?.choice !== "string" || typeof answer?.confidence !== "number") return undefined;
-	if (!(answer.choice in criteria)) return undefined;
-	return { choice: answer.choice, confidence: answer.confidence };
 }

@@ -267,6 +267,12 @@ async function runLoop(
 			continue;
 		}
 
+		const stopCheckMessages = (await config.beforeStop?.(newMessages)) || [];
+		if (stopCheckMessages.length > 0) {
+			pendingMessages = stopCheckMessages;
+			continue;
+		}
+
 		// No more messages, exit
 		break;
 	}

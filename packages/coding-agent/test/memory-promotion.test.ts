@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/core/background-call.ts", () => ({ backgroundCall: vi.fn() }));
 vi.mock("../src/core/jev-client.ts", () => ({
-	askJevChoice: vi.fn(async () => undefined),
 	askJevNoul: vi.fn(async () => undefined),
 	askJevNouls: vi.fn(async () => undefined),
 }));

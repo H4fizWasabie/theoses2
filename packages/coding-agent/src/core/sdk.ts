@@ -341,6 +341,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		"edit",
 		"write",
 		"working_note",
+		"task_plan",
 		"note_operations",
 		"remember",
 		"save_note",

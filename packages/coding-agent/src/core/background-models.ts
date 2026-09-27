@@ -7,7 +7,7 @@ import type { Api, Model } from "theoses-ai";
  * swapping a model or provider is a settings edit plus a restart, not a release.
  */
 
-export type BackgroundModelName = "consolidation" | "explorer" | "research";
+export type BackgroundModelName = "consolidation" | "explorer" | "research" | "reviewer";
 
 export interface BackgroundModelSetting {
 	/** OpenRouter model id, e.g. "deepseek/deepseek-v4-flash-0731". */
@@ -94,6 +94,14 @@ const DEFAULTS: ResolvedBackgroundModelSetting = {
 };
 
 /**
+ * The task-plan reviewer (issue #382) deliberately uses a different model family from the worker, whose
+ * blind spots it would otherwise share. GPT-6 Luna is the one the ICM workspaces already run on.
+ */
+const NAME_DEFAULTS: Partial<Record<BackgroundModelName, ResolvedBackgroundModelSetting>> = {
+	reviewer: { model: "openai/gpt-6-luna", providers: ["OpenAI"], quantizations: [] },
+};
+
+/**
  * Per-name output cap. With no explicit per-request maxTokens the shared default falls back to the
  * model's full declared max completion tokens (900K+ here) clamped to context, and cheap
  * shared-capacity-pool providers reject that with `provider_error_code: "queue_timeout"`
@@ -105,12 +113,14 @@ const MAX_TOKENS: Record<BackgroundModelName, number> = {
 	consolidation: 32000,
 	explorer: 8000,
 	research: 16000,
+	reviewer: 8000,
 };
 
 const LABELS: Record<BackgroundModelName, string> = {
 	consolidation: "Consolidation",
 	explorer: "Explorer",
 	research: "Research",
+	reviewer: "Reviewer",
 };
 
 /**
@@ -121,7 +131,11 @@ const LABELS: Record<BackgroundModelName, string> = {
  * later. Task-boundary summaries resolve as "consolidation" until issue #186 picks a dedicated model.
  */
 export function resolveBackgroundModel(source: BackgroundModelSource, name: BackgroundModelName): Model<Api> {
-	const setting = resolveBackgroundModelSetting(name, DEFAULTS, source.getBackgroundModelSetting?.(name));
+	const setting = resolveBackgroundModelSetting(
+		name,
+		NAME_DEFAULTS[name] ?? DEFAULTS,
+		source.getBackgroundModelSetting?.(name),
+	);
 	const model = source.getModel("openrouter", setting.model);
 	if (!model) {
 		throw new Error(
