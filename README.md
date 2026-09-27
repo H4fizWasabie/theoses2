@@ -12,12 +12,13 @@
 
 Theoses2 is a self-hosted, single-owner personal assistant and coding agent. It works in local projects from the terminal, while the same engine can also be reached through a private Telegram bot or browser dashboard.
 
-The point is continuity: each channel keeps its own conversation and session history, while a shared durable memory can be queried explicitly across channels. Recent context stays bounded instead of growing without limit.
+The point is continuity: each channel keeps its own Channel Session, while a shared Durable Memory can be queried explicitly across channels. Only the last three turns plus a curated Working Note are sent to the model each turn, so context stays bounded instead of growing without limit.
 
 ## What it does
 
 - **Acts on real workspaces.** The CLI can read, write, edit, and run shell commands, then extend that toolset through extensions, HTTP sidecars, or MCP servers.
-- **Keeps working context.** Sessions are persisted as JSONL and support resume, fork, branching, export, and compaction. Working Notes preserve short-lived orientation; semantic and episodic memory preserve durable facts.
+- **Keeps working context.** Sessions are persisted as JSONL and support resume, fork, branching, export, and compaction. Working Notes preserve short-lived orientation; Durable Memory (semantic and episodic) preserves facts, promoted from finished Telegram/dashboard turns and from compaction.
+- **Checks its own work.** A `task_plan` tool plus harness enforcement: no file change without an open plan, no ending a run with open items, and verify items close only after a passing check. Finished fix plans get an independent Plan Review from a different model family, and a claim check pushes back when the final reply claims work the tool results don't support. Disable with `taskPlan.enabled: false`.
 - **Uses the model you choose.** `theoses-ai` provides a common streaming and tool-calling API across OpenAI, Anthropic, Google, OpenRouter, Bedrock, local OpenAI-compatible servers, and many other providers, including OAuth-backed subscriptions.
 - **Adapts to your workflow.** Load `AGENTS.md` or `CLAUDE.md`, skills, prompt templates, themes, custom providers, and TypeScript extensions without changing the agent core.
 - **Runs where you need it.** Use interactive, print, JSON, or RPC modes from the CLI, or embed sessions through the SDK.
@@ -31,7 +32,7 @@ The point is continuity: each channel keeps its own conversation and session his
 | [Dashboard](packages/dashboard) | Browser chat, Telegram history, memory graph, and file workbench | Private, self-hosted |
 | [Protocol / client / server](packages/protocol) | Transport-neutral framed CBOR sessions for other consumers | Experimental |
 
-All first-party channels currently create sessions through the shared coding-agent runtime. The protocol, client, and server packages are an optional transport seam; they are not required to run the CLI, Telegram, or dashboard.
+All first-party channels create sessions through the shared coding-agent runtime; Telegram and the dashboard share one Channel Session module (`core/channel-session.ts`). The protocol, client, and server packages are an optional transport seam; they are not required to run the CLI, Telegram, or dashboard.
 
 ## Quick start
 
@@ -77,6 +78,7 @@ Terminal CLI ─┐
 Telegram ─────┼──> AgentSession / SessionManager ──> Agent loop + tools
 Dashboard ────┘                 │                         │
                                 ├── bounded channel context
+                                ├── task plan guard + plan review
                                 ├── JSONL session history
                                 ├── working notes + durable memory
                                 └── model runtime ───────> theoses-ai providers
@@ -97,6 +99,7 @@ The agent runs with the permissions of the account that launched it. It does not
 | [theoses-protocol](packages/protocol) | Validated CBOR schemas and byte-stream framing |
 | [theoses-client](packages/client) | Transport-neutral remote-session client |
 | [theoses-server](packages/server) | Experimental session server boundary |
+| [theoses-evals](packages/evals) | Private, model-backed behavioral evals (not published) |
 
 ## Documentation
 
@@ -105,6 +108,8 @@ The agent runs with the permissions of the account that launched it. It does not
 - [Providers and authentication](packages/coding-agent/docs/providers.md)
 - [Skills](packages/coding-agent/docs/skills.md) and [extensions](packages/coding-agent/docs/extensions.md)
 - [SDK](packages/coding-agent/docs/sdk.md)
+- [Settings](packages/coding-agent/docs/settings.md)
+- [Domain glossary](CONTEXT.md)
 - [Dashboard](packages/dashboard/README.md)
 - [Security policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
@@ -117,6 +122,7 @@ npm run build         # Refresh model data, then build all packages
 npm run build:offline # Build with the checked-in model data snapshot
 npm run check         # Formatting, lint, dependency, import, type, and smoke checks
 ./test.sh             # Repository test runner
+npm run eval -- --provider openai --model <id>  # Model-backed evals, costs tokens
 ```
 
 The monorepo requires exact versions for direct external dependencies and keeps generated release artifacts out of normal development. Do not expose dashboard or Telegram credentials in URLs, source files, or logs.
