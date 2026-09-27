@@ -10,7 +10,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { relative } from "node:path";
 import type { AgentMessage, BeforeToolCallResult } from "theoses-agent-core";
-import { claimCheck } from "./claim-check.ts";
+import { claimCheck, FINAL_REPLY_NOTE } from "./claim-check.ts";
 import { createCustomMessage } from "./messages.ts";
 import { formatFindings, logReview, PLAN_REVIEW_CUSTOM_TYPE, type ReviewOutcome } from "./plan-reviewer.ts";
 import {
@@ -215,5 +215,11 @@ export class TaskPlanGuard {
 
 function push(customType: string, label: string, text: string): AgentMessage {
 	console.error(`[${customType}] ${firstLine(text)}`);
-	return createCustomMessage(customType, `[System: ${label}]\n${text}`, true, undefined, new Date().toISOString());
+	return createCustomMessage(
+		customType,
+		`[System: ${label}]\n${text}\n\n${FINAL_REPLY_NOTE}`,
+		true,
+		undefined,
+		new Date().toISOString(),
+	);
 }

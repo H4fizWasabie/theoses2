@@ -70,19 +70,28 @@ Look for:
 3. Verification that did not exercise the changed code (a dry run that exits before it, a syntax check presented as a test).
 4. A fix that patches where the failure showed up instead of why it happened, or a plan of kind "change" that is really a fix.
 
-Each finding needs concrete evidence: a file and line, or the command output that shows it. "must-fix" means the request is not met or something will break; everything else is "nit". Do not report something the plan already defers with a reason. If nothing is missing, say so.
+Each finding needs concrete evidence: a file and line, or the command output that shows it. "must-fix" means the request is not met or something will break; everything else is "nit". If nothing is missing, say so.
+
+Items under <accepted_deferrals> were left undone on purpose, with the reason given (for example, waiting for the user's approval before publishing). They are not findings, even when the request asks for them. Only report one if its reason is false, with evidence.
 
 Your final message must be only this JSON, no prose:
 {"verdict": "ok" | "gaps", "findings": [{"severity": "must-fix" | "nit", "file": "path", "issue": "what is missing or wrong", "evidence": "file:line or output"}]}`;
 
-function buildPrompt(plan: TaskPlan, diff: string, verifyOutput: string | undefined): string {
+/** Exported for tests. */
+export function buildPrompt(plan: TaskPlan, diff: string, verifyOutput: string | undefined): string {
 	const cappedDiff =
 		diff.length > MAX_DIFF_CHARS
 			? `${diff.slice(0, MAX_DIFF_CHARS)}\n[diff truncated at ${MAX_DIFF_CHARS} chars; read the files for the rest]`
 			: diff;
+	// Issue #386: an inline "⏸ ... — reason" in the plan was not enough; the reviewer still flagged an
+	// approval-gated publish as a must-fix because the request asked for it.
+	const deferrals = plan.items
+		.filter((item) => item.status === "deferred")
+		.map((item) => `- [${item.id}] ${item.text} — reason: ${item.note ?? "(none)"}`);
 	return [
 		`<request>\n${plan.request || "(not recorded)"}\n</request>`,
 		`<plan>\n${formatPlan(plan)}\n</plan>`,
+		...(deferrals.length > 0 ? [`<accepted_deferrals>\n${deferrals.join("\n")}\n</accepted_deferrals>`] : []),
 		`<diff>\n${cappedDiff || "(no diff captured)"}\n</diff>`,
 		`<verify_output>\n${verifyOutput ?? "(no passing check output captured)"}\n</verify_output>`,
 	].join("\n\n");

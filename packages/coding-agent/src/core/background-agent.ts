@@ -107,9 +107,10 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 		if (event.type === "message_end" && event.message.role === "assistant") {
 			// streamSimple, unlike ModelRuntime's complete* paths, does not log the serving provider itself.
 			logServedProvider(event.message as AssistantMessage);
-			const usage = (event.message as { usage?: { input?: number; output?: number } }).usage;
+			const usage = (event.message as AssistantMessage).usage;
 			if (usage) {
-				inputTokens += usage.input ?? 0;
+				// Issue #390: `input` excludes cached tokens, and a multi-turn sub-agent resends its context mostly as cache reads.
+				inputTokens += (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
 				outputTokens += usage.output ?? 0;
 			}
 		}

@@ -91,6 +91,14 @@ export function findClaimProblem(runMessages: AgentMessage[], options: ClaimChec
 	return undefined;
 }
 
+/**
+ * Issue #389: adapters such as Telegram deliver only the run's last assistant text, so the reply after a
+ * push-back replaces the one it corrected. On 2026-09-27 "Part 02 is live" + links was replaced by
+ * "The reopened verify item was just bookkeeping...", and the user had to ask whether it was published.
+ */
+export const FINAL_REPLY_NOTE =
+	"The user will only see your last reply, not the one above. Once this is resolved, write that last reply as the complete answer for the user (results, links, anything deferred and why), not as a report on this check.";
+
 /** One corrective push per run at most; undefined when there is nothing to push. */
 export function claimCheck(runMessages: AgentMessage[], options: ClaimCheckOptions = {}): CustomMessage | undefined {
 	if (runMessages.some((m) => m.role === "custom" && m.customType === CLAIM_CHECK_CUSTOM_TYPE)) return undefined;
@@ -99,7 +107,7 @@ export function claimCheck(runMessages: AgentMessage[], options: ClaimCheckOptio
 	console.error(`[claim-check] ${firstLine(problem)}`);
 	return createCustomMessage(
 		CLAIM_CHECK_CUSTOM_TYPE,
-		`[System: harness check of your last reply against this turn's tool results]\n${problem}`,
+		`[System: harness check of your last reply against this turn's tool results]\n${problem}\n\n${FINAL_REPLY_NOTE}`,
 		true,
 		undefined,
 		new Date().toISOString(),

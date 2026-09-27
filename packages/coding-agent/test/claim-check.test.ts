@@ -1,6 +1,6 @@
 import type { AgentMessage } from "theoses-agent-core";
 import { describe, expect, it } from "vitest";
-import { CLAIM_CHECK_CUSTOM_TYPE, claimCheck, findClaimProblem } from "../src/core/claim-check.ts";
+import { CLAIM_CHECK_CUSTOM_TYPE, claimCheck, FINAL_REPLY_NOTE, findClaimProblem } from "../src/core/claim-check.ts";
 
 let nextId = 0;
 
@@ -157,6 +157,8 @@ describe("claimCheck", () => {
 		const run = [user("delete the old backup file"), reply("Done.")];
 		const first = claimCheck(run);
 		expect(first).toMatchObject({ role: "custom", customType: CLAIM_CHECK_CUSTOM_TYPE });
+		// #389: the corrected reply replaces this one in Telegram, so it must be the full answer.
+		expect(first?.content).toContain(FINAL_REPLY_NOTE);
 		expect(claimCheck([...run, first as AgentMessage, reply("Done.")])).toBeUndefined();
 	});
 });
