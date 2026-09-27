@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.92] - 2026-09-27
 
 - feat: `beforeStop` loop option (also on `Agent`). Called when the agent would stop, after follow-up messages are exhausted, with every message the run produced; messages it returns are injected and the run continues.

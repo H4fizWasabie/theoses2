@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+- fix: the Fireworks default model is now `accounts/fireworks/models/glm-5p3`. Fireworks removed the previous default `kimi-k2p6`, and 1.0.92 silently switched to `kimi-k3` (about 3x the price) without a changelog entry.
+
 ## [1.0.92] - 2026-09-27
 
 - change: memory consolidation no longer asks Jev to classify every new memory edge. The call ran in shadow mode (its answer was logged to `edge-relation-shadow-log.jsonl` and discarded) and made up about half of all Jev calls. Removes `askJevChoice`, `EDGE_RELATION_DESCRIPTIONS` and the `THEOSES_EDGE_RELATION_SHADOW_LOG` log.
