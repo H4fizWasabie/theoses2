@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.93] - 2026-09-27
 
 - fix: the Fireworks default model is now `accounts/fireworks/models/glm-5p3`. Fireworks removed the previous default `kimi-k2p6`, and 1.0.92 silently switched to `kimi-k3` (about 3x the price) without a changelog entry.
 - fix: background sub-agents (reviewer, explorer, researcher) now count cached input toward `maxInputTokens` and the reported `inputTokens` (#390). Before, only uncached input counted, so the caps barely stopped anything and `review-log.jsonl` showed `inputTokens: 18` for a full review.
