@@ -48,6 +48,8 @@ describe("Fireworks models", () => {
 		expect(fast.api).toBe("anthropic-messages");
 		expect(base.baseUrl).toBe("https://api.fireworks.ai/inference");
 		expect(fast.baseUrl).toBe(base.baseUrl);
+		expect(fast.compat).toEqual(base.compat);
+		expect(fast.thinkingLevelMap).toEqual(base.thinkingLevelMap);
 	});
 
 	it.each(["accounts/fireworks/models/kimi-k3", "accounts/fireworks/routers/kimi-k3-fast"] as const)(
@@ -168,7 +170,7 @@ function createFireworksModel(
 ): Model<"anthropic-messages"> {
 	return {
 		id: "accounts/fireworks/models/glm-5p3",
-		name: "Kimi K2.6",
+		name: "GLM 5.3",
 		api: "anthropic-messages",
 		provider: "fireworks",
 		baseUrl: "http://127.0.0.1:0", // overridden by captureAnthropicRequest
