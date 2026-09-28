@@ -3,6 +3,7 @@
  * passed, and what they printed. Shared by the stop-time checks (claim-check.ts, task-plan.ts) so they
  * agree on what counts as a file change and what counts as a verification command.
  */
+import { isAbsolute, join } from "node:path";
 import type { AgentMessage } from "theoses-agent-core";
 import type { ToolCall, ToolResultMessage } from "theoses-ai";
 
@@ -251,22 +252,44 @@ export interface CommandEffect {
 	readOnly: boolean;
 	/** Changes files outside scratch space. */
 	changesFiles: boolean;
-	/** Target paths that could be read off the command (relative ones are relative to its cwd). */
+	/** Target paths that could be read off the command, after any `cd` (relative ones are relative to its cwd). */
 	paths: string[];
+	/** Directories the command `cd`s into before changing files, so an untraced change still has a location. */
+	dirs: string[];
 	/** Changes files in a way whose targets cannot be read off the command (a script, patch, git apply). */
 	unknownChange: boolean;
 }
 
 export function commandEffect(command: string): CommandEffect {
 	const { lines, heredocBodies } = commandLines(command);
-	const effects = lines.flatMap(splitSegments).map((s) => segmentEffect(s, `${command}\n${heredocBodies}`));
-	const paths = [...new Set(effects.flatMap((e) => e.paths))];
+	const context = `${command}\n${heredocBodies}`;
+	const paths = new Set<string>();
+	const dirs = new Set<string>();
+	let readOnly = true;
+	let unknownChange = false;
+	let dir: string | undefined;
+	for (const segment of lines.flatMap(splitSegments)) {
+		const effect = segmentEffect(segment, context);
+		const [name, target] = tokenize(segment);
+		if (name === "cd" && target && target !== "-") dir = inDir(dir, target);
+		const changed = effect.paths.map((p) => inDir(dir, p)).filter((p) => !isScratchPath(p, command));
+		for (const p of changed) paths.add(p);
+		if (dir && !isScratchPath(dir, command) && (changed.length > 0 || effect.unknownChange)) dirs.add(dir);
+		readOnly &&= effect.readOnly;
+		unknownChange ||= effect.unknownChange;
+	}
 	return {
-		readOnly: effects.every((e) => e.readOnly),
-		changesFiles: paths.length > 0 || effects.some((e) => e.unknownChange),
-		paths,
-		unknownChange: effects.some((e) => e.unknownChange),
+		readOnly,
+		changesFiles: paths.size > 0 || unknownChange,
+		paths: [...paths],
+		dirs: [...dirs],
+		unknownChange,
 	};
+}
+
+/** `path` as seen after `cd dir`; absolute, home and variable paths stay as written. */
+function inDir(dir: string | undefined, path: string): string {
+	return dir && !isAbsolute(path) && !path.startsWith("~") && !path.startsWith("$") ? join(dir, path) : path;
 }
 
 /** True when this tool run changed (or tried to change) files. A failed edit/write changed nothing. */

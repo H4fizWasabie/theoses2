@@ -54,6 +54,8 @@ export interface ReviewInput {
 	plan: TaskPlan;
 	diff: string;
 	verifyOutput: string | undefined;
+	/** Directories outside cwd that the change touched. */
+	locations: string[];
 	cwd: string;
 	modelRuntime: ModelRuntime;
 	providerHooks?: ProviderHooks;
@@ -78,7 +80,12 @@ Your final message must be only this JSON, no prose:
 {"verdict": "ok" | "gaps", "findings": [{"severity": "must-fix" | "nit", "file": "path", "issue": "what is missing or wrong", "evidence": "file:line or output"}]}`;
 
 /** Exported for tests. */
-export function buildPrompt(plan: TaskPlan, diff: string, verifyOutput: string | undefined): string {
+export function buildPrompt(
+	plan: TaskPlan,
+	diff: string,
+	verifyOutput: string | undefined,
+	locations: string[] = [],
+): string {
 	const cappedDiff =
 		diff.length > MAX_DIFF_CHARS
 			? `${diff.slice(0, MAX_DIFF_CHARS)}\n[diff truncated at ${MAX_DIFF_CHARS} chars; read the files for the rest]`
@@ -92,6 +99,13 @@ export function buildPrompt(plan: TaskPlan, diff: string, verifyOutput: string |
 		`<request>\n${plan.request || "(not recorded)"}\n</request>`,
 		`<plan>\n${formatPlan(plan)}\n</plan>`,
 		...(deferrals.length > 0 ? [`<accepted_deferrals>\n${deferrals.join("\n")}\n</accepted_deferrals>`] : []),
+		// 2026-09-28: a change in /home/theoses/icm-workspaces/... was reviewed from the session cwd (the
+		// Theoses release dir); the reviewer searched there, found nothing, and flagged the work as missing.
+		...(locations.length > 0
+			? [
+					`<change_locations>\nThe change was made in these directories, outside the directory your tools start in. Pass them as absolute paths to read, grep, find and ls:\n${locations.map((l) => `- ${l}`).join("\n")}\n</change_locations>`,
+				]
+			: []),
 		`<diff>\n${cappedDiff || "(no diff captured)"}\n</diff>`,
 		`<verify_output>\n${verifyOutput ?? "(no passing check output captured)"}\n</verify_output>`,
 	].join("\n\n");
@@ -152,7 +166,7 @@ async function reviewOnce(input: ReviewInput): Promise<ReviewOutcome> {
 		signal: input.signal,
 		providerHooks: input.providerHooks,
 	});
-	const stats = await handle.prompt(buildPrompt(input.plan, input.diff, input.verifyOutput));
+	const stats = await handle.prompt(buildPrompt(input.plan, input.diff, input.verifyOutput, input.locations));
 	const messages = handle.agent.state.messages;
 	const parsed = parseReview(lastAssistantText(messages));
 	if (!parsed) {
