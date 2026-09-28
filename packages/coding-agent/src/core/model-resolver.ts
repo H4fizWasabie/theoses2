@@ -41,7 +41,7 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	together: "moonshotai/Kimi-K2.6",
 	baseten: "zai-org/GLM-5.2",
 	opencode: "kimi-k2.6",
-	"opencode-go": "kimi-k2.6",
+	"opencode-go": "kimi-k3",
 	"kimi-coding": "kimi-for-coding",
 	"cloudflare-workers-ai": "@cf/moonshotai/kimi-k2.6",
 	"cloudflare-ai-gateway": "gpt-5.5",
