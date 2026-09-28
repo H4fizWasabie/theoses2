@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: the `read` tool description now says to read without offset/limit first and continue from the offset a truncated result gives, instead of "use offset/limit for large files". Models guessed ranges up front: of GPT-6 Luna's 36 ranged reads today, about 8 split small files (a 71-line AGENTS.md read in three overlapping slices) and about 12 were whole-file reads with a redundant limit.
+
 ## [1.0.97] - 2026-09-28
 
 - feat: the system prompt's efficiency guidance now asks the model to plan the next step's tool calls and send independent reads/greps/commands together, and to read files whole instead of in small offset/limit slices. GPT-6 Luna was splitting work into runs of up to 7 single-call requests and reading 43% of files in 30-280 line slices; GLM batched only 7% of requests.
