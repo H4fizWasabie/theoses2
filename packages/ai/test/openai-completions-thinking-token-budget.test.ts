@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { openRouterReasoningBudget } from "../src/api/openai-completions.ts";
 import { streamSimple } from "../src/compat.ts";
 import type { Model, SimpleStreamOptions, ThinkingBudgets } from "../src/types.ts";
 
@@ -247,6 +248,18 @@ describe("openai-completions thinking token budget", () => {
 		it("omits max_tokens when reasoning is off", async () => {
 			const params = await capture(openRouterModel(), { reasoning: undefined });
 			expect(params.reasoning).toEqual({ effort: "none" });
+		});
+
+		it.each(["xhigh", "max"] as const)("sends effort %s instead of the high cap", async (level) => {
+			const model = { ...openRouterModel(), thinkingLevelMap: { xhigh: "xhigh", max: "max" } };
+			const params = await capture(model, { reasoning: level, thinkingBudgets: { high: 10000 } });
+			expect(params.reasoning).toEqual({ effort: level });
+			expect(openRouterReasoningBudget(model, level, { high: 10000 })).toBeUndefined();
+		});
+
+		it("keeps the high cap for max on a model without max support (clamped to high)", async () => {
+			const params = await capture(openRouterModel(), { reasoning: "max", thinkingBudgets: { high: 10000 } });
+			expect(params.reasoning).toEqual({ max_tokens: 10000 });
 		});
 	});
 });
