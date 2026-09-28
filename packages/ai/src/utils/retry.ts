@@ -4,7 +4,7 @@ function buildProviderErrorPattern(patterns: readonly string[]): RegExp {
 	return new RegExp(patterns.join("|"), "i");
 }
 
-const NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN = buildProviderErrorPattern([
+const NON_RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	// OpenCode Go/free-tier limits returned as 429 JSON error types by OpenCode's
 	// Zen API. These are subscription/account limits, not transient throttles.
 	"GoUsageLimitError",
@@ -21,6 +21,11 @@ const NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN = buildProviderErrorPattern([
 	"out of budget",
 	"quota exceeded",
 	"billing",
+
+	// The provider rejected the request body itself (HTTP 400). Resending the same
+	// body fails the same way, even when OpenRouter wraps it in the otherwise
+	// retryable "Provider returned error" text below.
+	"invalid_request_error",
 ]);
 
 const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
@@ -317,6 +322,6 @@ export function isRetryableAssistantError(message: AssistantMessage): boolean {
 
 /** Shared classification for raw HTTP/transport failures and failed assistant messages. */
 export function isRetryableProviderError(errorMessage: string, status?: number): boolean {
-	if (NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN.test(errorMessage)) return false;
+	if (NON_RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage)) return false;
 	return RETRYABLE_PROVIDER_ERROR_PATTERN.test(`${status ?? ""} ${errorMessage}`);
 }

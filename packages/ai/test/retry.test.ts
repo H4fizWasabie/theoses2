@@ -102,6 +102,12 @@ describe("provider retry classification", () => {
 		).toBe(false);
 	});
 
+	it("keeps OpenRouter-wrapped invalid request errors non-retryable", () => {
+		const errorMessage =
+			'400: {"message":"Provider returned error","code":400,"metadata":{"raw":"{\\"error\\":{\\"type\\":\\"invalid_request_error\\",\\"message\\":\\"The request is invalid: the request was rejected by an internal MaaS component.\\"}}"}}';
+		expect(isRetryableAssistantError(fauxAssistantMessage("", { stopReason: "error", errorMessage }))).toBe(false);
+	});
+
 	it("classifies assistant error messages", () => {
 		expect(
 			isRetryableAssistantError(fauxAssistantMessage("", { stopReason: "error", errorMessage: "overloaded_error" })),
