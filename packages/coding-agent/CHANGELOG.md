@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.94] - 2026-09-28
 
 - fix: edit tool errors now say what to do next. "Could not find the exact text" without a closest-match snippet tells the model to re-read the file instead of re-guessing, and "Found N occurrences" lists each occurrence's start line so the model knows which neighbouring lines to add. The 2026-09-28 eval digest showed edit failing 16% of calls, with 3 loops of 3+ failed edits on the same file.
 - fix: Plan Review now finds changes made outside the session's working directory. The guard records every directory outside cwd that a plan changed (edited files, and the `cd` target of shell commands that change files), shows those files by absolute path in the diff, and gives the reviewer a `<change_locations>` block to search. `commandEffect` also reads paths after `cd dir` relative to that directory. On 2026-09-27/28 a reel pipeline in `/home/theoses/icm-workspaces/labnotebook-reels` was reviewed from `/opt/theoses2-releases/current`; the reviewer searched the release checkout, found no files, and twice flagged finished work as missing.

@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.94] - 2026-09-28
 
 - fix: provider errors of type `invalid_request_error` (HTTP 400, the provider rejected the request body) are no longer retried. OpenRouter wraps them in "Provider returned error", which matched the retryable pattern, so the same rejected request was resent until retries ran out (seen 2026-09-25: 12 consecutive 400s from z-ai/glm-5.3-flash, "rejected by an internal MaaS component"). They now fail on the first attempt, like quota/billing errors.
 
