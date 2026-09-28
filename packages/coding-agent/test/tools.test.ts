@@ -296,6 +296,18 @@ describe("Coding Agent Tools", () => {
 			).rejects.toThrow(/Could not find the exact text/);
 		});
 
+		it("should tell the model to re-read when no similar block exists", async () => {
+			const testFile = join(testDir, "edit-test.txt");
+			writeFileSync(testFile, "Hello, world!");
+
+			await expect(
+				editTool.execute("test-call-6a", {
+					path: testFile,
+					edits: [{ oldText: "nothing like this line", newText: "testing" }],
+				}),
+			).rejects.toThrow(/read the file again before retrying/);
+		});
+
 		it("should include ENOENT when the edit target does not exist", async () => {
 			const missingFile = join(testDir, "missing.txt");
 
@@ -318,6 +330,18 @@ describe("Coding Agent Tools", () => {
 					edits: [{ oldText: "foo", newText: "bar" }],
 				}),
 			).rejects.toThrow(/Found 3 occurrences/);
+		});
+
+		it("should list the start line of each duplicate occurrence", async () => {
+			const testFile = join(testDir, "edit-test.txt");
+			writeFileSync(testFile, "a\nfoo\nb\n\nfoo\nfoo");
+
+			await expect(
+				editTool.execute("test-call-7a", {
+					path: testFile,
+					edits: [{ oldText: "foo", newText: "bar" }],
+				}),
+			).rejects.toThrow(/Found 3 occurrences .*\(starting at lines 2, 5, 6\)/);
 		});
 
 		it("should replace multiple disjoint regions in one call", async () => {

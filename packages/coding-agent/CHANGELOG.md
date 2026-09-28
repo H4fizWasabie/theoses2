@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: edit tool errors now say what to do next. "Could not find the exact text" without a closest-match snippet tells the model to re-read the file instead of re-guessing, and "Found N occurrences" lists each occurrence's start line so the model knows which neighbouring lines to add. The 2026-09-28 eval digest showed edit failing 16% of calls, with 3 loops of 3+ failed edits on the same file.
+
 ## [1.0.93] - 2026-09-27
 
 - fix: the Fireworks default model is now `accounts/fireworks/models/glm-5p3`. Fireworks removed the previous default `kimi-k2p6`, and 1.0.92 silently switched to `kimi-k3` (about 3x the price) without a changelog entry.
