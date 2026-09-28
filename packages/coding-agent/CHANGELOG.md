@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- feat: `createChannelSessions` takes `customTools`, registered on every session it opens, so a channel can add its own tools (Telegram's `send_file`).
 - feat: the `read` tool description now says to read without offset/limit first and continue from the offset a truncated result gives, instead of "use offset/limit for large files". Models guessed ranges up front: of GPT-6 Luna's 36 ranged reads today, about 8 split small files (a 71-line AGENTS.md read in three overlapping slices) and about 12 were whole-file reads with a redundant limit.
 
 ## [1.0.97] - 2026-09-28
