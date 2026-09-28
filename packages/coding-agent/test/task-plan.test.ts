@@ -112,7 +112,18 @@ describe("commandEffect", () => {
 
 	it("flags a python heredoc that writes files as an untraced change", () => {
 		const effect = commandEffect("python3 - <<'EOF'\nopen('run.sh','w').write(s)\nEOF");
-		expect(effect).toMatchObject({ changesFiles: true, unknownChange: true, paths: [] });
+		expect(effect).toMatchObject({ changesFiles: true, unknownChange: true, paths: [], dirs: [] });
+	});
+
+	it("reads paths after a cd relative to it, and records where an untraced change ran", () => {
+		expect(commandEffect("cd /srv/app && sed -i 's/a/b/' tools/run.sh")).toMatchObject({
+			paths: ["/srv/app/tools/run.sh"],
+			dirs: ["/srv/app"],
+		});
+		const untraced = commandEffect("cd /srv/reels && python3 - <<'EOF'\nopen('addvoice.sh','w').write(s)\nEOF");
+		expect(untraced).toMatchObject({ unknownChange: true, paths: [], dirs: ["/srv/reels"] });
+		expect(commandEffect("cd /srv/app && git status")).toMatchObject({ readOnly: true, dirs: [] });
+		expect(commandEffect("cd /tmp/x && echo hi > out.txt")).toMatchObject({ changesFiles: false, dirs: [] });
 	});
 });
 
@@ -278,6 +289,13 @@ describe("buildPrompt", () => {
 		);
 		expect(buildPrompt(plan, "", undefined)).not.toContain("<accepted_deferrals>");
 	});
+
+	it("points the reviewer at directories outside its starting directory", () => {
+		const prompt = buildPrompt(created(), "", undefined, ["/home/theoses/icm-workspaces/labnotebook-reels"]);
+		expect(prompt).toContain("<change_locations>");
+		expect(prompt).toContain("- /home/theoses/icm-workspaces/labnotebook-reels");
+		expect(buildPrompt(created(), "", undefined)).not.toContain("<change_locations>");
+	});
 });
 
 describe("parseReview", () => {
@@ -299,7 +317,7 @@ describe("TaskPlanGuard", () => {
 	let dir: string;
 	let plan: TaskPlan | undefined;
 	let run: AgentMessage[];
-	let reviews: { diff: string; verifyOutput: string | undefined }[];
+	let reviews: { diff: string; verifyOutput: string | undefined; locations: string[] }[];
 	let reviewResult: ReviewOutcome | { skipped: string };
 
 	function guard(enabled = true): TaskPlanGuard {
@@ -312,7 +330,7 @@ describe("TaskPlanGuard", () => {
 			enabled: () => enabled,
 			runMessages: () => run,
 			review: async (input) => {
-				reviews.push({ diff: input.diff, verifyOutput: input.verifyOutput });
+				reviews.push({ diff: input.diff, verifyOutput: input.verifyOutput, locations: input.locations });
 				return reviewResult;
 			},
 			generatePatch: generateUnifiedPatch,
@@ -408,6 +426,36 @@ describe("TaskPlanGuard", () => {
 		expect(reviews).toHaveLength(1);
 		expect(g.planStatus()).toContain("reviewed by luna: 1 gap(s) sent back");
 		expect(readFileSync(file, "utf8")).toBe("gate 1\n");
+	});
+
+	it("replays 2026-09-28: a change outside cwd reaches the reviewer with absolute paths and its location", async () => {
+		const workspace = mkdtempSync(join(tmpdir(), "task-plan-workspace-"));
+		try {
+			const script = join(workspace, "build.sh");
+			writeFileSync(script, "drawtext\n");
+			const g = guard();
+			plan = created();
+			g.startOperation();
+			g.beforeToolCall("edit", { path: script });
+			writeFileSync(script, "zoompan\n");
+			g.beforeToolCall("bash", { command: `cd ${workspace} && python3 - <<'EOF'\nopen('addvoice.sh','w')\nEOF` });
+			g.beforeToolCall("edit", { path: "run.sh" });
+			plan = { ...plan, items: plan.items.map((i) => ({ ...i, status: "done" as const })) };
+			run = [
+				user("go"),
+				...tool("task_plan", {}, "plan"),
+				...tool("edit", { path: script }, "ok"),
+				...tool("bash", { command: `bash ${script}` }, "built"),
+				reply("Done."),
+			];
+
+			await g.beforeStop();
+			expect(reviews[0].locations).toEqual([workspace]);
+			expect(reviews[0].diff).toContain(script);
+			expect(reviews[0].diff).not.toContain("../");
+		} finally {
+			rmSync(workspace, { recursive: true, force: true });
+		}
 	});
 
 	it("records a skipped review in the plan status", async () => {

@@ -8,7 +8,7 @@
  *   - planStatus: the one-line plan status the channel appends to the final reply.
  */
 import { readFileSync, statSync } from "node:fs";
-import { relative } from "node:path";
+import { dirname, isAbsolute, relative } from "node:path";
 import type { AgentMessage, BeforeToolCallResult } from "theoses-agent-core";
 import { claimCheck, FINAL_REPLY_NOTE } from "./claim-check.ts";
 import { createCustomMessage } from "./messages.ts";
@@ -41,6 +41,7 @@ export interface TaskPlanGuardDeps {
 		plan: TaskPlan;
 		diff: string;
 		verifyOutput: string | undefined;
+		locations: string[];
 	}) => Promise<ReviewOutcome | { skipped: string }>;
 	generatePatch: (path: string, before: string, after: string) => string;
 }
@@ -59,6 +60,8 @@ export class TaskPlanGuard {
 	// ponytail: snapshots live in memory, so a restart mid-plan loses the "before" side and the reviewer sees files as new; persist them if that matters.
 	private snapshots = new Map<string, string | null>();
 	private untracedCommands: string[] = [];
+	/** Directories outside cwd that this plan changed, so the reviewer looks there (2026-09-28). */
+	private outsideDirs = new Set<string>();
 	private snapshotPlan: string | undefined;
 	private planAtOperationStart: string | undefined;
 	private pendingReviewOutcome: { goal: string; items: number; mustFix: number } | undefined;
@@ -71,6 +74,7 @@ export class TaskPlanGuard {
 	beforeToolCall(toolName: string, args: Record<string, unknown>): BeforeToolCallResult | undefined {
 		if (!this.deps.enabled()) return undefined;
 		let paths: string[];
+		let dirs: string[] = [];
 		let untraced: string | undefined;
 		if (FILE_TOOLS.has(toolName) && typeof args.path === "string") {
 			paths = [args.path];
@@ -78,6 +82,7 @@ export class TaskPlanGuard {
 			const effect = commandEffect(args.command);
 			if (!effect.changesFiles) return undefined;
 			paths = effect.paths;
+			dirs = effect.dirs;
 			if (effect.unknownChange) untraced = args.command;
 		} else {
 			return undefined;
@@ -96,10 +101,16 @@ export class TaskPlanGuard {
 			this.snapshotPlan = plan.createdAt;
 			this.snapshots = new Map();
 			this.untracedCommands = [];
+			this.outsideDirs = new Set();
 		}
 		for (const path of paths) {
 			const absolute = resolveToCwd(path, this.deps.cwd);
 			if (!this.snapshots.has(absolute)) this.snapshots.set(absolute, readSnapshot(absolute));
+			if (this.isOutside(absolute)) this.outsideDirs.add(dirname(absolute));
+		}
+		for (const dir of dirs) {
+			const absolute = resolveToCwd(dir, this.deps.cwd);
+			if (this.isOutside(absolute)) this.outsideDirs.add(absolute);
 		}
 		if (untraced) this.untracedCommands.push(firstLine(untraced, 300));
 		return undefined;
@@ -111,7 +122,7 @@ export class TaskPlanGuard {
 		for (const [path, before] of this.snapshots) {
 			const after = readSnapshot(path);
 			if (after === before) continue;
-			const shown = relative(this.deps.cwd, path) || path;
+			const shown = this.isOutside(path) ? path : relative(this.deps.cwd, path) || path;
 			parts.push(this.deps.generatePatch(shown, before ?? "", after ?? ""));
 		}
 		if (this.untracedCommands.length > 0) {
@@ -120,6 +131,16 @@ export class TaskPlanGuard {
 			);
 		}
 		return parts.join("\n");
+	}
+
+	/** Directories outside cwd this plan changed, sorted. */
+	locations(): string[] {
+		return [...this.outsideDirs].sort();
+	}
+
+	private isOutside(path: string): boolean {
+		const rel = relative(this.deps.cwd, path);
+		return rel.startsWith("..") || isAbsolute(rel);
 	}
 
 	/** Marks the start of a user operation, so planStatus only reports plans this operation touched. */
@@ -163,7 +184,12 @@ export class TaskPlanGuard {
 
 		const reviewedThisRun = run.some((m) => m.role === "custom" && m.customType === PLAN_REVIEW_CUSTOM_TYPE);
 		if (!reviewedThisRun && runTouchedPlan(run) && needsReview(plan)) {
-			const outcome = await this.deps.review({ plan, diff: this.diff(), verifyOutput: verifyOutput(run) });
+			const outcome = await this.deps.review({
+				plan,
+				diff: this.diff(),
+				verifyOutput: verifyOutput(run),
+				locations: this.locations(),
+			});
 			if ("skipped" in outcome) {
 				this.deps.setPlan({ ...plan, review: { skipped: outcome.skipped } });
 				logReview({ phase: "skipped", goal: plan.goal, kind: plan.kind, reason: outcome.skipped });
