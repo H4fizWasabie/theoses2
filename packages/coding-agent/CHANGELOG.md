@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.94] - 2026-09-28
 
 - fix: edit tool errors now say what to do next. "Could not find the exact text" without a closest-match snippet tells the model to re-read the file instead of re-guessing, and "Found N occurrences" lists each occurrence's start line so the model knows which neighbouring lines to add. The 2026-09-28 eval digest showed edit failing 16% of calls, with 3 loops of 3+ failed edits on the same file.
