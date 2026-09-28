@@ -6,6 +6,8 @@
 
 - fix: Plan Review no longer throws away its work when it runs out of turns before giving a verdict. `reviewOnce` now forces exactly one more turn, with no tools, asking the reviewer to commit to a verdict from what it already read, instead of throwing "budget ran out before a verdict" straight away. On 2026-09-28 13:06 KUL both review attempts for a 6-item daily-ai-news-fb change used all 8 turns calling tools and failed this way; the change shipped unreviewed. 3 of the 9 review attempts since 2026-09-27 failed the same way, logged as `phase: "skipped"` in `review-log.jsonl`.
 
+- fix: `taskPlan: { enabled: false }` now also removes `task_plan` from the active tool set, not just the stop-guard gated on it. Previously the tool stayed registered and in the system prompt, so the model kept making `task_plan` calls that nothing enforced (its description says the harness won't let the run end while items are open, which was no longer true with planning disabled). The claim check in `TaskPlanGuard.beforeStop` still runs unconditionally before the enabled check, so basic "does the reply match what happened" enforcement is unaffected.
+
 ## [1.0.95] - 2026-09-28
 
 - feat: `SessionManager.listAll` takes an optional channel filter. When given, a session whose header channel doesn't match is dropped right after the header is read, without reading the rest of the file — lets callers like the dashboard skip huge session files (e.g. Telegram's) that they were going to filter out anyway.

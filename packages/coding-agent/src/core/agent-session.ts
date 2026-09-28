@@ -3011,7 +3011,14 @@ export class AgentSession {
 			}
 		}
 
-		this.setActiveToolsByName([...new Set(nextActiveToolNames)]);
+		// taskPlan.enabled: false must hide the task_plan tool itself, not just the stop-guard
+		// that used to be the only thing gated on it (the model kept "planning" into a tool
+		// nothing enforced). Filtered here, after allowedToolNames/activeToolNames are merged,
+		// so a caller-supplied list (e.g. --tools) can't push it back in.
+		const activeToolNames = this.settingsManager.getTaskPlanEnabled()
+			? nextActiveToolNames
+			: nextActiveToolNames.filter((name) => name !== "task_plan");
+		this.setActiveToolsByName([...new Set(activeToolNames)]);
 	}
 
 	private _buildRuntime(options: {
