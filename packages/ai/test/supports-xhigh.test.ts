@@ -140,6 +140,16 @@ describe("getSupportedThinkingLevels", () => {
 		expect(getSupportedThinkingLevels(model!)).not.toContain("xhigh");
 	});
 
+	it.each(["openai/gpt-6-luna", "openai/gpt-6-sol", "openai/gpt-6-astra"] as const)(
+		"includes xhigh and max for OpenRouter %s, so max is not clamped to high",
+		(modelId) => {
+			const model = getModel("openrouter", modelId);
+			expect(model).toBeDefined();
+			expect(getSupportedThinkingLevels(model!)).toContain("xhigh");
+			expect(getSupportedThinkingLevels(model!)).toContain("max");
+		},
+	);
+
 	it("includes xhigh and max for Bedrock Claude Opus 5", () => {
 		const model = getModel("amazon-bedrock", "global.anthropic.claude-opus-5");
 		expect(model).toBeDefined();

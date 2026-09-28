@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: GPT-6 models (Luna, Sol, Astra) now expose the `xhigh` and `max` thinking levels. `generate-models.ts` only granted them to `gpt-5.x`, so GPT-6 had no `thinkingLevelMap` entry for either and `clampThinkingLevel` silently sent `max` as `high`. OpenRouter lists `max` and `xhigh` in every GPT-6 model's `supported_efforts`.
+
 ## [1.0.98] - 2026-09-28
 
 ## [1.0.97] - 2026-09-28
