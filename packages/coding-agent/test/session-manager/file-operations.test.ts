@@ -254,8 +254,8 @@ describe("SessionManager custom flat session directory", () => {
 		rmSync(tempDir, { recursive: true, force: true });
 	});
 
-	function createPersistedSession(cwd: string, label: string): string {
-		const session = SessionManager.create(cwd, tempDir);
+	function createPersistedSession(cwd: string, label: string, channel?: string): string {
+		const session = SessionManager.create(cwd, tempDir, channel ? { channel } : undefined);
 		session.appendMessage({ role: "user", content: label, timestamp: Date.now() });
 		session.appendMessage({
 			role: "assistant",
@@ -294,6 +294,27 @@ describe("SessionManager custom flat session directory", () => {
 
 		const continuedA = SessionManager.continueRecent(projectA, tempDir);
 		expect(continuedA.getSessionFile()).toBe(sessionA);
+	});
+
+	it("filters listAll by channel without breaking the unfiltered case", async () => {
+		const dashboardSession = createPersistedSession(projectA, "from dashboard", "dashboard");
+		const telegramSession = createPersistedSession(projectB, "from telegram", "telegram");
+
+		const all = await SessionManager.listAll(tempDir);
+		expect(new Set(all.map((session) => session.path))).toEqual(new Set([dashboardSession, telegramSession]));
+
+		const dashboardOnly = await SessionManager.listAll(tempDir, undefined, "dashboard");
+		expect(dashboardOnly.map((session) => session.path)).toEqual([dashboardSession]);
+	});
+
+	it("stops reading a filtered-out session file after its header", async () => {
+		const telegramSession = createPersistedSession(projectA, "from telegram", "telegram");
+		// Simulate a huge history: if buildSessionInfo reads past the header, appending garbage
+		// after a truncated/invalid line would make JSON parsing blow up or slow the test down.
+		appendFileSync(telegramSession, `${"x".repeat(1024 * 1024)}\n`);
+
+		const dashboardOnly = await SessionManager.listAll(tempDir, undefined, "dashboard");
+		expect(dashboardOnly).toEqual([]);
 	});
 });
 
