@@ -4,6 +4,8 @@
 
 - fix: the built-in default model for `opencode-go` is now `kimi-k3`. models.dev dropped `kimi-k2.6` from opencode-go, so the old default pointed at a model that no longer exists (caught by the "built-in defaults exist in generated provider catalogs" test once CI regenerated the catalog).
 
+- fix: Plan Review no longer throws away its work when it runs out of turns before giving a verdict. `reviewOnce` now forces exactly one more turn, with no tools, asking the reviewer to commit to a verdict from what it already read, instead of throwing "budget ran out before a verdict" straight away. On 2026-09-28 13:06 KUL both review attempts for a 6-item daily-ai-news-fb change used all 8 turns calling tools and failed this way; the change shipped unreviewed. 3 of the 9 review attempts since 2026-09-27 failed the same way, logged as `phase: "skipped"` in `review-log.jsonl`.
+
 ## [1.0.95] - 2026-09-28
 
 - feat: `SessionManager.listAll` takes an optional channel filter. When given, a session whose header channel doesn't match is dropped right after the header is read, without reading the rest of the file — lets callers like the dashboard skip huge session files (e.g. Telegram's) that they were going to filter out anyway.
