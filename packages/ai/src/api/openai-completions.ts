@@ -947,10 +947,12 @@ function buildParams(
 			// implies (#352 incident), and reflects the minimal/low/medium/high
 			// settings.thinkingBudgets override when the caller sets one, so it's adjustable
 			// without a code change. Every OpenRouter-routed reasoning model gets this ceiling,
-			// not just the one that triggered it. Falls back to effort only if no budget resolves.
+			// not just the one that triggered it. Falls back to effort when no budget resolves, and
+			// always for xhigh/max (see openRouterThinkingBudget).
+			const openRouterBudget = openRouterThinkingBudget(model, options, params);
 			openRouterParams.reasoning =
-				thinkingBudget !== undefined
-					? { max_tokens: thinkingBudget }
+				openRouterBudget !== undefined
+					? { max_tokens: openRouterBudget }
 					: { effort: model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort };
 		} else if (model.thinkingLevelMap?.off !== null) {
 			openRouterParams.reasoning = { effort: model.thinkingLevelMap?.off ?? "none" };
@@ -1041,7 +1043,22 @@ export function openRouterReasoningBudget(
 	if (getCompat(completionsModel).thinkingFormat !== "openrouter") return undefined;
 	const reasoningEffort = clampThinkingLevel(completionsModel, level);
 	if (reasoningEffort === "off") return undefined;
-	return resolveClampedThinkingBudget(completionsModel, { reasoningEffort, thinkingBudgets }, {});
+	return openRouterThinkingBudget(completionsModel, { reasoningEffort, thinkingBudgets }, {});
+}
+
+/**
+ * The `reasoning.max_tokens` cap for an OpenRouter-format request, or undefined to send the effort label instead.
+ * xhigh and max have no budget of their own (thinkingBudgetForLevel gives them high's), so capping them would
+ * send the high cap and silently drop the level the user picked: gpt-6-luna at max ran with ~500 reasoning
+ * tokens under `max_tokens`, about half what `effort: "max"` gets. Picking xhigh/max opts out of the cap.
+ */
+function openRouterThinkingBudget(
+	model: Model<"openai-completions">,
+	options: OpenAICompletionsOptions | undefined,
+	params: { max_tokens?: number | null; max_completion_tokens?: number | null },
+): number | undefined {
+	if (options?.reasoningEffort === "xhigh" || options?.reasoningEffort === "max") return undefined;
+	return resolveClampedThinkingBudget(model, options, params);
 }
 
 function resolveClampedThinkingBudget(
