@@ -226,4 +226,75 @@ describe("defaultTools setting", () => {
 		expect(session.getActiveToolNames()).toContain("explore");
 		session.dispose();
 	});
+
+	// Issue #403 (coding-agent): taskPlan.enabled: false disabled the TaskPlanGuard check but
+	// left `task_plan` itself in the active tool list, so the model kept making bookkeeping
+	// calls that nothing enforced. The tool must be filtered out of both the built-in default
+	// active set and an explicit `tools` list when planning is disabled.
+	it("excludes task_plan from the active tools when taskPlan.enabled is false", async () => {
+		const settingsManager = SettingsManager.inMemory({ taskPlan: { enabled: false } });
+		const resourceLoader = new DefaultResourceLoader({
+			cwd: tempDir,
+			agentDir,
+			settingsManager,
+		});
+		await resourceLoader.reload();
+
+		const { session } = await createAgentSession({
+			cwd: tempDir,
+			agentDir,
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			settingsManager,
+			sessionManager: SessionManager.inMemory(tempDir),
+			resourceLoader,
+		});
+
+		expect(session.getActiveToolNames()).not.toContain("task_plan");
+		session.dispose();
+	});
+
+	it("keeps task_plan in the active tools when taskPlan.enabled is true (default)", async () => {
+		const settingsManager = SettingsManager.inMemory({});
+		const resourceLoader = new DefaultResourceLoader({
+			cwd: tempDir,
+			agentDir,
+			settingsManager,
+		});
+		await resourceLoader.reload();
+
+		const { session } = await createAgentSession({
+			cwd: tempDir,
+			agentDir,
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			settingsManager,
+			sessionManager: SessionManager.inMemory(tempDir),
+			resourceLoader,
+		});
+
+		expect(session.getActiveToolNames()).toContain("task_plan");
+		session.dispose();
+	});
+
+	it("filters task_plan from an explicit tools list when taskPlan.enabled is false", async () => {
+		const settingsManager = SettingsManager.inMemory({ taskPlan: { enabled: false } });
+		const resourceLoader = new DefaultResourceLoader({
+			cwd: tempDir,
+			agentDir,
+			settingsManager,
+		});
+		await resourceLoader.reload();
+
+		const { session } = await createAgentSession({
+			cwd: tempDir,
+			agentDir,
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			settingsManager,
+			sessionManager: SessionManager.inMemory(tempDir),
+			resourceLoader,
+			tools: ["read", "task_plan"],
+		});
+
+		expect(session.getActiveToolNames()).not.toContain("task_plan");
+		session.dispose();
+	});
 });
