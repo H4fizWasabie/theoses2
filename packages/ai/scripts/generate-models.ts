@@ -425,7 +425,6 @@ const OPENCODE_OPENAI_COMPLETIONS_LONG_CACHE_RETENTION_UNSUPPORTED_MODELS = new 
 	"opencode:kimi-k2.5",
 	"opencode:kimi-k2.6",
 	"opencode:minimax-m2.7",
-	"opencode-go:kimi-k2.6",
 ]);
 
 // GitHub's "Models with extended capabilities" table lists these Copilot models as supporting
@@ -955,8 +954,8 @@ function applyThinkingLevelMetadata(model: Model<any>): void {
 	if (model.provider === "opencode-go" && model.id === "glm-5.2") {
 		mergeThinkingLevelMap(model, OPENCODE_GO_GLM52_THINKING_LEVEL_MAP);
 	}
-	if (model.provider === "opencode-go" && model.id === "kimi-k2.6") {
-		// OpenCode Go exposes Kimi K2.6 thinking as on/off, not distinct effort tiers.
+	if (model.provider === "opencode" && model.id === "kimi-k2.6") {
+		// OpenCode exposes Kimi K2.6 thinking as on/off, not distinct effort tiers.
 		mergeThinkingLevelMap(model, { minimal: null, low: null, medium: null });
 	}
 	if (model.provider === "opencode" && model.id === "grok-build-0.1") {

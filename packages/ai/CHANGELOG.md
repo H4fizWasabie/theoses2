@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: models.dev dropped `kimi-k2.6` from the `opencode-go` provider (it remains on `opencode` with identical compat). Retargeted the tests that referenced the now-missing `opencode-go/kimi-k2.6` to whichever model actually exercises the behavior under test — `opencode/kimi-k2.6` for generic compat (long-cache-retention omission, thinking on/off levels), `opencode-go/kimi-k3` for `opencode-go`-specific provider behavior (the hardcoded `reasoning` -> `reasoning_content` normalization, `max_tokens` field) — and removed the dead `opencode-go:kimi-k2.6` special cases from `generate-models.ts`.
+
 ## [1.0.95] - 2026-09-28
 
 ## [1.0.94] - 2026-09-28
