@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.95] - 2026-09-28
 
 - fix: the dashboard now lists and opens only dashboard sessions, never Telegram's. `GET /api/sessions` used to scan and JSON-parse every session file across all channels, including Telegram's, before filtering — on the production VPS that meant parsing a 320 MB Telegram log on every login, and the dashboard could open Telegram's 23 MB history as a read-only session. Removed the Telegram-visible-but-read-only UI: the "Telegram sessions are read-only" placeholder/disabled state in the chat box and the `telegram` session badge style.
