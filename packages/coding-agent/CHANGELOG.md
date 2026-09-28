@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.97] - 2026-09-28
 
 - feat: the system prompt's efficiency guidance now asks the model to plan the next step's tool calls and send independent reads/greps/commands together, and to read files whole instead of in small offset/limit slices. GPT-6 Luna was splitting work into runs of up to 7 single-call requests and reading 43% of files in 30-280 line slices; GLM batched only 7% of requests.
