@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: the system prompt's efficiency guidance now asks the model to plan the next step's tool calls and send independent reads/greps/commands together, and to read files whole instead of in small offset/limit slices. GPT-6 Luna was splitting work into runs of up to 7 single-call requests and reading 43% of files in 30-280 line slices; GLM batched only 7% of requests.
+
 ## [1.0.96] - 2026-09-28
 
 - fix: the built-in default model for `opencode-go` is now `kimi-k3`. models.dev dropped `kimi-k2.6` from opencode-go, so the old default pointed at a model that no longer exists (caught by the "built-in defaults exist in generated provider catalogs" test once CI regenerated the catalog).

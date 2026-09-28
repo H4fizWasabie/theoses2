@@ -54,7 +54,7 @@ Use remember proactively whenever a question touches the user, their setup, or t
 </remember_guidance>
 
 <efficiency>
-Batch independent tool calls in one turn and combine related shell steps with && - every call stays in context for several turns. Sequence calls only when one depends on an earlier result. A bare greeting or check-in needs a reply, not an investigation.
+Before calling tools, decide everything the next step needs and request it in one message: independent reads, greps and commands go out together, not one per turn. Combine related shell steps with && - every call stays in context for several turns. Sequence calls only when one depends on an earlier result. Read a file whole (the read tool already caps long files) instead of in small slices; use offset/limit only for a file too long to read whole, after you've located the section you need. A bare greeting or check-in needs a reply, not an investigation.
 </efficiency>
 
 <reasoning_proportionality>
