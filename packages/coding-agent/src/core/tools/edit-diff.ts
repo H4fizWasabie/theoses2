@@ -244,10 +244,20 @@ export function fuzzyFindText(content: string, oldText: string): FuzzyMatchResul
 	};
 }
 
-function countOccurrences(content: string, oldText: string): number {
+/** 1-based start line of each non-overlapping occurrence, so a duplicate error can say where to add context. */
+function findOccurrenceLines(content: string, oldText: string): number[] {
 	const fuzzyContent = normalizeForFuzzyMatch(content);
 	const fuzzyOldText = normalizeForFuzzyMatch(oldText);
-	return fuzzyContent.split(fuzzyOldText).length - 1;
+	const lines: number[] = [];
+	let line = 1;
+	let scanned = 0;
+	for (let index = fuzzyContent.indexOf(fuzzyOldText); index !== -1; ) {
+		line += fuzzyContent.slice(scanned, index).split("\n").length - 1;
+		lines.push(line);
+		scanned = index;
+		index = fuzzyContent.indexOf(fuzzyOldText, index + fuzzyOldText.length);
+	}
+	return lines;
 }
 
 interface NearMiss {
@@ -329,6 +339,9 @@ function getNotFoundError(path: string, editIndex: number, totalEdits: number, n
 			? "but whitespace/indentation differs - check exact spacing"
 			: "but some lines differ - the file may have changed since you last saw it";
 		hint = ` Closest match found at line ${nearMiss.line}, ${reason}. Current content (line number, tab, text):\n${nearMiss.snippet}`;
+	} else {
+		// Without a near miss the model has nothing to correct against; guessing again is what loops.
+		hint = " No similar block found either: read the file again before retrying instead of re-guessing the text.";
 	}
 	if (totalEdits === 1) {
 		return new Error(
@@ -340,14 +353,16 @@ function getNotFoundError(path: string, editIndex: number, totalEdits: number, n
 	);
 }
 
-function getDuplicateError(path: string, editIndex: number, totalEdits: number, occurrences: number): Error {
+function getDuplicateError(path: string, editIndex: number, totalEdits: number, occurrenceLines: number[]): Error {
+	const where = `(starting at lines ${occurrenceLines.join(", ")})`;
+	const fix = "Extend it with neighbouring lines that differ between those places.";
 	if (totalEdits === 1) {
 		return new Error(
-			`Found ${occurrences} occurrences of the text in ${path}. The text must be unique. Please provide more context to make it unique.`,
+			`Found ${occurrenceLines.length} occurrences of the text in ${path} ${where}. The text must be unique. ${fix}`,
 		);
 	}
 	return new Error(
-		`${noneApplied(totalEdits)}Found ${occurrences} occurrences of edits[${editIndex}] in ${path}. Each oldText must be unique. Please provide more context to make it unique.`,
+		`${noneApplied(totalEdits)}Found ${occurrenceLines.length} occurrences of edits[${editIndex}] in ${path} ${where}. Each oldText must be unique. ${fix}`,
 	);
 }
 
@@ -404,9 +419,9 @@ export function applyEditsToNormalizedContent(
 			throw getNotFoundError(path, i, normalizedEdits.length, findNearMiss(normalizedContent, edit.oldText));
 		}
 
-		const occurrences = countOccurrences(replacementBaseContent, edit.oldText);
-		if (occurrences > 1) {
-			throw getDuplicateError(path, i, normalizedEdits.length, occurrences);
+		const occurrenceLines = findOccurrenceLines(replacementBaseContent, edit.oldText);
+		if (occurrenceLines.length > 1) {
+			throw getDuplicateError(path, i, normalizedEdits.length, occurrenceLines);
 		}
 
 		matchedEdits.push({
