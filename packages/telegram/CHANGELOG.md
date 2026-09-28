@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.98] - 2026-09-28
 
 - feat: `send_file` tool - sends a file from disk to the owner's chat, images (jpg/png/webp up to 10 MB) as a photo and anything else as a document (up to 50 MB). The agent previously had no way to show the owner an existing file: `read` only shows an image to the model, so it claimed "sent inline" for a photo that never arrived, then fell back to curling the Bot API with the token from bash. The tool's guidelines state that `read` is model-only and that a file counts as sent only after `send_file` succeeds.

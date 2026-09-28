@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.98] - 2026-09-28
 
 - feat: `createChannelSessions` takes `customTools`, registered on every session it opens, so a channel can add its own tools (Telegram's `send_file`).
