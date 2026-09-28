@@ -27,7 +27,8 @@ import { createReadToolDefinition } from "./tools/read.ts";
 import { wrapToolDefinition } from "./tools/tool-definition-wrapper.ts";
 
 export const PLAN_REVIEW_CUSTOM_TYPE = "plan-review";
-const MAX_TURNS = 8;
+/** Exported for tests. */
+export const MAX_TURNS = 8;
 const MAX_INPUT_TOKENS = 200_000;
 const MAX_MUST_FIX = 5;
 export const MAX_DIFF_CHARS = 40_000;
@@ -78,6 +79,14 @@ Items under <accepted_deferrals> were left undone on purpose, with the reason gi
 
 Your final message must be only this JSON, no prose:
 {"verdict": "ok" | "gaps", "findings": [{"severity": "must-fix" | "nit", "file": "path", "issue": "what is missing or wrong", "evidence": "file:line or output"}]}`;
+
+// 2026-09-28: both attempts of a review hit MAX_TURNS while still calling tools, so
+// lastAssistantText never held a verdict and the whole read was thrown away (3 of 9 reviews
+// since 09-27). Rather than let the turn budget run out mid-investigation, force exactly one
+// more turn with no tools once the budget is hit, asking for a verdict from what it already saw.
+const FORCE_VERDICT_PROMPT = `You are out of turns to investigate further. Stop here and give your verdict now, based only on what you have already read. Do not ask for more tools; none are available.
+
+Reply with only the JSON described earlier, no prose.`;
 
 /** Exported for tests. */
 export function buildPrompt(
@@ -149,7 +158,8 @@ function runCost(messages: AgentMessage[]): number {
 	return cost;
 }
 
-async function reviewOnce(input: ReviewInput): Promise<ReviewOutcome> {
+/** Exported for tests. */
+export async function reviewOnce(input: ReviewInput): Promise<ReviewOutcome> {
 	const model = resolveBackgroundModel(input.modelRuntime, "reviewer");
 	const handle = createBudgetedAgent({
 		systemPrompt: SYSTEM_PROMPT,
@@ -166,9 +176,18 @@ async function reviewOnce(input: ReviewInput): Promise<ReviewOutcome> {
 		signal: input.signal,
 		providerHooks: input.providerHooks,
 	});
-	const stats = await handle.prompt(buildPrompt(input.plan, input.diff, input.verifyOutput, input.locations));
-	const messages = handle.agent.state.messages;
-	const parsed = parseReview(lastAssistantText(messages));
+	let stats = await handle.prompt(buildPrompt(input.plan, input.diff, input.verifyOutput, input.locations));
+	let messages = handle.agent.state.messages;
+	let parsed = parseReview(lastAssistantText(messages));
+	if (!parsed && stats.stoppedByBudget) {
+		// The budget ran out while the model was still investigating, so its last message carries no
+		// verdict. One forced turn with tools removed - the same conversation, no new investigation -
+		// asks it to commit to a verdict on what it already read instead of throwing that work away.
+		handle.agent.state.tools = [];
+		stats = await handle.prompt(FORCE_VERDICT_PROMPT);
+		messages = handle.agent.state.messages;
+		parsed = parseReview(lastAssistantText(messages));
+	}
 	if (!parsed) {
 		throw new Error(stats.stoppedByBudget ? "budget ran out before a verdict" : "no parseable verdict");
 	}
