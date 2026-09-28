@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.96] - 2026-09-28
 
 - fix: the built-in default model for `opencode-go` is now `kimi-k3`. models.dev dropped `kimi-k2.6` from opencode-go, so the old default pointed at a model that no longer exists (caught by the "built-in defaults exist in generated provider catalogs" test once CI regenerated the catalog).
