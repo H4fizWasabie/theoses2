@@ -1,6 +1,7 @@
 import type { ThinkingLevel } from "theoses-agent-core";
 import type { Api, Model } from "theoses-ai";
 import type { AgentSessionEvent, PromptOptions, PromptResult } from "./agent-session.ts";
+import type { ToolDefinition } from "./extensions/types.ts";
 import { findExactModelReferenceMatch } from "./model-resolver.ts";
 import { createAgentSession } from "./sdk.ts";
 import { SessionManager } from "./session-manager.ts";
@@ -47,6 +48,8 @@ export interface ChannelSessionsOptions {
 	cwd: string;
 	/** Channel-specific system prompt additions (e.g. Telegram's rich-formatting guidance). */
 	appendSystemPrompt?: string[];
+	/** Channel-specific tools (e.g. Telegram's send_file), registered on every session this opens. */
+	customTools?: ToolDefinition[];
 }
 
 export type ChannelSessions = ReturnType<typeof createChannelSessions>;
@@ -70,7 +73,11 @@ export function createChannelSessions(options: ChannelSessionsOptions) {
 		if (sessionManager.getChannelSessionKey().channel !== channel) {
 			throw new Error(`Session is not a ${channel} session`);
 		}
-		const { session } = await createAgentSession({ sessionManager, appendSystemPrompt: options.appendSystemPrompt });
+		const { session } = await createAgentSession({
+			sessionManager,
+			appendSystemPrompt: options.appendSystemPrompt,
+			customTools: options.customTools,
+		});
 		// settings.json's defaultThinkingLevel wins even over a resumed session's saved level, so a long-lived
 		// Channel Session can be retuned with a settings edit and restart. High when unset (#60).
 		session.setThinkingLevel(session.settingsManager.getDefaultThinkingLevel() ?? "high");

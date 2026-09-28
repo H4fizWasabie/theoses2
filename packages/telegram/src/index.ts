@@ -4,6 +4,7 @@ import { Bot, type Context, InputFile } from "grammy";
 import type { Message } from "grammy/types";
 import { type ChannelInput, configureHttpDispatcher, createChannelSessions, getAgentDir } from "theoses-coding-agent";
 import { readInbound, resolvePrompt } from "./inbound.ts";
+import { createSendFileTool } from "./send-file.ts";
 import { createTurnQueue, type StopDecision } from "./turn-queue.ts";
 import { createTurnView, type Outbox } from "./turn-view.ts";
 
@@ -241,10 +242,20 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 	// convert_doc, needed for document uploads, is in the default active set. appendSystemPrompt (issues
 	// #195/#196) adds Telegram-only rich-formatting guidance - collapsible blocks and footnotes have no
 	// existing habit to build on - scoped to this channel so it never reaches the dashboard or CLI.
+	// send_file always targets the owner: it is the only chat this bot answers.
+	const sendFileTool = createSendFileTool(cwd, {
+		async sendPhoto(data, fileName, caption) {
+			return (await bot.api.sendPhoto(ownerChatId, new InputFile(data, fileName), { caption })).message_id;
+		},
+		async sendDocument(data, fileName, caption) {
+			return (await bot.api.sendDocument(ownerChatId, new InputFile(data, fileName), { caption })).message_id;
+		},
+	});
 	const channelSessions = createChannelSessions({
 		channel: CHANNEL,
 		cwd,
 		appendSystemPrompt: [TELEGRAM_RICH_FORMATTING_GUIDANCE],
+		customTools: [sendFileTool],
 	});
 	const albums = new Map<string, Message[]>();
 	let toolCallDetailEnabled = loadToolCallDetailPreference();
