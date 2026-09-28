@@ -1,6 +1,6 @@
 {
 	"name": "theoses-telegram",
-	"version": "1.0.98",
+	"version": "1.0.99",
 	"description": "Telegram channel for Theoses",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -21,8 +21,8 @@
 	},
 	"dependencies": {
 		"grammy": "1.38.3",
-		"theoses-ai": "^1.0.98",
-		"theoses-coding-agent": "^1.0.98"
+		"theoses-ai": "^1.0.99",
+		"theoses-coding-agent": "^1.0.99"
 	},
 	"engines": {
 		"node": ">=22.19.0"

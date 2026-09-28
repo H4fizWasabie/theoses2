@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.99] - 2026-09-28
 
 - fix: OpenRouter-format requests at the `xhigh` or `max` thinking level now send `reasoning.effort` instead of the `reasoning.max_tokens` cap. Neither level has a budget of its own, so the cap was always `high`'s and the chosen level never reached the provider: `openai/gpt-6-luna` at `max` ran with ~500 reasoning tokens under `max_tokens: 10000`, about half what `effort: "max"` gets on the same prompt. `high` and below keep the cap (#352), and the system prompt's `<reasoning_budget>` note is omitted at `xhigh`/`max` since no cap applies.
 
