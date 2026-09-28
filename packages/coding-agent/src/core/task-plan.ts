@@ -24,7 +24,8 @@ export const MAX_PLAN_ITEMS = 12;
 export const MAX_STOP_PUSHES = 2;
 /** Fix-item notes shorter than this are a tick, not an analysis. */
 const MIN_FIX_NOTE_CHARS = 20;
-const REOPENED_NOTE = "reopened: files changed after this was closed";
+const REOPENED_NOTE =
+	"reopened: files changed after this was closed. Close it with a check that exercises those changes — rerunning the original check only counts if it covers them.";
 
 export type PlanKind = "change" | "fix";
 export type PlanItemKind = "step" | "verify" | "root-cause" | "siblings" | "fix-scope";
@@ -195,16 +196,30 @@ export function applyPlanAction(
 			if (!current || current.abandoned) return { error: "No plan to add to; create one." };
 			const steps = (input.items ?? []).map((text) => text.trim()).filter(Boolean);
 			if (steps.length === 0) return { error: "add needs `items`." };
-			if (current.items.length + steps.length > MAX_PLAN_ITEMS) {
+			// If no verify item is still open, these steps would ship unverified (issue #387); a new
+			// verify item is required and appended after them. Otherwise the existing open verify item
+			// already covers what's added, so a supplied `verify` is ignored (documented on the tool).
+			const hasOpenVerify = current.items.some((item) => item.kind === "verify" && item.status === "open");
+			const verify = input.verify?.trim();
+			if (!hasOpenVerify && !verify) {
+				return {
+					error: "These steps come after verification closed; pass `verify`: the check that will prove them.",
+				};
+			}
+			const extra = hasOpenVerify ? 0 : 1;
+			if (current.items.length + steps.length + extra > MAX_PLAN_ITEMS) {
 				return { error: `At most ${MAX_PLAN_ITEMS} items; group smaller steps together.` };
 			}
 			const nextId = Math.max(0, ...current.items.map((item) => item.id)) + 1;
-			const added = steps.map((text, i) => ({
+			const added: PlanItem[] = steps.map((text, i) => ({
 				id: nextId + i,
 				kind: "step" as const,
 				text,
 				status: "open" as const,
 			}));
+			if (!hasOpenVerify) {
+				added.push({ id: nextId + steps.length, kind: "verify", text: verify as string, status: "open" });
+			}
 			return { plan: { ...current, items: [...current.items, ...added] } };
 		}
 
@@ -260,26 +275,38 @@ export interface PlanStopResult {
 }
 
 /**
- * Stop-time check: the run may not end while its plan has open items, or with a verify item closed
- * before the latest file change. Only applies to runs that changed files or touched the plan, so a
- * question asked mid-task is not pushed back.
+ * Stop-time check: the run may not end while its plan has open items, or with the latest verify item
+ * closed before the latest file change. Earlier verify items that already closed stay closed — a later
+ * change doesn't undo what they already proved (issue #387). Only applies to runs that changed files or
+ * touched the plan, so a question asked mid-task is not pushed back.
  */
 export function planStopCheck(plan: TaskPlan | undefined, runMessages: AgentMessage[]): PlanStopResult {
 	if (!plan || plan.abandoned || !runTouchedPlan(runMessages)) return {};
 	let next = plan;
+	let reopened = false;
 	const runs = toolRuns(runMessages);
 	if (runs.some(runChangesFiles) && verifyEvidenceProblem(runMessages)) {
-		const reopened = plan.items.map((item) =>
-			item.kind === "verify" && item.status !== "open"
-				? { ...item, status: "open" as const, note: REOPENED_NOTE }
-				: item,
+		const latestVerify = plan.items.reduce<PlanItem | undefined>(
+			(latest, item) => (item.kind === "verify" && (!latest || item.id > latest.id) ? item : latest),
+			undefined,
 		);
-		if (reopened.some((item, i) => item !== plan.items[i])) next = { ...plan, items: reopened };
+		if (latestVerify && latestVerify.status !== "open") {
+			next = {
+				...plan,
+				items: plan.items.map((item) =>
+					item.id === latestVerify.id ? { ...item, status: "open" as const, note: REOPENED_NOTE } : item,
+				),
+			};
+			reopened = true;
+		}
 	}
 	if (!isPlanOpen(next)) return next === plan ? {} : { plan: next };
 
 	const pushes = runMessages.filter((m) => m.role === "custom" && m.customType === TASK_PLAN_CHECK_CUSTOM_TYPE).length;
 	if (pushes >= MAX_STOP_PUSHES) return { plan: next === plan ? undefined : next, gaveUp: true };
-	const problem = `Your task plan still has open items, so the task is not done:\n${formatPlan(next)}\nFinish each open item and close it with task_plan update (a verify item needs a passing check after your last change). If an item cannot be done now, set it to deferred with the reason. If the plan no longer applies, abandon it with a reason. Tell the user plainly about anything deferred.`;
+	const reopenHint = reopened
+		? " The latest verify item reopened because files changed after it closed: any check that exercises what changed since then closes it again — rerunning the original command only helps if it covers those changes."
+		: "";
+	const problem = `Your task plan still has open items, so the task is not done:\n${formatPlan(next)}\nFinish each open item and close it with task_plan update (a verify item needs a passing check after your last change).${reopenHint} If an item cannot be done now, set it to deferred with the reason. If the plan no longer applies, abandon it with a reason. Tell the user plainly about anything deferred.`;
 	return { plan: next === plan ? undefined : next, problem };
 }

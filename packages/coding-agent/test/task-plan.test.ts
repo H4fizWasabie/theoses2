@@ -207,6 +207,39 @@ describe("applyPlanAction", () => {
 		const items = Array.from({ length: 12 }, (_, i) => `step ${i}`);
 		expect(act(undefined, { action: "create", goal: "g", items, verify: "v" }).error).toContain("At most 12");
 	});
+
+	it("add after every verify item is closed needs a `verify`, and appends a new open verify item with it (#387)", () => {
+		const plan = created({ items: [] });
+		const closed: TaskPlan = { ...plan, items: plan.items.map((i) => ({ ...i, status: "done" as const })) };
+		expect(act(closed, { action: "add", items: ["step x"] }).error).toContain("verify");
+		const added = act(closed, { action: "add", items: ["step x"], verify: "check x" }).plan;
+		expect(added?.items.map((i) => [i.id, i.kind, i.status])).toEqual([
+			[1, "verify", "done"],
+			[2, "step", "open"],
+			[3, "verify", "open"],
+		]);
+	});
+
+	it("add while a verify item is still open works without `verify`, as before", () => {
+		const plan = created();
+		const added = act(plan, { action: "add", items: ["extra step"] }).plan;
+		expect(added?.items.map((i) => [i.id, i.kind, i.status])).toEqual([
+			[1, "step", "open"],
+			[2, "step", "open"],
+			[3, "verify", "open"],
+			[4, "step", "open"],
+		]);
+	});
+
+	it("caps count the extra verify item that add appends once verification is closed", () => {
+		const items = Array.from({ length: 10 }, (_, i) => `step ${i}`);
+		const plan = created({ items });
+		const closed: TaskPlan = {
+			...plan,
+			items: plan.items.map((i) => (i.kind === "verify" ? { ...i, status: "done" as const } : i)),
+		};
+		expect(act(closed, { action: "add", items: ["one more"], verify: "v2" }).error).toContain("At most 12");
+	});
 });
 
 describe("planStopCheck", () => {
@@ -240,6 +273,85 @@ describe("planStopCheck", () => {
 		const result = planStopCheck(plan, run);
 		expect(result.plan?.items[0]).toMatchObject({ kind: "verify", status: "open" });
 		expect(result.problem).toContain("reopened");
+	});
+
+	it("reopens only the latest verify item; an earlier closed verify item stays closed (#387)", () => {
+		const base = created({ items: [] });
+		const plan: TaskPlan = {
+			...base,
+			items: [
+				{ id: 1, kind: "verify", text: "first gate", status: "done" },
+				{ id: 2, kind: "step", text: "extra step", status: "done" },
+				{ id: 3, kind: "verify", text: "second gate", status: "done" },
+			],
+		};
+		const run = [
+			user("go"),
+			...tool("bash", { command: "npm test" }, "ok"),
+			...tool("edit", { path: "a.ts" }, "ok"),
+			reply("Done."),
+		];
+		const result = planStopCheck(plan, run);
+		expect(result.plan?.items[0]).toMatchObject({ id: 1, status: "done" });
+		expect(result.plan?.items[2]).toMatchObject({ id: 3, status: "open" });
+		expect(result.problem).toContain("reopened");
+	});
+
+	it("replays 2026-09-27: steps added after the render gate closed need their own verify, and closing it doesn't touch the render gate (#387)", () => {
+		const items = [
+			{ id: 1, kind: "step" as const, text: "render 02", status: "done" as const },
+			{ id: 2, kind: "step" as const, text: "thumbnail", status: "done" as const },
+			{ id: 3, kind: "step" as const, text: "captions", status: "done" as const },
+			{ id: 4, kind: "step" as const, text: "audio mix", status: "done" as const },
+			{ id: 5, kind: "verify" as const, text: "tools/run-video.sh 02 --dry-run", status: "done" as const },
+		];
+		const base: TaskPlan = {
+			kind: "change",
+			goal: "ai-third-person part 02",
+			request: "publish part 02",
+			items,
+			createdAt: new Date(0).toISOString(),
+		};
+
+		expect(
+			act(base, { action: "add", items: ["publish to Threads/FB", "append ledger + edit Status line"] }).error,
+		).toContain("verify");
+
+		const added = act(base, {
+			action: "add",
+			items: ["publish to Threads/FB", "append ledger + edit Status line"],
+			verify: "node tools/check-ledger.mjs 02",
+		}).plan;
+		if (!added) throw new Error("add failed");
+		expect(added.items.map((i) => [i.id, i.kind, i.status])).toEqual([
+			[1, "step", "done"],
+			[2, "step", "done"],
+			[3, "step", "done"],
+			[4, "step", "done"],
+			[5, "verify", "done"],
+			[6, "step", "open"],
+			[7, "step", "open"],
+			[8, "verify", "open"],
+		]);
+
+		const ledgerChange = [
+			user("publish part 02"),
+			...tool("bash", { command: 'cat >> state/ledger.jsonl <<\'EOF\'\n{"post":"02"}\nEOF' }, "ok"),
+			reply("Posted."),
+		];
+		// verify 5 was already closed and untouched by this change; verify 8 was never closed, so nothing
+		// reopens here — the plan is still open on item 8, which is the actual gap.
+		const stop = planStopCheck(added, ledgerChange);
+		expect(stop.plan).toBeUndefined();
+		expect(stop.problem).toContain("still has open items");
+
+		const passed = [
+			...ledgerChange,
+			...tool("bash", { command: "node tools/check-ledger.mjs 02" }, "ledger has 02, Status: posted"),
+		];
+		const closed = act(added, { action: "update", id: 8, status: "done" }, passed);
+		expect(closed.plan?.items[7]).toMatchObject({ id: 8, status: "done" });
+		expect(closed.plan?.items[4]).toMatchObject({ id: 5, status: "done" });
 	});
 });
 
