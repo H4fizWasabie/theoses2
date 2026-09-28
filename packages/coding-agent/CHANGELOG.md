@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: `task_plan add` now requires a `verify` when every verify item is already closed, and appends it as a new open verify item after the new steps; `planStopCheck` reopens only the latest verify item instead of every closed one (#387). On 2026-09-27 (ai-third-person part 02), steps to publish and update the ledger were added after the render-gate verify had closed, so nothing ever required proof the posts went live, and a later ledger edit reopened that same render gate, wasting a 5-minute re-render that proved nothing about the edit.
+
 ## [1.0.94] - 2026-09-28
 
 - fix: edit tool errors now say what to do next. "Could not find the exact text" without a closest-match snippet tells the model to re-read the file instead of re-guessing, and "Found N occurrences" lists each occurrence's start line so the model knows which neighbouring lines to add. The 2026-09-28 eval digest showed edit failing 16% of calls, with 3 loops of 3+ failed edits on the same file.

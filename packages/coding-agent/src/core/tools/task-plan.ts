@@ -9,7 +9,7 @@ import { applyPlanAction, formatPlan, MAX_PLAN_ITEMS, type TaskPlan } from "../t
 const taskPlanSchema = Type.Object({
 	action: StringEnum(["create", "add", "update", "abandon", "show"] as const, {
 		description:
-			"create: start a plan (needs goal and verify). add: append steps. update: set one item's status/note. abandon: drop the plan with a reason. show: print it.",
+			"create: start a plan (needs goal and verify). add: append steps (needs `verify` if every verify item is already closed, so new steps don't ship unverified). update: set one item's status/note. abandon: drop the plan with a reason. show: print it.",
 	}),
 	kind: Type.Optional(
 		StringEnum(["change", "fix"] as const, {
@@ -26,7 +26,7 @@ const taskPlanSchema = Type.Object({
 	verify: Type.Optional(
 		Type.String({
 			description:
-				"create only. The command or check that will prove the change works end to end (it must run the changed code, not just parse it).",
+				"create: the command or check that will prove the change works end to end (it must run the changed code, not just parse it). add: required only when every verify item is already closed — the check that will prove the newly added steps; ignored if a verify item is still open (the open one already covers them).",
 		}),
 	),
 	id: Type.Optional(Type.Number({ description: "update only. Item id." })),
