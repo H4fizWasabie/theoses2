@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: `SessionManager.listAll` takes an optional channel filter. When given, a session whose header channel doesn't match is dropped right after the header is read, without reading the rest of the file — lets callers like the dashboard skip huge session files (e.g. Telegram's) that they were going to filter out anyway.
+
 - fix: `task_plan add` now requires a `verify` when every verify item is already closed, and appends it as a new open verify item after the new steps; `planStopCheck` reopens only the latest verify item instead of every closed one (#387). On 2026-09-27 (ai-third-person part 02), steps to publish and update the ledger were added after the render-gate verify had closed, so nothing ever required proof the posts went live, and a later ledger edit reopened that same render gate, wasting a 5-minute re-render that proved nothing about the edit.
 
 ## [1.0.94] - 2026-09-28

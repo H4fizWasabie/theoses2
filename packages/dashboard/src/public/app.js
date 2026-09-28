@@ -58,7 +58,7 @@ function renderSessions() {
   if (!state.sessions.length) { target.innerHTML = '<div class="empty">No browser sessions yet.</div>'; return; }
   target.innerHTML = state.sessions.map((session) => `<button class="session ${session.id === state.active?.id ? "active" : ""}" data-session="${escapeHtml(session.id)}">
     <span class="session-name">${escapeHtml(session.title)}</span>
-    <span class="session-meta"><span class="badge ${session.channel === "telegram" ? "telegram" : ""}">${escapeHtml(session.channel)}</span><span>${session.messageCount} messages</span><span>${relativeTime(session.modified)}</span></span>
+    <span class="session-meta"><span class="badge">${escapeHtml(session.channel)}</span><span>${session.messageCount} messages</span><span>${relativeTime(session.modified)}</span></span>
   </button>`).join("");
   target.querySelectorAll("[data-session]").forEach((button) => button.addEventListener("click", () => openSession(button.dataset.session)));
 }
@@ -161,13 +161,12 @@ function setReply(turn) {
 }
 
 function renderActive() {
-  const telegram = state.active?.channel === "telegram";
   $("session-title").textContent = state.active?.title || "No dashboard session";
   $("session-channel").textContent = state.active ? ` · ${state.active.channel}` : "";
-  $("message").disabled = !state.active || telegram;
-  $("message").placeholder = telegram ? "Telegram sessions are read-only" : "Message Theoses…";
-  $("chat-form").querySelector(".send").disabled = !state.active || telegram;
-  $("stop-chat").hidden = !state.active || telegram || !state.pending;
+  $("message").disabled = !state.active;
+  $("message").placeholder = "Message Theoses…";
+  $("chat-form").querySelector(".send").disabled = !state.active;
+  $("stop-chat").hidden = !state.active || !state.pending;
   renderRail();
 }
 
@@ -399,7 +398,7 @@ $("message").addEventListener("keydown", (event) => {
 
 $("chat-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  if (!state.active || state.active.channel === "telegram") return;
+  if (!state.active) return;
   const input = $("message"); const message = input.value.trim(); if (!message) return;
   const replyContext = state.reply ? flatText(state.reply) : undefined;
   const sessionId = state.active.id;

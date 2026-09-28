@@ -24,7 +24,6 @@ import { saveTelegramConfig, telegramConfigStatus } from "./telegram-config.ts";
 configureHttpDispatcher();
 
 const DASHBOARD_CHANNEL = "dashboard";
-const TELEGRAM_CHANNEL = "telegram";
 const DASHBOARD_TOKEN_COOKIE = "theoses_dashboard_token";
 const publicDirectory = fileURLToPath(new URL("./public/", import.meta.url));
 
@@ -251,16 +250,13 @@ function sessionView(info: SessionInfo): SessionView {
 }
 
 async function visibleSessions(): Promise<SessionView[]> {
-	const infos = await SessionManager.listAll();
-	return infos
-		.filter((info) => info.channel === DASHBOARD_CHANNEL || info.channel === TELEGRAM_CHANNEL)
-		.sort((left, right) => right.modified.getTime() - left.modified.getTime())
-		.map(sessionView);
+	const infos = await SessionManager.listAll(undefined, undefined, DASHBOARD_CHANNEL);
+	return infos.sort((left, right) => right.modified.getTime() - left.modified.getTime()).map(sessionView);
 }
 
 async function findVisibleSession(id: string, channelSessions: ChannelSessions, cwd: string): Promise<SessionInfo> {
-	const info = (await SessionManager.listAll()).find(
-		(session) => session.id === id && (session.channel === DASHBOARD_CHANNEL || session.channel === TELEGRAM_CHANNEL),
+	const info = (await SessionManager.listAll(undefined, undefined, DASHBOARD_CHANNEL)).find(
+		(session) => session.id === id,
 	);
 	if (info) return info;
 
@@ -281,9 +277,8 @@ async function findVisibleSession(id: string, channelSessions: ChannelSessions, 
 	};
 }
 
-/** The writable Channel Session behind a visible session; Telegram sessions are shown but never driven from here. */
+/** The writable Channel Session behind a visible session. */
 function dashboardSession(info: SessionInfo, channelSessions: ChannelSessions): Promise<ChannelSession> {
-	if (info.channel !== DASHBOARD_CHANNEL) throw new Error("Telegram sessions are read-only");
 	return channelSessions.open(info.channelSessionId ?? info.id, info.path);
 }
 
@@ -428,7 +423,7 @@ async function api(
 		if (request.method === "GET") {
 			const manager = SessionManager.open(info.path);
 			const history = sessionHistory(manager);
-			const live = info.channel === DASHBOARD_CHANNEL ? channelSessions.find(info.id) : undefined;
+			const live = channelSessions.find(info.id);
 			json(response, 200, { session: sessionView(info), history, runtime: runtimeSummary(manager, history, live) });
 			return true;
 		}

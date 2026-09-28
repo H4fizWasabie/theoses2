@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fauxAssistantMessage, registerFauxProvider } from "theoses-ai/compat";
+import { SessionManager } from "theoses-coding-agent";
 import { createDashboardServer } from "../src/index.ts";
 
 async function listen(server: ReturnType<typeof createDashboardServer>): Promise<string> {
@@ -245,6 +246,49 @@ test("dashboard shows a new session's live model before its file is written", as
 	} finally {
 		await close(server);
 		faux.unregister();
+		if (previousAgentDir === undefined) delete process.env.THEOSES_CODING_AGENT_DIR;
+		else process.env.THEOSES_CODING_AGENT_DIR = previousAgentDir;
+	}
+});
+
+test("dashboard never lists or opens sessions from other channels (e.g. Telegram)", async () => {
+	const root = await mkdtemp(join(tmpdir(), "theoses-dashboard-channels-"));
+	const agentDir = join(root, "agent");
+	await mkdir(agentDir);
+	const previousAgentDir = process.env.THEOSES_CODING_AGENT_DIR;
+	process.env.THEOSES_CODING_AGENT_DIR = agentDir;
+	try {
+		const telegramSession = SessionManager.create(root, undefined, { channel: "telegram" });
+		telegramSession.appendMessage({ role: "user", content: "from telegram", timestamp: Date.now() });
+		const telegramId = telegramSession.getSessionFile();
+		assert.ok(telegramId);
+
+		const server = createDashboardServer({ accessToken: "test-owner-token", cwd: root });
+		const base = await listen(server);
+		try {
+			const created = await fetch(`${base}/api/sessions`, {
+				method: "POST",
+				headers: { Authorization: "Bearer test-owner-token" },
+			});
+			const dashboardSession = (await created.json()) as { id: string; channel: string };
+			assert.equal(dashboardSession.channel, "dashboard");
+
+			const list = await fetch(`${base}/api/sessions`, {
+				headers: { Authorization: "Bearer test-owner-token" },
+			});
+			const { sessions } = (await list.json()) as { sessions: Array<{ channel: string; id: string }> };
+			assert.ok(sessions.every((session) => session.channel === "dashboard"));
+
+			const telegramSessionId = telegramSession.getSessionId();
+			const opened = await fetch(`${base}/api/sessions/${encodeURIComponent(telegramSessionId)}`, {
+				headers: { Authorization: "Bearer test-owner-token" },
+			});
+			const body = (await opened.json()) as { error: string };
+			assert.match(body.error, /Session not found/);
+		} finally {
+			await close(server);
+		}
+	} finally {
 		if (previousAgentDir === undefined) delete process.env.THEOSES_CODING_AGENT_DIR;
 		else process.env.THEOSES_CODING_AGENT_DIR = previousAgentDir;
 	}

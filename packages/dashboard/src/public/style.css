@@ -11,7 +11,6 @@
   --dim: #5b6864;
   --accent: #d99a52;
   --accent-soft: #1c150d;
-  --telegram: #7f92b8;
   --danger: #e2604a;
   --sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
@@ -105,7 +104,6 @@ body.field-focus .timeline { opacity: 0; transition: opacity .25s ease; }
 .session-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
 .session-meta { display: flex; gap: 6px; align-items: center; margin-top: 5px; color: var(--muted); font-size: 11px; font-family: var(--mono); }
 .badge { border-radius: 3px; padding: 2px 5px; color: var(--accent); background: var(--accent-soft); text-transform: uppercase; font-size: 9px; letter-spacing: .04em; }
-.badge.telegram { color: var(--telegram); background: #151d26; }
 .empty { color: var(--dim); padding: 20px; text-align: center; }
 
 .panel.chat, .panel.files { min-height: 0; }
