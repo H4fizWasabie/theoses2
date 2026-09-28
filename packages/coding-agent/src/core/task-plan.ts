@@ -24,8 +24,7 @@ export const MAX_PLAN_ITEMS = 12;
 export const MAX_STOP_PUSHES = 2;
 /** Fix-item notes shorter than this are a tick, not an analysis. */
 const MIN_FIX_NOTE_CHARS = 20;
-const REOPENED_NOTE =
-	"reopened: files changed after this was closed. Close it with a check that exercises those changes — rerunning the original check only counts if it covers them.";
+const REOPENED_NOTE = "reopened: files changed after this was closed";
 
 export type PlanKind = "change" | "fix";
 export type PlanItemKind = "step" | "verify" | "root-cause" | "siblings" | "fix-scope";
