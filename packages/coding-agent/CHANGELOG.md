@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.105] - 2026-09-29
 
 - feat: command hooks. `hooks` in `settings.json` runs a shell command at `PreToolUse` (can block a call with exit 2 or `{"decision":"block"}`, or replace its input with `{"updatedInput":{...}}`), `PostToolUse` (adds `additionalContext` to the tool result), `UserPromptSubmit` (adds context after the prompt, or swallows it), `Stop` (a blocking hook feeds its reason back so the run continues, at most twice per run, with `stopHookActive` in its input), `SessionStart` and `SessionEnd`. The command gets one JSON object on stdin, never in its arguments. A hook error is logged and the action continues unless the hook sets `failClosed`; a hook that times out (default 30 s, at most 600) or prints over 64 KB is an error. Hooks come from the user settings and, when the project is trusted, the project settings; the two lists are concatenated, because a plain settings merge would let a project's array replace the owner's guard hooks. Hooks run before extension `tool_call` handlers and the file checkpoint, so the checkpoint is taken on the input a hook may have rewritten. See docs/hooks.md.
 
