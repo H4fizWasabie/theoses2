@@ -166,6 +166,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/tree` | Jump to any point in the session and continue from there |
 | `/trust` | Save project trust decision for future sessions (restart required) |
 | `/fork` | Create a new session from a previous user message |
+| `/rewind` | Put files back to before a previous user message, optionally forking before it |
 | `/clone` | Duplicate the current active branch into a new session |
 | `/compact [prompt]` | Manually compact context, optional custom instructions |
 | `/copy` | Copy last assistant message to clipboard |
@@ -241,6 +242,8 @@ Use `/session` in interactive mode to see the current session ID before reusing 
 - Press Shift+L to label entries as bookmarks and Shift+T to toggle label timestamps
 
 **`/fork`** - Create a new session file from a previous user message on the active branch. Opens a selector, copies the active path up to that point, and places the selected prompt in the editor for modification.
+
+**`/rewind`** - Put the files back to how they were before a previous user message. Opens a selector, shows what would be restored or deleted, and lets you also fork before that message. Original file bytes are saved before each `edit`, `write` and traceable shell command (`sed -i`, redirects, `cp`, `mv`, `rm`, `tee`); files over 10 MB and commands whose file changes cannot be traced (a script that writes files) cannot be restored.
 
 **`/clone`** - Duplicate the current active branch into a new session file at the current position. The new session keeps the full active-path history and opens with an empty editor.
 

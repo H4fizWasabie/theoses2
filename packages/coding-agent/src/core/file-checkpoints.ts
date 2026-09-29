@@ -158,6 +158,28 @@ export function planFileRewind(branch: SessionEntry[], targetEntryId: string): R
 	return plan;
 }
 
+function count(n: number, noun: string): string {
+	return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
+/** Plain-text summary of what a rewind would do, for a confirmation prompt. */
+export function describeRewindPlan(plan: RewindPlan): string {
+	const lines: string[] = [];
+	const deletions = plan.restore.filter((r) => r.hash === null).length;
+	const restores = plan.restore.length - deletions;
+	if (restores > 0) lines.push(`Restore ${count(restores, "file")} to how they were before.`);
+	if (deletions > 0) lines.push(`Delete ${count(deletions, "file")} created since then.`);
+	if (plan.skipped.length > 0) {
+		const names = plan.skipped.slice(0, 3).map((s) => `${s.path} (${s.reason})`);
+		const more = plan.skipped.length > 3 ? `, and ${plan.skipped.length - 3} more` : "";
+		lines.push(`Cannot restore ${count(plan.skipped.length, "file")}: ${names.join(", ")}${more}.`);
+	}
+	if (plan.untraced.length > 0) {
+		lines.push(`${count(plan.untraced.length, "shell command")} changed files in ways that cannot be undone.`);
+	}
+	return lines.length > 0 ? lines.join("\n") : "No files changed since that message.";
+}
+
 export interface RewindResult extends Omit<RewindPlan, "restore"> {
 	restored: string[];
 	deleted: string[];
