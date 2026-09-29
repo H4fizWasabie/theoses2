@@ -2,10 +2,10 @@
  * File checkpoints: before a tool call changes a file, its original bytes are saved once per user turn, so
  * the files can be put back to how they were before any earlier turn (`/rewind`, AgentSession.rewindFiles).
  *
- * Original bytes go to `<session artifact dir>/checkpoints/<sha256>` (content-addressed, so an unchanged
- * file costs nothing twice); a `file_checkpoint` custom entry in the session log records which path and
- * hash belong to which turn. Nothing lives in memory, so checkpoints survive a restart and follow the
- * session's branches.
+ * Original bytes go to `<session dir>/checkpoints/<sha256>` (content-addressed, so an unchanged file costs
+ * nothing twice, and shared by the sessions in that directory so a fork or clone still finds them); a
+ * `file_checkpoint` custom entry in the session log records which path and hash belong to which turn.
+ * Nothing lives in memory, so checkpoints survive a restart and follow the session's branches.
  *
  * Covers what `fileChangesOf` can see: `edit`, `write`, and shell commands whose targets can be read off
  * (redirects, sed -i, cp, mv, rm, tee). A command that changes files in a way that cannot be traced (a
@@ -40,7 +40,7 @@ export interface CheckpointSession {
 	isPersisted(): boolean;
 	getLeafEntry(): SessionEntry | undefined;
 	getEntry(id: string): SessionEntry | undefined;
-	getArtifactDirectory(): string;
+	getCheckpointDirectory(): string;
 	appendCustomEntry(customType: string, data?: unknown): string;
 }
 
@@ -116,9 +116,7 @@ export class FileCheckpoints {
 		if (size > MAX_CHECKPOINT_BYTES) return { skipped: `larger than ${MAX_CHECKPOINT_BYTES} bytes` };
 		const bytes = readFileSync(absolute);
 		const hash = createHash("sha256").update(bytes).digest("hex");
-		const directory = join(this.session.getArtifactDirectory(), "checkpoints");
-		mkdirSync(directory, { recursive: true, mode: 0o700 });
-		const blob = join(directory, hash);
+		const blob = join(this.session.getCheckpointDirectory(), hash);
 		if (!existsSync(blob)) writeFileSync(blob, bytes, { mode: 0o600 });
 		return { hash };
 	}
@@ -167,7 +165,7 @@ export interface RewindResult extends Omit<RewindPlan, "restore"> {
 }
 
 /** Puts the files of a plan back. One file failing does not stop the others. */
-export function applyFileRewind(plan: RewindPlan, artifactDirectory: string): RewindResult {
+export function applyFileRewind(plan: RewindPlan, checkpointDirectory: string): RewindResult {
 	const result: RewindResult = {
 		restored: [],
 		deleted: [],
@@ -184,7 +182,7 @@ export function applyFileRewind(plan: RewindPlan, artifactDirectory: string): Re
 				}
 				continue;
 			}
-			const bytes = readFileSync(join(artifactDirectory, "checkpoints", hash));
+			const bytes = readFileSync(join(checkpointDirectory, hash));
 			mkdirSync(dirname(path), { recursive: true });
 			writeFileSync(path, bytes);
 			result.restored.push(path);

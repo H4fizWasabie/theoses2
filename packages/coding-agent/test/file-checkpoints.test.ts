@@ -46,7 +46,17 @@ describe("file checkpoints", () => {
 		session.getEntries().filter((e) => e.type === "custom" && e.customType === FILE_CHECKPOINT_ENTRY_TYPE);
 
 	const rewindTo = (id: string) =>
-		applyFileRewind(planFileRewind(session.getBranch(), id), session.getArtifactDirectory());
+		applyFileRewind(planFileRewind(session.getBranch(), id), session.getCheckpointDirectory());
+
+	it("still rewinds after the session is branched into a new file", () => {
+		writeFileSync(file("a.txt"), "v0");
+		const first = turn("first", [["a.txt", "v1"]]);
+		turn("second");
+		session.createBranchedSession(session.getLeafId() as string);
+
+		expect(rewindTo(first).restored).toEqual([file("a.txt")]);
+		expect(read("a.txt")).toBe("v0");
+	});
 
 	it("saves a file's original once per user turn, however often the turn changes it", () => {
 		writeFileSync(file("a.txt"), "v0");
@@ -115,7 +125,7 @@ describe("file checkpoints", () => {
 			["a.txt", "x"],
 			["b.txt", "y"],
 		]);
-		expect(readdirSync(join(session.getArtifactDirectory(), "checkpoints"))).toHaveLength(1);
+		expect(readdirSync(session.getCheckpointDirectory())).toHaveLength(1);
 	});
 
 	it("leaves the conversation the model sees untouched", () => {
@@ -148,9 +158,9 @@ describe("file checkpoints", () => {
 		]);
 		const plan = planFileRewind(session.getBranch(), id);
 		const damaged = plan.restore[0].hash as string;
-		rmSync(join(session.getArtifactDirectory(), "checkpoints", damaged));
+		rmSync(join(session.getCheckpointDirectory(), damaged));
 
-		const result = applyFileRewind(plan, session.getArtifactDirectory());
+		const result = applyFileRewind(plan, session.getCheckpointDirectory());
 
 		expect(result.failed).toHaveLength(1);
 		expect(result.restored).toHaveLength(1);

@@ -1159,7 +1159,7 @@ export class AgentSession {
 	/** Puts the files changed since the user message `userEntryId` back to how they were before it. Leaves the conversation alone. */
 	rewindFiles(userEntryId: string): RewindResult {
 		if (this._isAgentRunActive) throw new Error("Stop the current run before rewinding files");
-		return applyFileRewind(this.previewFileRewind(userEntryId), this.sessionManager.getArtifactDirectory());
+		return applyFileRewind(this.previewFileRewind(userEntryId), this.sessionManager.getCheckpointDirectory());
 	}
 
 	// =========================================================================

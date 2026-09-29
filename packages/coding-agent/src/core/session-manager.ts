@@ -1176,6 +1176,17 @@ export class SessionManager {
 		return this.sessionDir;
 	}
 
+	/**
+	 * Where file checkpoints keep the original bytes (file-checkpoints.ts). Shared by every session in this
+	 * directory, not per session: a fork or clone copies the log entries that name a hash, so the bytes must be
+	 * findable from the new session too.
+	 */
+	getCheckpointDirectory(): string {
+		const directory = join(this.sessionDir, "checkpoints");
+		if (this.persist) mkdirSync(directory, { recursive: true, mode: 0o700 });
+		return directory;
+	}
+
 	usesDefaultSessionDir(): boolean {
 		return this.defaultSessionDir !== "" && this.sessionDir === this.defaultSessionDir;
 	}
