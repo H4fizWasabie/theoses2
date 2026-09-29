@@ -84,6 +84,24 @@ export async function recordEvalSourceArtifact(
 	});
 }
 
+/**
+ * Writes the session of a run that failed. A test that times out never completes, so vitest keeps no
+ * harness run for it and the reporter never records its session; this is the only trace such a run leaves.
+ * Files land in `<artifactDirectory>/failed-sessions/<runId>.jsonl`.
+ */
+export async function persistFailedEvalSession(
+	artifactDirectory: string,
+	runId: string,
+	session: string,
+): Promise<string> {
+	if (basename(runId) !== runId) throw new TypeError(`Invalid eval run ID: ${runId}`);
+	const directory = join(artifactDirectory, "failed-sessions");
+	await mkdir(directory, { recursive: true, mode: 0o700 });
+	const path = join(directory, `${runId}.jsonl`);
+	await writeFile(path, session, { encoding: "utf8", mode: 0o600 });
+	return path;
+}
+
 export async function persistEvalArtifactReferences(
 	artifacts: ReadonlyArray<TestArtifact>,
 	runId: string,

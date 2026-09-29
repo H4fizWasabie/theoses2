@@ -23,7 +23,7 @@ import {
 	type TranscriptEvent,
 	toJsonValue,
 } from "vitest-evals/harness";
-import { THEOSES_SESSION_SNAPSHOT_ARTIFACT } from "./vitest-evals/artifacts.ts";
+import { persistFailedEvalSession, THEOSES_SESSION_SNAPSHOT_ARTIFACT } from "./vitest-evals/artifacts.ts";
 
 export type TheosesCodingAgentInput = string | Array<{ type: "prompt"; content: string } | { type: "reload" }>;
 
@@ -225,7 +225,12 @@ async function runTheosesCodingAgent<TOutput extends JsonValue>(
 		try {
 			const sessionPath = sessionManager.getSessionFile();
 			if (sessionPath && existsSync(sessionPath)) {
-				setArtifact(THEOSES_SESSION_SNAPSHOT_ARTIFACT, await readFile(sessionPath, "utf8"));
+				const snapshot = await readFile(sessionPath, "utf8");
+				setArtifact(THEOSES_SESSION_SNAPSHOT_ARTIFACT, snapshot);
+				const artifactDirectory = process.env.THEOSES_EVAL_ARTIFACT_DIR?.trim();
+				if (!outcome.success && artifactDirectory) {
+					await persistFailedEvalSession(artifactDirectory, sessionManager.getSessionId(), snapshot);
+				}
 			}
 		} catch (error) {
 			cleanupErrors.push(error);
