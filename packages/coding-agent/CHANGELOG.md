@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.100] - 2026-09-29
 
 - fix: the built-in default model for `together` is now `moonshotai/Kimi-K3`. models.dev dropped `Kimi-K2.6` from Together, so the old default pointed at a model that no longer exists. The Together tests in `packages/ai` moved to K3 too, which is what broke `tsgo` in CI.
