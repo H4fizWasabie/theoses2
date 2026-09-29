@@ -4,10 +4,13 @@ import {
 	closeSync,
 	createReadStream,
 	existsSync,
+	fsyncSync,
 	mkdirSync,
 	openSync,
 	readdirSync,
 	readSync,
+	renameSync,
+	rmSync,
 	statSync,
 	writeFileSync,
 } from "fs";
@@ -593,6 +596,23 @@ function parseSessionEntryLine(line: string): FileEntry | null {
 	}
 }
 
+/**
+ * A crash mid-append leaves a last line with no newline. Loading skips it, but the next append would be
+ * glued onto it and lost too, so end the line before anything is appended.
+ */
+function terminateTornLine(filePath: string): void {
+	const size = statSync(filePath).size;
+	if (size === 0) return;
+	const last = Buffer.alloc(1);
+	const fd = openSync(filePath, "r");
+	try {
+		readSync(fd, last, 0, 1, size - 1);
+	} finally {
+		closeSync(fd);
+	}
+	if (last[0] !== 0x0a) appendFileSync(filePath, "\n");
+}
+
 /** Exported for testing */
 export function loadEntriesFromFile(filePath: string): FileEntry[] {
 	const resolvedFilePath = normalizePath(filePath);
@@ -1022,6 +1042,14 @@ export class SessionManager {
 				return;
 			}
 
+			if (this.persist) {
+				try {
+					terminateTornLine(this.sessionFile);
+				} catch {
+					// Unwritable log: appending fails loudly later, opening it to read must still work.
+				}
+			}
+
 			const header = this.fileEntries.find((e) => e.type === "session") as SessionHeader | undefined;
 			this.sessionId = header?.id ?? createSessionId();
 			this._hydrateImages();
@@ -1110,15 +1138,29 @@ export class SessionManager {
 			console.error(`[session] ${missing} image(s) referenced by ${this.sessionFile} could not be restored`);
 	}
 
+	/**
+	 * Replaces the log with the in-memory entries. Writes a sibling file and renames it over the log:
+	 * truncating the log and rewriting it in place left a fragment of the session's whole history when the
+	 * process died or the disk filled partway, and this runs on every compaction that prunes thinking signatures.
+	 */
 	private _rewriteFile(): void {
 		if (!this.persist || !this.sessionFile) return;
-		const fd = openSync(this.sessionFile, "w");
+		const temp = `${this.sessionFile}.${process.pid}.tmp`;
 		try {
-			for (const entry of this.fileEntries) {
-				writeFileSync(fd, this._serializeEntry(entry));
+			const mode = existsSync(this.sessionFile) ? statSync(this.sessionFile).mode & 0o777 : 0o666;
+			const fd = openSync(temp, "w", mode);
+			try {
+				for (const entry of this.fileEntries) {
+					writeFileSync(fd, this._serializeEntry(entry));
+				}
+				fsyncSync(fd);
+			} finally {
+				closeSync(fd);
 			}
-		} finally {
-			closeSync(fd);
+			renameSync(temp, this.sessionFile);
+		} catch (error) {
+			rmSync(temp, { force: true });
+			throw error;
 		}
 	}
 
