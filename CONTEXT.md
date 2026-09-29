@@ -32,6 +32,10 @@ _Avoid_: stop marker, boundary marker
 The fire-and-forget work that runs after a Channel Session turn ends successfully (memory consolidation, task-boundary detection). It never blocks or fails the reply. Triggered by the Channel Session itself when an operation finishes with outcome `completed` and no retry is pending; adapters never trigger it. Only non-CLI Channel Sessions (Telegram, dashboard) settle. Plain CLI coding runs still reach Durable Memory, but only through compaction distillation of the turns compaction drops.
 _Avoid_: post-turn hook (implies an event seam that doesn't exist), background turn work
 
+**Compaction Run**:
+One execution of context compaction, from preparation to `compaction_end`, whether triggered manually (`/compact`, RPC, extensions) or automatically (overflow, threshold, turns). Owns the `session_before_compact` and `session_compact` hooks, the summarizer call, appending the compaction entry, rebuilding message state, and every `compaction_end` / `session_compact_failed` event, including failures that never started a run. The trigger decision and overflow-retry bookkeeping stay with the Channel Session's engine, not the run. Distinct from the pure summarizer in `compaction/compaction.ts`.
+_Avoid_: compaction pass, compact job
+
 **Task Plan**:
 The list of every piece of a change plus the check that proves it, kept by the model through the `task_plan` tool and enforced by the harness: no file change without an open plan, no end of the run while items are open, and a verify item closes only after a check command passed since the last file change. A `fix` plan starts with root cause, siblings and fix scope. Persisted as `task_plan` custom entries in the session log (latest wins), so it survives restarts. Distinct from the Working Note, which records facts; the Task Plan records obligations.
 _Avoid_: todo list (implies optional), checklist

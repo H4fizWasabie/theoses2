@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- refactor: manual and automatic compaction now share one Compaction Run (`core/compaction/run.ts`) that owns the extension hooks, summarizer call, compaction entry, and every `compaction_end` / `session_compact_failed` event. The two paths in `AgentSession` had drifted apart. One behaviour change: `isCompacting` is now false when `compaction_end` listeners run for automatic compaction, as it already was for manual.
+
 ## [1.0.99] - 2026-09-28
 
 ## [1.0.98] - 2026-09-28
