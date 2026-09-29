@@ -11,6 +11,11 @@ on:
         default: "1"
         type: choice
         options: ["1", "2", "3"]
+      suite:
+        description: "coding = the easy and hard sets; plan-ab = the hard set with the task plan off vs on (3 repetitions each)"
+        default: "coding"
+        type: choice
+        options: ["coding", "plan-ab"]
   schedule:
     - cron: "0 3 * * 1"
 
@@ -25,11 +30,13 @@ jobs:
     # Forks have no secret; skip there instead of failing.
     if: github.repository == 'H4fizWasabie/theoses2'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     permissions:
       contents: read
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      SUITE: ${{ inputs.suite || 'coding' }}
+      PASSES: ${{ inputs.passes || '1' }}
     steps:
       # The runner context is not available in job-level env, so the directory is set here.
       - name: Choose the run-record directory
@@ -56,15 +63,22 @@ jobs:
         # A wrong answer fails its test; the floors below decide whether the job fails, so keep going here.
         continue-on-error: true
         run: |
-          for pass in $(seq 1 "${{ inputs.passes || '1' }}"); do
+          if [ "$SUITE" = "plan-ab" ]; then files="src/coding-plan-ab.eval.ts"; else files="src/coding.eval.ts src/coding-hard.eval.ts"; fi
+          for pass in $(seq 1 "$PASSES"); do
             THEOSES_EVAL_ARTIFACT_DIR="$EVAL_DIR/pass-$pass" npm run eval -- \
               --provider openrouter --model z-ai/glm-5.3-flash \
-              src/coding.eval.ts src/coding-hard.eval.ts || true
+              $files || true
           done
 
       - name: Summarize
         # Floors from the first baseline on the production model: the easy set 15/15, the hard set 26/33 (79%).
-        run: node packages/evals/scripts/summarize-runs.ts "$EVAL_DIR" --floor coding=1 --floor coding-hard=0.7
+        # The plan A/B compares two arms and has no floor.
+        run: |
+          if [ "$SUITE" = "plan-ab" ]; then
+            node packages/evals/scripts/summarize-runs.ts "$EVAL_DIR"
+          else
+            node packages/evals/scripts/summarize-runs.ts "$EVAL_DIR" --floor coding=1 --floor coding-hard=0.7
+          fi
 
       - name: Upload run records
         if: always()

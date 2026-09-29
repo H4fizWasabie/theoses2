@@ -15,6 +15,25 @@ describe("suiteOf", () => {
 		expect(suiteOf("coding-hard-sibling-sort-bug")).toBe("coding-hard");
 		expect(suiteOf("cache-prefix")).toBe("cache-prefix");
 	});
+
+	it("keeps the two arms of the plan A/B apart", () => {
+		expect(suiteOf("plan-off-sibling-sort-bug")).toBe("plan-off");
+		expect(suiteOf("plan-on-sibling-sort-bug")).toBe("plan-on");
+	});
+});
+
+describe("correctness comes from the judge score when a record has one", () => {
+	it("counts a passed test with a score under 1 as wrong, and a missing score falls back to the status", () => {
+		const withScore = (score: number) => JSON.stringify({ harness: "plan-on-t", test: { status: "passed" }, score });
+		const [suite] = summarizeRuns(
+			parseRuns(
+				[withScore(1), withScore(0), withScore(0.5), run("plan-on-t", "passed"), run("plan-on-t", "failed")].join(
+					"\n",
+				),
+			),
+		);
+		expect(suite).toMatchObject({ suite: "plan-on", runs: 5, passed: 2 });
+	});
 });
 
 describe("summarizeRuns", () => {

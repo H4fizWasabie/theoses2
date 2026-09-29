@@ -36,6 +36,8 @@ async function appendHarnessRunReport(test: TestCase): Promise<void> {
 			status: test.result().state,
 		},
 		harness: harness.name,
+		// The judges' average score. With judgeThreshold null the test status says nothing about correctness.
+		...(test.meta().eval?.avgScore !== undefined ? { score: test.meta().eval?.avgScore } : {}),
 		usage: run.usage,
 		...(run.timings ? { timings: run.timings } : {}),
 		...(run.errors.length > 0 ? { errors: run.errors } : {}),

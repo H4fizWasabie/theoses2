@@ -15,19 +15,28 @@ const CodingJudge = createJudge<TheosesCodingAgentInput, CodingOutput>("CodingJu
 	};
 });
 
+/**
+ * The harness for one coding task. The deployed agent runs the task plan off (the library default is on, which adds
+ * task-plan and independent plan-review round trips that pushed a trivial rename past the timeout), so `taskPlan`
+ * defaults to false; the plan A/B turns it on for the candidate.
+ */
+export function codingHarness(name: string, task: CodingTask, taskPlan = false) {
+	return createTheosesCodingAgentHarness({
+		name,
+		files: task.files,
+		// Production runs at "max" (settings.json defaultThinkingLevel); baseline the same.
+		thinkingLevel: "max",
+		settings: { taskPlan: { enabled: taskPlan } },
+		output: ({ session }): CodingOutput => gradeWorkspace(session.sessionManager.getCwd(), task),
+	});
+}
+
+export { CodingJudge, TASK_TIMEOUT_MS };
+
 /** One eval per task. `suite` prefixes harness names so run reports from different sets stay apart. */
 export function describeCodingTasks(suite: string, tasks: CodingTask[]): void {
 	for (const task of tasks) {
-		const harness = createTheosesCodingAgentHarness({
-			name: `${suite}-${task.id}`,
-			files: task.files,
-			// Production runs at "max" (settings.json defaultThinkingLevel); baseline the same.
-			thinkingLevel: "max",
-			// The deployed agent sets taskPlan.enabled=false; the library default is true, which adds
-			// task-plan and independent plan-review round trips that pushed a trivial rename past the timeout.
-			settings: { taskPlan: { enabled: false } },
-			output: ({ session }): CodingOutput => gradeWorkspace(session.sessionManager.getCwd(), task),
-		});
+		const harness = codingHarness(`${suite}-${task.id}`, task);
 
 		// Threshold 1: a wrong answer fails the test. With null a run that broke the tests still counted as passed,
 		// and the first hard-set baseline was reported as 33/33 when 26 answers were right.

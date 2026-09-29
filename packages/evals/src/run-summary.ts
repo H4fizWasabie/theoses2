@@ -1,10 +1,12 @@
-// Reads the `runs.jsonl` the eval reporter writes and turns it into a per-task, per-suite pass rate. "Passed" is the
-// test status: the coding suites use judgeThreshold 1, so it means the answer was correct, and a timeout or crash counts
-// as a failure.
+// Reads the `runs.jsonl` the eval reporter writes and turns it into a per-task, per-suite pass rate. "Passed" means the
+// answer was correct: the judges' score is 1 when the record has one, otherwise the test status is used (the coding suites
+// use judgeThreshold 1, so their status is correctness). A timeout or crash has neither and counts as a failure.
 
 export type RunRecord = {
 	harness: string;
 	test: { status: string };
+	/** Average judge score, 0..1. Absent in records written before the reporter recorded it. */
+	score?: number;
 	usage?: { totalTokens?: number; toolCalls?: number; metadata?: { estimatedCostUsd?: number } };
 	timings?: { totalMs?: number };
 };
@@ -20,9 +22,16 @@ export type TaskSummary = {
 
 export type SuiteSummary = { suite: string; runs: number; passed: number; tasks: TaskSummary[] };
 
-/** Harness names are `coding-<task>` and `coding-hard-<task>` (see coding-suite.ts). */
+/** Harness names are `coding-<task>`, `coding-hard-<task>` (coding-suite.ts) and `plan-off-<task>` / `plan-on-<task>` (coding-plan-ab.eval.ts). */
 export function suiteOf(harness: string): string {
-	return harness.startsWith("coding-hard-") ? "coding-hard" : harness.startsWith("coding-") ? "coding" : harness;
+	for (const prefix of ["coding-hard", "plan-off", "plan-on", "coding"]) {
+		if (harness.startsWith(`${prefix}-`)) return prefix;
+	}
+	return harness;
+}
+
+function isCorrect(record: RunRecord): boolean {
+	return record.score !== undefined ? record.score >= 1 : record.test.status === "passed";
 }
 
 function median(values: number[]): number | undefined {
@@ -55,7 +64,7 @@ export function summarizeRuns(records: RunRecord[]): SuiteSummary[] {
 			return {
 				task: harness.slice(suite.length + 1),
 				runs: runs.length,
-				passed: runs.filter((r) => r.test.status === "passed").length,
+				passed: runs.filter(isCorrect).length,
 				medianTokens: median(
 					runs.flatMap((r) => (r.usage?.totalTokens === undefined ? [] : [r.usage.totalTokens])),
 				),
