@@ -16,6 +16,10 @@ describe("suiteOf", () => {
 		expect(suiteOf("cache-prefix")).toBe("cache-prefix");
 	});
 
+	it("does not fold the edit-recovery tasks into the easy suite and its floor", () => {
+		expect(suiteOf("coding-recovery-edit-duplicate-line")).toBe("coding-recovery");
+	});
+
 	it("keeps the two arms of the plan A/B apart", () => {
 		expect(suiteOf("plan-off-sibling-sort-bug")).toBe("plan-off");
 		expect(suiteOf("plan-on-sibling-sort-bug")).toBe("plan-on");

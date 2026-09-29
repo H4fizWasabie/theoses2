@@ -5,8 +5,9 @@ import { describe, expect, it } from "vitest";
 import { type CodingTask, gradeWorkspace, writeFiles } from "../src/coding-grader.ts";
 import { easyTasks } from "../src/coding-tasks-easy.ts";
 import { hardTasks } from "../src/coding-tasks-hard.ts";
+import { recoveryTasks } from "../src/coding-tasks-recovery.ts";
 
-const tasks: CodingTask[] = [...easyTasks, ...hardTasks];
+const tasks: CodingTask[] = [...easyTasks, ...hardTasks, ...recoveryTasks];
 
 // A bad fixture must not be mistaken for a bad agent: every task has to fail as seeded and pass with its
 // reference solution, and the solution must leave protected files alone.
