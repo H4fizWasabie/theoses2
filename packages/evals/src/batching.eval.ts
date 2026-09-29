@@ -61,6 +61,8 @@ function harnessFor(name: string, files: Record<string, string>, strong: boolean
 		name,
 		files,
 		thinkingLevel: "max",
+		// Only `read`: with bash available the model collapses the task into one `cat` command and never batches.
+		tools: ["read"],
 		settings: { taskPlan: { enabled: false } },
 		...(strong ? { transformSystemPrompt: withStrongerEfficiency } : {}),
 		output: ({ response, session }): Output => {
