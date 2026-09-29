@@ -180,6 +180,8 @@ for (const task of tasks) {
 	const harness = createTheosesCodingAgentHarness({
 		name: `coding-${task.id}`,
 		files: task.files,
+		// Production runs at "max" (settings.json defaultThinkingLevel); baseline the same.
+		thinkingLevel: "max",
 		output: ({ session }): CodingOutput => {
 			const cwd = session.sessionManager.getCwd();
 			const protectedIntact = task.protectedFiles.every(
