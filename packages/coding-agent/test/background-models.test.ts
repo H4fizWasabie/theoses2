@@ -85,17 +85,17 @@ describe("background model resolvers honour backgroundModels overrides", () => {
 	it("consolidation uses the configured model, providers and quantizations", () => {
 		const { runtime, getModel } = runtimeWith({
 			consolidation: {
-				model: "deepseek/deepseek-v4-flash-0731",
-				providers: ["Baidu", "DeepInfra"],
+				model: "vendor/other-model",
+				providers: ["ProviderA", "ProviderB"],
 				quantizations: ["fp8"],
 			},
 		});
 
 		const model = resolveBackgroundModel(runtime, "consolidation");
 
-		expect(getModel).toHaveBeenCalledWith("openrouter", "deepseek/deepseek-v4-flash-0731");
+		expect(getModel).toHaveBeenCalledWith("openrouter", "vendor/other-model");
 		expect(routingOf(model)).toMatchObject({
-			order: ["Baidu", "DeepInfra"],
+			order: ["ProviderA", "ProviderB"],
 			quantizations: ["fp8"],
 			allow_fallbacks: false,
 		});
@@ -107,7 +107,7 @@ describe("background model resolvers honour backgroundModels overrides", () => {
 		const model = resolveBackgroundModel(runtime, "explorer");
 
 		expect(routingOf(model)).not.toHaveProperty("quantizations");
-		expect(routingOf(model)).toMatchObject({ order: ["Baidu", "DeepInfra"], allow_fallbacks: false });
+		expect(routingOf(model)).toMatchObject({ order: ["Novita"], allow_fallbacks: false });
 	});
 
 	it("the explorer and consolidation are configured independently", () => {
@@ -117,7 +117,7 @@ describe("background model resolvers honour backgroundModels overrides", () => {
 		resolveBackgroundModel(runtime, "consolidation");
 
 		expect(getModel).toHaveBeenNthCalledWith(1, "openrouter", "vendor/explorer-only");
-		expect(getModel).toHaveBeenNthCalledWith(2, "openrouter", "deepseek/deepseek-v4-flash-0731");
+		expect(getModel).toHaveBeenNthCalledWith(2, "openrouter", "inclusionai/ling-3.0-flash-vl");
 	});
 
 	it("a malformed setting fails the resolve instead of silently using the default", () => {

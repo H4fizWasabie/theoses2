@@ -53,22 +53,33 @@ Memory consolidation (which also writes task-boundary summaries) and the explore
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `backgroundModels.<name>.model` | string | `"deepseek/deepseek-v4-flash-0731:free"` | OpenRouter model id |
-| `backgroundModels.<name>.providers` | string[] | `["OpenInference"]` | OpenRouter provider `order`, by the endpoints API's `provider_name`. Requests fail instead of falling back to a provider outside the list. Must not be empty |
-| `backgroundModels.<name>.quantizations` | string[] | `["fp8"]` | Accepted quantizations. An empty list turns the filter off |
+| `backgroundModels.<name>.model` | string | `"inclusionai/ling-3.0-flash-vl"` | OpenRouter model id |
+| `backgroundModels.<name>.providers` | string[] | `["DeepInfra"]` (`["Novita"]` for `explorer` and `research`) | OpenRouter provider `order`, by the endpoints API's `provider_name`. Requests fail instead of falling back to a provider outside the list. Must not be empty |
+| `backgroundModels.<name>.quantizations` | string[] | `["fp16"]` (`["bf16"]` for `explorer` and `research`) | Accepted quantizations. An empty list turns the filter off |
 
-Any field you omit keeps its default. A malformed value fails the background call with a message naming the setting, rather than silently using the default.
+The `reviewer` (the task-plan reviewer) defaults to `openai/gpt-6-luna` via OpenAI. Any field you omit keeps its default. A malformed value fails the background call with a message naming the setting, rather than silently using the default.
 
 ```json
 {
   "backgroundModels": {
     "consolidation": {
-      "model": "deepseek/deepseek-v4-flash-0731",
-      "providers": ["Baidu", "DeepInfra"]
+      "model": "inclusionai/ling-3.0-flash-vl",
+      "providers": ["DeepInfra"],
+      "quantizations": ["fp16"]
     }
   }
 }
 ```
+
+### Excluded Models
+
+`excludedModels` lists patterns for models that must not be selectable at all: they disappear from `/model`, cycling and every listing, a background model or a resumed session's saved model that matches is treated as missing. A pattern is matched against `provider/id` and against the bare id, ignoring case; `*` matches any characters, including `/`. A trusted project's list is added to yours; a project cannot remove your patterns.
+
+```json
+{ "excludedModels": ["*deepseek*"] }
+```
+
+Read at startup and on `/reload`.
 
 ### UI & Display
 
