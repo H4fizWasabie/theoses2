@@ -21,7 +21,7 @@ on:
         type: choice
         options: ["1", "2", "3"]
       suite:
-        description: "coding = the easy, hard and edit-recovery sets; plan-ab = the hard set with the task plan off vs on (3 repetitions each)"
+        description: "coding = the easy, hard, edit-recovery and real-fix replay sets; plan-ab = the hard set with the task plan off vs on (3 repetitions each)"
         default: "coding"
         type: choice
         options: ["coding", "plan-ab"]
@@ -55,6 +55,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The replay tasks start at the parent of a real fix, so they need the history.
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -72,7 +74,7 @@ jobs:
         # A wrong answer fails its test; the floors below decide whether the job fails, so keep going here.
         continue-on-error: true
         run: |
-          if [ "$SUITE" = "plan-ab" ]; then files="src/coding-plan-ab.eval.ts"; else files="src/coding.eval.ts src/coding-hard.eval.ts src/coding-recovery.eval.ts"; fi
+          if [ "$SUITE" = "plan-ab" ]; then files="src/coding-plan-ab.eval.ts"; else files="src/coding.eval.ts src/coding-hard.eval.ts src/coding-recovery.eval.ts src/coding-replay.eval.ts"; fi
           for pass in $(seq 1 "$PASSES"); do
             THEOSES_EVAL_ARTIFACT_DIR="$EVAL_DIR/pass-$pass" npm run eval -- \
               --provider openrouter --model z-ai/glm-5.3-flash \

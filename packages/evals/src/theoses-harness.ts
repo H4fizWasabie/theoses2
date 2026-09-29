@@ -47,6 +47,8 @@ type TheosesCodingAgentHarnessOptions = {
 	settings?: Parameters<typeof SettingsManager.inMemory>[0];
 	/** Files written into the workspace before the run, keyed by relative path. */
 	files?: Record<string, string>;
+	/** Fills the workspace after `files`, for a tree too big to list (a replay of a real repository). */
+	seed?: (cwd: string) => void | Promise<void>;
 };
 
 type TheosesCodingAgentHarnessWithOutput<TOutput extends JsonValue> = TheosesCodingAgentHarnessOptions & {
@@ -143,6 +145,7 @@ async function runTheosesCodingAgent<TOutput extends JsonValue>(
 			await mkdir(dirname(target), { recursive: true });
 			await writeFile(target, content);
 		}
+		await options.seed?.(cwd);
 		const services = await createAgentSessionServices({
 			cwd,
 			agentDir,
