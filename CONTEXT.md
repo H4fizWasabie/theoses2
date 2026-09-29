@@ -32,6 +32,10 @@ _Avoid_: stop marker, boundary marker
 The fire-and-forget work that runs after a Channel Session turn ends successfully (memory consolidation, task-boundary detection). It never blocks or fails the reply. Triggered by the Channel Session itself when an operation finishes with outcome `completed` and no retry is pending; adapters never trigger it. Only non-CLI Channel Sessions (Telegram, dashboard) settle. Plain CLI coding runs still reach Durable Memory, but only through compaction distillation of the turns compaction drops.
 _Avoid_: post-turn hook (implies an event seam that doesn't exist), background turn work
 
+**Tool Registry**:
+The session's set of available tools, built from built-in, SDK, external (sidecar, MCP) and extension sources, plus the rule that decides which of them are active: allow/exclude lists, external tools deferred behind `tool_search`, `taskPlan.enabled` hiding `task_plan`. Implemented by `core/tool-registry.ts`. It does not own the active set (the engine's Agent does) and does not execute tools beyond routing `tool_call`: a refresh returns the names that should be active and the session applies them.
+_Avoid_: tool manager, tool catalog
+
 **Task Plan**:
 The list of every piece of a change plus the check that proves it, kept by the model through the `task_plan` tool and enforced by the harness: no file change without an open plan, no end of the run while items are open, and a verify item closes only after a check command passed since the last file change. A `fix` plan starts with root cause, siblings and fix scope. Persisted as `task_plan` custom entries in the session log (latest wins), so it survives restarts. Distinct from the Working Note, which records facts; the Task Plan records obligations.
 _Avoid_: todo list (implies optional), checklist
