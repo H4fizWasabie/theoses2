@@ -10,6 +10,7 @@ export type Inbound =
 	| { kind: "stop" }
 	| { kind: "toolCallDetail"; on: boolean }
 	| { kind: "model"; ref: string }
+	| { kind: "rewind"; args: string }
 	| { kind: "prompt" };
 
 const STOP_COMMANDS = new Set(["stop", "halt", "/stop", "/cancel"]);
@@ -24,6 +25,8 @@ export function readInbound(message: Message): Inbound {
 	// Toggle for per-tool-call status entries.
 	if (TOOL_CALL_DETAIL_ON.has(normalized)) return { kind: "toolCallDetail", on: true };
 	if (TOOL_CALL_DETAIL_OFF.has(normalized)) return { kind: "toolCallDetail", on: false };
+	const rewind = normalized.match(/^\/rewind(?:\s+(.*))?$/);
+	if (rewind) return { kind: "rewind", args: (rewind[1] ?? "").trim() };
 	const ref = parseModelCommand(text);
 	if (ref !== undefined) return { kind: "model", ref };
 	return { kind: "prompt" };

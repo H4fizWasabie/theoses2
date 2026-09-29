@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fauxAssistantMessage, registerFauxProvider } from "theoses-ai/compat";
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "theoses-ai/compat";
 import { SessionManager } from "theoses-coding-agent";
 import { createDashboardServer } from "../src/index.ts";
 
@@ -315,5 +315,82 @@ test("dashboard rejects a model switch to an unknown provider/id", async () => {
 		assert.match(body.error, /No exact match/);
 	} finally {
 		await close(server);
+	}
+});
+
+test("dashboard lists the turns that changed files, previews a rewind, and puts the files back", async () => {
+	const root = await mkdtemp(join(tmpdir(), "theoses-dashboard-rewind-"));
+	const agentDir = join(root, "agent");
+	await mkdir(agentDir);
+	const faux = registerFauxProvider();
+	const model = faux.getModel();
+	await writeFile(
+		join(agentDir, "models.json"),
+		JSON.stringify({
+			providers: {
+				[model.provider]: {
+					baseUrl: model.baseUrl,
+					apiKey: "faux-key",
+					api: faux.api,
+					models: [{ id: model.id, name: model.name, reasoning: model.reasoning, input: model.input }],
+				},
+			},
+		}),
+	);
+	await writeFile(
+		join(agentDir, "settings.json"),
+		JSON.stringify({ defaultProvider: model.provider, defaultModel: model.id }),
+	);
+	const previousAgentDir = process.env.THEOSES_CODING_AGENT_DIR;
+	process.env.THEOSES_CODING_AGENT_DIR = agentDir;
+	const target = join(root, "notes.txt");
+	await writeFile(target, "v0");
+	faux.setResponses([
+		fauxAssistantMessage(fauxToolCall("write", { path: "notes.txt", content: "v1" }), { stopReason: "toolUse" }),
+		fauxAssistantMessage("done"),
+	]);
+	const server = createDashboardServer({ accessToken: "test-owner-token", cwd: root });
+	const base = await listen(server);
+	const headers = { Authorization: "Bearer test-owner-token", "Content-Type": "application/json" };
+	try {
+		const created = await fetch(`${base}/api/sessions`, { method: "POST", headers });
+		const session = (await created.json()) as { id: string };
+		const url = `${base}/api/sessions/${encodeURIComponent(session.id)}/rewind`;
+		await (
+			await fetch(`${base}/api/sessions/${encodeURIComponent(session.id)}/messages`, {
+				method: "POST",
+				headers,
+				body: JSON.stringify({ message: "change notes" }),
+			})
+		).text();
+		assert.equal(await readFile(target, "utf8"), "v1");
+
+		const { points } = (await (await fetch(url, { headers })).json()) as {
+			points: Array<{ entryId: string; text: string }>;
+		};
+		assert.deepEqual(
+			points.map((p) => p.text),
+			["change notes"],
+		);
+
+		const { preview } = (await (await fetch(`${url}?entry=${points[0].entryId}`, { headers })).json()) as {
+			preview: string;
+		};
+		assert.match(preview, /Restore 1 file/);
+		assert.equal(await readFile(target, "utf8"), "v1", "a preview changes nothing");
+
+		const rewound = await fetch(url, {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ entryId: points[0].entryId }),
+		});
+		assert.equal(rewound.status, 200);
+		assert.match(((await rewound.json()) as { message: string }).message, /Restored 1 file/);
+		assert.equal(await readFile(target, "utf8"), "v0");
+	} finally {
+		await close(server);
+		faux.unregister();
+		if (previousAgentDir === undefined) delete process.env.THEOSES_CODING_AGENT_DIR;
+		else process.env.THEOSES_CODING_AGENT_DIR = previousAgentDir;
 	}
 });

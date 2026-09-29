@@ -1,7 +1,9 @@
 import type { ThinkingLevel } from "theoses-agent-core";
 import type { Api, Model } from "theoses-ai";
 import type { AgentSessionEvent, PromptOptions, PromptResult } from "./agent-session.ts";
+import { stripClockAnnotation } from "./clock.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
+import { describeRewindPlan, FILE_CHECKPOINT_ENTRY_TYPE, type RewindResult } from "./file-checkpoints.ts";
 import { findExactModelReferenceMatch } from "./model-resolver.ts";
 import { createAgentSession } from "./sdk.ts";
 import { SessionManager } from "./session-manager.ts";
@@ -26,6 +28,18 @@ export interface ChannelSession {
 	/** Session-only switch to the exact `provider/id` match; settings.json's default is untouched. */
 	switchModel(reference: string): Promise<{ model: Model<Api> } | { error: string }>;
 	storeArtifact(label: string, fileName: string, data: Uint8Array): string;
+	/** The newest user messages whose turn changed files, newest first: what `rewind` can put back (file-checkpoints.ts). */
+	rewindPoints(limit?: number): RewindPoint[];
+	/** What `rewind(entryId)` would do, as text for a confirmation. Throws for an entry that is not on the current branch. */
+	previewRewind(entryId: string): string;
+	/** Puts the files changed since that user message back; the conversation is left alone. Throws while a run is active. */
+	rewind(entryId: string): RewindResult;
+}
+
+export interface RewindPoint {
+	entryId: string;
+	/** The user message's text, for choosing between points. */
+	text: string;
 }
 
 export interface ChannelInput {
@@ -34,6 +48,14 @@ export interface ChannelInput {
 	replyContext?: string;
 	/** See PromptOptions.settlementText. */
 	settlementText?: string;
+}
+
+function userText(content: string | Array<{ type: string; text?: string }>): string {
+	const text =
+		typeof content === "string"
+			? content
+			: content.map((part) => (part.type === "text" ? (part.text ?? "") : "[image]")).join(" ");
+	return stripClockAnnotation(text);
 }
 
 /** The owner-facing line for a turn that still failed after its retries (#211), or undefined if it didn't. */
@@ -142,6 +164,27 @@ export function createChannelSessions(options: ChannelSessionsOptions) {
 			},
 			storeArtifact(label, fileName, data) {
 				return sessionManager.storeArtifact(label, fileName, data);
+			},
+			rewindPoints(limit = 10) {
+				const points: RewindPoint[] = [];
+				let turnChangedFiles = false;
+				const branch = sessionManager.getBranch();
+				for (let i = branch.length - 1; i >= 0 && points.length < limit; i--) {
+					const entry = branch[i];
+					if (entry.type === "custom" && entry.customType === FILE_CHECKPOINT_ENTRY_TYPE) {
+						turnChangedFiles = true;
+					} else if (entry.type === "message" && entry.message.role === "user") {
+						if (turnChangedFiles) points.push({ entryId: entry.id, text: userText(entry.message.content) });
+						turnChangedFiles = false;
+					}
+				}
+				return points;
+			},
+			previewRewind(entryId) {
+				return describeRewindPlan(session.previewFileRewind(entryId));
+			},
+			rewind(entryId) {
+				return session.rewindFiles(entryId);
 			},
 		};
 	}

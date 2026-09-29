@@ -11,6 +11,7 @@ import {
 	configureHttpDispatcher,
 	createChannelSessions,
 	describeFinalError,
+	describeRewindResult,
 	getAgentDir,
 	type SessionInfo,
 	SessionManager,
@@ -402,7 +403,7 @@ async function api(
 		return true;
 	}
 
-	const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)(?:\/(messages|stop|model))?$/);
+	const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)(?:\/(messages|stop|model|rewind))?$/);
 	if (sessionMatch) {
 		const id = decodeURIComponent(sessionMatch[1]);
 		const info = await findVisibleSession(id, channelSessions, cwd);
@@ -413,6 +414,18 @@ async function api(
 		if (sessionMatch[2] === "stop" && request.method === "POST") {
 			await (await dashboardSession(info, channelSessions)).stop();
 			json(response, 200, { ok: true });
+			return true;
+		}
+		if (sessionMatch[2] === "rewind" && request.method === "GET") {
+			const session = await dashboardSession(info, channelSessions);
+			const entry = url.searchParams.get("entry");
+			json(response, 200, entry ? { preview: session.previewRewind(entry) } : { points: session.rewindPoints() });
+			return true;
+		}
+		if (sessionMatch[2] === "rewind" && request.method === "POST") {
+			const session = await dashboardSession(info, channelSessions);
+			const entryId = stringField(await body(request), "entryId");
+			json(response, 200, { message: describeRewindResult(session.rewind(entryId)) });
 			return true;
 		}
 		if (sessionMatch[2] === "model" && request.method === "POST") {

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -172,5 +172,44 @@ describe("Channel Session", () => {
 		faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "boom" })]);
 		const result = await (await registry().open("chat-1")).submit({ text: "hi" });
 		expect(result).toEqual({ outcome: "failed", finalError: expect.objectContaining({ message: "boom" }) });
+	});
+	describe("rewinding files", () => {
+		const writeCall = (path: string, content: string) =>
+			fauxAssistantMessage(fauxToolCall("write", { path, content }), { stopReason: "toolUse" });
+
+		it("lists the turns that changed files, previews them, and puts the files back", async () => {
+			writeFileSync(join(cwd, "a.txt"), "v0");
+			faux.setResponses([
+				writeCall("a.txt", "v1"),
+				fauxAssistantMessage("done a"),
+				fauxAssistantMessage("just talking"),
+				writeCall("b.txt", "new"),
+				fauxAssistantMessage("done b"),
+			]);
+			const session = await registry().open("chat-1");
+			await session.submit({ text: "change a" });
+			await session.submit({ text: "hello" });
+			await session.submit({ text: "make b" });
+
+			const points = session.rewindPoints();
+
+			expect(points.map((p) => p.text)).toEqual(["make b", "change a"]);
+			expect(session.previewRewind(points[1].entryId)).toContain("Restore 1 file");
+			expect(session.previewRewind(points[1].entryId)).toContain("Delete 1 file");
+
+			const result = session.rewind(points[1].entryId);
+
+			expect(result.failed).toEqual([]);
+			expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("v0");
+			expect(existsSync(join(cwd, "b.txt"))).toBe(false);
+		});
+
+		it("has nothing to list before any file changed", async () => {
+			faux.setResponses([fauxAssistantMessage("hi")]);
+			const session = await registry().open("chat-1");
+			await session.submit({ text: "hello" });
+
+			expect(session.rewindPoints()).toEqual([]);
+		});
 	});
 });

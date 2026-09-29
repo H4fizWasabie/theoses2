@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- feat: Rewind button and `GET/POST /api/sessions/:id/rewind`. The button lists the turns that changed files, previews what would be restored or deleted, and puts the files back after a confirm; the conversation is left alone. Disabled while a reply is running.
 ## [1.0.105] - 2026-09-29
 
 ## [1.0.104] - 2026-09-29
