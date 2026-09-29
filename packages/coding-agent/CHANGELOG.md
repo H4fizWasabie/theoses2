@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: `scripts/theoses-updater/update.sh` now also installs the release's `theoses-<version>-source.tar.gz` (checksum-verified) read-only at `/opt/theoses2-releases/<tag>/source`, so `/opt/theoses2-releases/current/source` is always the exact source of the running release. The service bundle ships only `dist/`, so an agent auditing its own runtime read a git checkout that had drifted 14 releases behind (v1.0.88) and labelled the audit "v1.0.102" without checking. A missing or bad source asset is logged and never blocks an update.
+
 ## [1.0.102] - 2026-09-29
 
 - fix: an `AgentSession` operation now leaves a marker file `<agent dir>/busy/<pid>-<session id>` for its whole run (retries, continuations and turn settlement included) and removes it at the end. `scripts/theoses-updater/update.sh` treats a marker whose pid is alive as busy and ignores (and deletes) one left by a dead process, keeping the session-file mtime check as a fallback for services on an older release. The mtime check alone missed long tool runs and long reasoning at `xhigh`/`max`, because a session file is only written when a message ends, so the updater restarted services mid-turn (#413). A marker that cannot be written never fails the turn.

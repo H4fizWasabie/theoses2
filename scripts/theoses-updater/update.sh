@@ -143,6 +143,23 @@ for entry_path in packages/dashboard/dist/index.js packages/telegram/dist/index.
     fi
 done
 
+# Read-only copy of the deployed source at <release>/source, so anything that needs "the code that is
+# running" (Theo auditing its own runtime) reads the exact tag instead of a checkout that drifted. The
+# release bundle ships only dist/. Best effort: a missing or bad source asset is logged, never blocks
+# an update. Pruned together with its release directory.
+SOURCE_ASSET="theoses-${latest_tag#v}-source.tar.gz"
+install_source() {
+    gh release download "$latest_tag" --repo "$REPO" --dir "$workdir" --clobber --pattern "$SOURCE_ASSET" \
+        && (cd "$workdir" && grep " ${SOURCE_ASSET}\$" SHA256SUMS | sha256sum -c -) \
+        && mkdir -p "${target_dir}.tmp/source" \
+        && tar -xzf "${workdir}/${SOURCE_ASSET}" -C "${target_dir}.tmp/source" --strip-components=1 --no-same-owner \
+        && chmod -R a-w "${target_dir}.tmp/source"
+}
+if ! install_source; then
+    log "source asset ${SOURCE_ASSET} unavailable, continuing without ${latest_tag}/source"
+    rm -rf "${target_dir}.tmp/source"
+fi
+
 rm -rf "$target_dir"
 mv "${target_dir}.tmp" "$target_dir"
 
