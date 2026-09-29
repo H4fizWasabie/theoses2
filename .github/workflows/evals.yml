@@ -30,8 +30,11 @@ jobs:
       contents: read
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      EVAL_DIR: ${{ runner.temp }}/evals
     steps:
+      # The runner context is not available in job-level env, so the directory is set here.
+      - name: Choose the run-record directory
+        run: echo "EVAL_DIR=$RUNNER_TEMP/evals" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
