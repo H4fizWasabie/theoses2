@@ -40,6 +40,10 @@ _Avoid_: compaction pass, compact job
 The session's set of available tools, built from built-in, SDK, external (sidecar, MCP) and extension sources, plus the rule that decides which of them are active: allow/exclude lists, external tools deferred behind `tool_search`, `taskPlan.enabled` hiding `task_plan`. Implemented by `core/tool-registry.ts`. It does not own the active set (the engine's Agent does) and does not execute tools beyond routing `tool_call`: a refresh returns the names that should be active and the session applies them.
 _Avoid_: tool manager, tool catalog
 
+**Model Switch**:
+Applying a chosen model to a session, whichever way it was chosen (`setModel`, cycling scoped models, cycling all available models). One private path in `AgentSession` (`_applyModel`) does it: picks the thinking level for the new model (a scoped model's own level, else the per-model default, else the global default), sets the model and records a `model_change`, saves it as the default only when asked to persist, applies the thinking level clamped to what the model supports, then emits `model_select`. The three entry points differ only in how they choose the model; the auth check belongs to `setModel`, since cycling only picks models whose provider already has credentials.
+_Avoid_: model change (that is the session-log entry), model selection
+
 **Task Plan**:
 The list of every piece of a change plus the check that proves it, kept by the model through the `task_plan` tool, which the model chooses to use or not: the harness never blocks a file change for lack of a plan and never holds a run open for open items. A plan the model does keep is held to its own rules: a verify item closes only after a check command passed since the last file change, and open or deferred items show in the status line under the final reply. A `fix` plan starts with root cause, siblings and fix scope. Persisted as `task_plan` custom entries in the session log (latest wins), so it survives restarts. Distinct from the Working Note, which records facts; the Task Plan records obligations.
 _Avoid_: todo list, checklist

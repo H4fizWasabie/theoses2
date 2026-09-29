@@ -1887,21 +1887,32 @@ export class AgentSession {
 		if (!(await this._modelRuntime.checkAuth(model.provider))) {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
 		}
+		await this._applyModel(model, "set", options);
+	}
 
+	/**
+	 * The one place a model change is applied (issue #418); setModel and both kinds of cycling only choose the model.
+	 * Picks the thinking level for the new model before switching (a scoped model's own level beats the per-model
+	 * default, which beats the global default), sets and records the model, saves it as the default only when
+	 * `options.persist` is set, applies the thinking level (clamped to what the new model supports; persisting a model
+	 * does not rewrite the global thinking default), then emits `model_select`. The auth check stays with setModel:
+	 * cycling only picks from models whose provider already has credentials.
+	 */
+	private async _applyModel(
+		model: Model<any>,
+		source: "set" | "cycle",
+		options: ModelMutationOptions,
+		scopedThinkingLevel?: ThinkingLevel,
+	): Promise<void> {
 		const previousModel = this.model;
-		const thinkingLevel = this._getThinkingLevelForModelSwitch(model);
+		const thinkingLevel = this._getThinkingLevelForModelSwitch(model, scopedThinkingLevel);
 		this.agent.state.model = model;
 		this.sessionManager.appendModelChange(model.provider, model.id);
 		if (options.persist) {
 			this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
 		}
-
-		// Apply thinking level for the new model.
-		// Per-model thinking level overrides take priority over the global default.
-		// Model persistence does not implicitly rewrite the global thinking default.
 		this.setThinkingLevel(thinkingLevel);
-
-		await this._emitModelSelect(model, previousModel, "set");
+		await this._emitModelSelect(model, previousModel, source);
 	}
 
 	/**
@@ -1939,23 +1950,8 @@ export class AgentSession {
 		const len = scopedModels.length;
 		const nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
 		const next = scopedModels[nextIndex];
-		const thinkingLevel = this._getThinkingLevelForModelSwitch(next.model, next.thinkingLevel);
 
-		// Apply model
-		this.agent.state.model = next.model;
-		this.sessionManager.appendModelChange(next.model.provider, next.model.id);
-		if (options.persist) {
-			this.settingsManager.setDefaultModelAndProvider(next.model.provider, next.model.id);
-		}
-
-		// Apply thinking level for the new model.
-		// - Explicit scoped model thinking level overrides defaults
-		// - Per-model thinking level overrides take priority over the global default
-		// setThinkingLevel clamps to model capabilities.
-		// Model persistence does not implicitly rewrite the global thinking default.
-		this.setThinkingLevel(thinkingLevel);
-
-		await this._emitModelSelect(next.model, currentModel, "cycle");
+		await this._applyModel(next.model, "cycle", options, next.thinkingLevel);
 
 		return { model: next.model, thinkingLevel: this.thinkingLevel, isScoped: true };
 	}
@@ -1975,18 +1971,7 @@ export class AgentSession {
 		const nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
 		const nextModel = availableModels[nextIndex];
 
-		const thinkingLevel = this._getThinkingLevelForModelSwitch(nextModel);
-		this.agent.state.model = nextModel;
-		this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
-		if (options.persist) {
-			this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id);
-		}
-
-		// Apply thinking level for the new model.
-		// Model persistence does not implicitly rewrite the global thinking default.
-		this.setThinkingLevel(thinkingLevel);
-
-		await this._emitModelSelect(nextModel, currentModel, "cycle");
+		await this._applyModel(nextModel, "cycle", options);
 
 		return { model: nextModel, thinkingLevel: this.thinkingLevel, isScoped: false };
 	}
