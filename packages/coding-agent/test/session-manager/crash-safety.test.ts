@@ -88,4 +88,25 @@ describe("SessionManager survives a crash mid-write", () => {
 		expect(userTexts(file)).toEqual(["first", "second"]);
 		expect(readdirSync(tempDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
 	});
+
+	describe("the first turn of a session", () => {
+		it("is on disk before the first reply for a channel session, so a restart mid-turn reads as interrupted", () => {
+			const session = SessionManager.create(tempDir, tempDir, { channel: "telegram", channelSessionId: "chat-1" });
+			session.appendMessage({ role: "user", content: "long first task", timestamp: 1 });
+			const file = session.getSessionFile() as string;
+
+			// The process dies here, before any assistant message ends.
+			expect(userTexts(file)).toEqual(["long first task"]);
+			expect(SessionManager.open(file, tempDir).getLastOperationOutcome()).toBe("interrupted");
+		});
+
+		it("still waits for the first reply for a CLI session, so an abandoned prompt leaves no file", () => {
+			const session = SessionManager.create(tempDir, tempDir);
+			session.appendMessage({ role: "user", content: "never answered", timestamp: 1 });
+			expect(readdirSync(tempDir).filter((name) => name.endsWith(".jsonl"))).toEqual([]);
+
+			session.appendMessage(assistant("answer"));
+			expect(userTexts(session.getSessionFile() as string)).toEqual(["never answered"]);
+		});
+	});
 });

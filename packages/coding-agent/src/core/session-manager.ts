@@ -1369,8 +1369,12 @@ export class SessionManager {
 	_persist(entry: SessionEntry): void {
 		if (!this.persist || !this.sessionFile) return;
 
+		// A CLI session waits for the first reply so an abandoned prompt leaves no file. A channel session
+		// (Telegram, dashboard) writes at once: the first turn can run for minutes, and until the user turn is
+		// on disk a restart mid-turn loses the task with nothing for Auto-Resume to find (issue #246).
 		const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
-		if (!hasAssistant) {
+		const writeNow = hasAssistant || this.getChannelSessionKey().channel !== "cli";
+		if (!writeNow) {
 			if (this.flushed) {
 				appendFileSync(this.sessionFile, this._serializeEntry(entry));
 			} else {
