@@ -101,7 +101,6 @@ import {
 	type TreePreparation,
 	type TurnEndEvent,
 	type TurnStartEvent,
-	wrapRegisteredTools,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import { createMemoryPromotion, type MemoryPromotion } from "./memory-promotion.ts";
@@ -129,11 +128,10 @@ import {
 import { createSessionSystemPrompt, type SessionSystemPrompt } from "./session-system-prompt.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
-import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { TaskPlanGuard } from "./task-plan-guard.ts";
+import { createToolRegistry, type ToolRegistry } from "./tool-registry.ts";
 import { currentRunMessages } from "./tool-runs.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
-import { createDeferredToolDefinitions } from "./tools/deferred-dispatch.ts";
 import { generateUnifiedPatch } from "./tools/edit-diff.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { spillPrunedText } from "./tools/output-shaping.ts";
@@ -378,11 +376,6 @@ export interface SessionStats {
 	contextUsage?: ContextUsage;
 }
 
-interface ToolDefinitionEntry {
-	definition: ToolDefinition;
-	sourceInfo: SourceInfo;
-}
-
 // ============================================================================
 // Constants
 // ============================================================================
@@ -440,14 +433,9 @@ export class AgentSession {
 	private _turnIndex = 0;
 
 	private _resourceLoader: ResourceLoader;
-	private _customTools: ToolDefinition[];
-	private _externalTools: RegisteredTool[];
 	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
 	private _cwd: string;
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
-	private _initialActiveToolNames?: string[];
-	private _allowedToolNames?: Set<string>;
-	private _excludedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
 	private _sessionStartEvent: SessionStartEvent;
 	private _extensionUIContext?: ExtensionUIContext;
@@ -463,12 +451,7 @@ export class AgentSession {
 	private readonly _memoryPromotion: MemoryPromotion;
 	private readonly _taskPlanGuard: TaskPlanGuard;
 
-	// Tool registry for extension getTools/setTools
-	private _toolRegistry: Map<string, AgentTool> = new Map();
-	private _toolDefinitions: Map<string, ToolDefinitionEntry> = new Map();
-	private _toolPromptSnippets: Map<string, string> = new Map();
-	private _toolPromptGuidelines: Map<string, string[]> = new Map();
-	private _deferredToolUsage: Map<string, number> = new Map();
+	private readonly _tools: ToolRegistry;
 
 	// Base system prompt for the current operation (without extension appends), refreshed once per
 	// prompt()/sendCustomMessage() call from _systemPrompt below.
@@ -482,16 +465,22 @@ export class AgentSession {
 		this.settingsManager = config.settingsManager;
 		this._scopedModels = config.scopedModels ?? [];
 		this._resourceLoader = config.resourceLoader;
-		this._customTools = config.customTools ?? [];
-		this._externalTools = config.externalTools ?? [];
+		this._tools = createToolRegistry({
+			customTools: config.customTools ?? [],
+			externalTools: config.externalTools ?? [],
+			allowedToolNames: config.allowedToolNames ? new Set(config.allowedToolNames) : undefined,
+			excludedToolNames: config.excludedToolNames ? new Set(config.excludedToolNames) : undefined,
+			initialActiveToolNames: config.initialActiveToolNames,
+			activate: (names) => this.setActiveToolsByName([...this.getActiveToolNames(), ...names]),
+		});
 		this._cwd = config.cwd;
 		this._systemPrompt = createSessionSystemPrompt({
 			cwd: this._cwd,
 			resourceLoader: this._resourceLoader,
 			sessionManager: this.sessionManager,
 			settingsManager: this.settingsManager,
-			getToolPromptSnippets: () => this._toolPromptSnippets,
-			getToolPromptGuidelines: () => this._toolPromptGuidelines,
+			getToolPromptSnippets: () => this._tools.promptSnippets,
+			getToolPromptGuidelines: () => this._tools.promptGuidelines,
 		});
 		this._modelRuntime = config.modelRuntime;
 		this._memoryPromotion = createMemoryPromotion({
@@ -528,9 +517,6 @@ export class AgentSession {
 			generatePatch: generateUnifiedPatch,
 		});
 		this._extensionRunnerRef = config.extensionRunnerRef;
-		this._initialActiveToolNames = config.initialActiveToolNames;
-		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
-		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 
@@ -541,7 +527,7 @@ export class AgentSession {
 		this._installAgentNextTurnRefresh();
 
 		this._buildRuntime({
-			activeToolNames: this._initialActiveToolNames,
+			activeToolNames: config.initialActiveToolNames,
 			includeAllExtensionTools: true,
 		});
 	}
@@ -1086,17 +1072,11 @@ export class AgentSession {
 	 * Get all configured tools with name, description, parameter schema, prompt guidelines, and source metadata.
 	 */
 	getAllTools(): ToolInfo[] {
-		return Array.from(this._toolDefinitions.values()).map(({ definition, sourceInfo }) => ({
-			name: definition.name,
-			description: definition.description,
-			parameters: definition.parameters,
-			promptGuidelines: definition.promptGuidelines,
-			sourceInfo,
-		}));
+		return this._tools.getAll();
 	}
 
 	getToolDefinition(name: string): ToolDefinition | undefined {
-		return this._toolDefinitions.get(name)?.definition;
+		return this._tools.getDefinition(name);
 	}
 
 	/**
@@ -1106,12 +1086,7 @@ export class AgentSession {
 	 * Changes take effect on the next agent turn.
 	 */
 	setActiveToolsByName(toolNames: string[]): void {
-		const tools: AgentTool[] = [];
-		for (const name of toolNames) {
-			const tool = this._toolRegistry.get(name);
-			if (tool) tools.push(tool);
-		}
-		this.agent.state.tools = tools;
+		this.agent.state.tools = this._tools.resolve(toolNames);
 		this._rebuildSystemPromptNow();
 	}
 
@@ -1163,30 +1138,6 @@ export class AgentSession {
 	/** File-based prompt templates */
 	get promptTemplates(): ReadonlyArray<PromptTemplate> {
 		return this._resourceLoader.getPrompts().prompts;
-	}
-
-	private _normalizePromptSnippet(text: string | undefined): string | undefined {
-		if (!text) return undefined;
-		const oneLine = text
-			.replace(/[\r\n]+/g, " ")
-			.replace(/\s+/g, " ")
-			.trim();
-		return oneLine.length > 0 ? oneLine : undefined;
-	}
-
-	private _normalizePromptGuidelines(guidelines: string[] | undefined): string[] {
-		if (!guidelines || guidelines.length === 0) {
-			return [];
-		}
-
-		const unique = new Set<string>();
-		for (const guideline of guidelines) {
-			const normalized = guideline.trim();
-			if (normalized.length > 0) {
-				unique.add(normalized);
-			}
-		}
-		return Array.from(unique);
 	}
 
 	// =========================================================================
@@ -2537,163 +2488,15 @@ export class AgentSession {
 	}
 
 	private _refreshToolRegistry(options?: { activeToolNames?: string[]; includeAllExtensionTools?: boolean }): void {
-		const previousActiveToolNames = this.getActiveToolNames();
-		const previousRegistryNames = new Set(this._toolRegistry.keys());
-		const allowedToolNames = this._allowedToolNames;
-		const excludedToolNames = this._excludedToolNames;
-		const isAllowedTool = (name: string): boolean =>
-			(!allowedToolNames || allowedToolNames.has(name)) && !excludedToolNames?.has(name);
-
-		const registeredTools = this._extensionRunner.getAllRegisteredTools();
-		const allCustomTools = [
-			...registeredTools,
-			...this._externalTools,
-			...this._customTools.map((definition) => ({
-				definition,
-				sourceInfo: createSyntheticSourceInfo(`<sdk:${definition.name}>`, { source: "sdk" }),
-			})),
-		].filter((tool) => isAllowedTool(tool.definition.name));
-		const dispatcherDefinitions = createDeferredToolDefinitions(
-			() => new Map(allCustomTools.map((tool) => [tool.definition.name, tool.definition])),
-			(names, _context) => this.setActiveToolsByName([...this.getActiveToolNames(), ...names]),
-			{
-				get: (name) => this._deferredToolUsage.get(name) ?? 0,
-				record: (name) => this._deferredToolUsage.set(name, (this._deferredToolUsage.get(name) ?? 0) + 1),
-			},
-			(name, toolCallId, args, signal, onUpdate) => {
-				const tool = this._toolRegistry.get(name);
-				if (!tool) throw new Error(`Unknown deferred tool: ${name}`);
-				return tool.execute(toolCallId, args, signal, onUpdate);
-			},
-		);
-		const definitionRegistry = new Map<string, ToolDefinitionEntry>(
-			Array.from(this._baseToolDefinitions.entries())
-				.filter(([name]) => isAllowedTool(name))
-				.map(([name, definition]) => [
-					name,
-					{
-						definition,
-						sourceInfo: createSyntheticSourceInfo(`<builtin:${name}>`, { source: "builtin" }),
-					},
-				]),
-		);
-		for (const tool of allCustomTools) {
-			definitionRegistry.set(tool.definition.name, {
-				definition: tool.definition,
-				sourceInfo: tool.sourceInfo,
-			});
-		}
-		for (const definition of dispatcherDefinitions) {
-			if (!isAllowedTool(definition.name)) continue;
-			definitionRegistry.set(definition.name, {
-				definition,
-				sourceInfo: createSyntheticSourceInfo(`<builtin:${definition.name}>`, { source: "builtin" }),
-			});
-		}
-		this._toolDefinitions = definitionRegistry;
-		this._toolPromptSnippets = new Map(
-			Array.from(definitionRegistry.values())
-				.map(({ definition }) => {
-					const snippet = this._normalizePromptSnippet(definition.promptSnippet);
-					return snippet ? ([definition.name, snippet] as const) : undefined;
-				})
-				.filter((entry): entry is readonly [string, string] => entry !== undefined),
-		);
-		this._toolPromptGuidelines = new Map(
-			Array.from(definitionRegistry.values())
-				.map(({ definition }) => {
-					const guidelines = this._normalizePromptGuidelines(definition.promptGuidelines);
-					return guidelines.length > 0 ? ([definition.name, guidelines] as const) : undefined;
-				})
-				.filter((entry): entry is readonly [string, string[]] => entry !== undefined),
-		);
-		const runner = this._extensionRunner;
-		const wrappedExtensionTools = wrapRegisteredTools(allCustomTools, runner);
-		const wrappedDispatcherTools = wrapRegisteredTools(
-			dispatcherDefinitions.map((definition) => ({
-				definition,
-				sourceInfo: createSyntheticSourceInfo(`<builtin:${definition.name}>`, { source: "builtin" }),
-			})),
-			runner,
-			false,
-		);
-		const wrappedBuiltInTools = wrapRegisteredTools(
-			Array.from(this._baseToolDefinitions.values())
-				.filter((definition) => isAllowedTool(definition.name))
-				.map((definition) => ({
-					definition,
-					sourceInfo: createSyntheticSourceInfo(`<builtin:${definition.name}>`, { source: "builtin" }),
-				})),
-			runner,
-			false,
-		);
-
-		const toolRegistry = new Map(wrappedBuiltInTools.map((tool) => [tool.name, tool]));
-		for (const tool of wrappedDispatcherTools) toolRegistry.set(tool.name, tool);
-		for (const tool of wrappedExtensionTools as AgentTool[]) {
-			toolRegistry.set(tool.name, tool);
-		}
-		this._toolRegistry = toolRegistry;
-
-		// Only tools sourced from an external tool source (#14: HTTP sidecar/MCP) default to
-		// deferred/inactive (#16). Built-in, extension-registered, and SDK tools keep their
-		// pre-#16 default-active behavior — #16 scoped deferral to large external catalogs,
-		// not to Pi's own first-party tool registration mechanisms.
-		const isExternalToolSource = (name: string): boolean => {
-			const source = definitionRegistry.get(name)?.sourceInfo.source;
-			return source?.startsWith("sidecar:") === true || source?.startsWith("mcp:") === true;
-		};
-
-		const nextActiveToolNames = (
-			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
-		).filter(
-			(name) => isAllowedTool(name) && (!isExternalToolSource(name) || previousActiveToolNames.includes(name)),
-		);
-
-		if (allowedToolNames) {
-			for (const toolName of this._toolRegistry.keys()) {
-				if (allowedToolNames.has(toolName) && !isExternalToolSource(toolName)) {
-					nextActiveToolNames.push(toolName);
-				}
-			}
-		} else if (options?.includeAllExtensionTools) {
-			for (const toolName of this._toolRegistry.keys()) {
-				if (
-					isAllowedTool(toolName) &&
-					!isExternalToolSource(toolName) &&
-					definitionRegistry.get(toolName)?.sourceInfo.source !== "builtin"
-				) {
-					nextActiveToolNames.push(toolName);
-				}
-			}
-		} else if (!options?.activeToolNames) {
-			for (const toolName of this._toolRegistry.keys()) {
-				if (!previousRegistryNames.has(toolName) && isAllowedTool(toolName) && !isExternalToolSource(toolName)) {
-					nextActiveToolNames.push(toolName);
-				}
-			}
-		}
-		// Only external (MCP/sidecar) tools are ever deferred, so without one there is nothing for
-		// tool_search to find and the pair only invites searches for tools that are already active.
-		const hasDeferredTools = allCustomTools.some((tool) => isExternalToolSource(tool.definition.name));
-		for (const dispatcherName of hasDeferredTools ? ["tool_search", "tool_call"] : []) {
-			if (
-				isAllowedTool(dispatcherName) &&
-				options?.activeToolNames?.length !== 0 &&
-				this._initialActiveToolNames?.length !== 0
-			) {
-				nextActiveToolNames.push(dispatcherName);
-			}
-		}
-
-		// taskPlan.enabled: false must hide the task_plan tool itself, not just the stop-guard
-		// that used to be the only thing gated on it (the model kept "planning" into a tool
-		// nothing enforced). Filtered here, after allowedToolNames/activeToolNames are merged,
-		// so a caller-supplied list (e.g. --tools) can't push it back in.
-		const activeToolNames = this.settingsManager.getTaskPlanEnabled()
-			? nextActiveToolNames
-			: nextActiveToolNames.filter((name) => name !== "task_plan");
-		this.setActiveToolsByName([...new Set(activeToolNames)]);
+		const nextActiveToolNames = this._tools.refresh({
+			runner: this._extensionRunner,
+			baseToolDefinitions: this._baseToolDefinitions,
+			previousActiveToolNames: this.getActiveToolNames(),
+			activeToolNames: options?.activeToolNames,
+			includeAllExtensionTools: options?.includeAllExtensionTools,
+			taskPlanEnabled: this.settingsManager.getTaskPlanEnabled(),
+		});
+		this.setActiveToolsByName(nextActiveToolNames);
 	}
 
 	private _buildRuntime(options: {

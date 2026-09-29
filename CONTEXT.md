@@ -36,6 +36,10 @@ _Avoid_: post-turn hook (implies an event seam that doesn't exist), background t
 One execution of context compaction, from preparation to `compaction_end`, whether triggered manually (`/compact`, RPC, extensions) or automatically (overflow, threshold, turns). Owns the `session_before_compact` and `session_compact` hooks, the summarizer call, appending the compaction entry, rebuilding message state, and every `compaction_end` / `session_compact_failed` event, including failures that never started a run. The trigger decision and overflow-retry bookkeeping stay with the Channel Session's engine, not the run. Distinct from the pure summarizer in `compaction/compaction.ts`.
 _Avoid_: compaction pass, compact job
 
+**Tool Registry**:
+The session's set of available tools, built from built-in, SDK, external (sidecar, MCP) and extension sources, plus the rule that decides which of them are active: allow/exclude lists, external tools deferred behind `tool_search`, `taskPlan.enabled` hiding `task_plan`. Implemented by `core/tool-registry.ts`. It does not own the active set (the engine's Agent does) and does not execute tools beyond routing `tool_call`: a refresh returns the names that should be active and the session applies them.
+_Avoid_: tool manager, tool catalog
+
 **Task Plan**:
 The list of every piece of a change plus the check that proves it, kept by the model through the `task_plan` tool and enforced by the harness: no file change without an open plan, no end of the run while items are open, and a verify item closes only after a check command passed since the last file change. A `fix` plan starts with root cause, siblings and fix scope. Persisted as `task_plan` custom entries in the session log (latest wins), so it survives restarts. Distinct from the Working Note, which records facts; the Task Plan records obligations.
 _Avoid_: todo list (implies optional), checklist
