@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: file checkpoints. Before an `edit`, a `write` or a shell command whose targets can be read off (redirects, `sed -i`, `cp`, `mv`, `rm`, `tee`) changes a file, its original bytes are saved once per user turn to `<session dir>/checkpoints/<sha256>` (shared by the sessions in that directory, so a fork or clone still finds the bytes its copied entries name), and a `file_checkpoint` custom entry in the session log records the path and hash. `AgentSession.previewFileRewind(userEntryId)` and `rewindFiles(userEntryId)` put the files back to how they were before that user message (created files are deleted, deleted files come back) and leave the conversation alone; they refuse while a run is active. Checkpoints live in the session log, so they survive restarts and follow branches, and they never reach the model's context. Only persisted sessions checkpoint. Files over 10 MB and shell commands whose file changes cannot be traced (a script that writes files) are reported as not restorable. The `/rewind` command comes next. `TaskPlanGuard` and the checkpoints now share `fileChangesOf` in `tool-runs.ts`.
+
 ## [1.0.103] - 2026-09-29
 
 - feat: `scripts/theoses-updater/update.sh` now also installs the release's `theoses-<version>-source.tar.gz` (checksum-verified) read-only at `/opt/theoses2-releases/<tag>/source`, so `/opt/theoses2-releases/current/source` is always the exact source of the running release. The service bundle ships only `dist/`, so an agent auditing its own runtime read a git checkout that had drifted 14 releases behind (v1.0.88) and labelled the audit "v1.0.102" without checking. A missing or bad source asset is logged and never blocks an update.

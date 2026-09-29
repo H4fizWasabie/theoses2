@@ -1,0 +1,194 @@
+/**
+ * File checkpoints: before a tool call changes a file, its original bytes are saved once per user turn, so
+ * the files can be put back to how they were before any earlier turn (`/rewind`, AgentSession.rewindFiles).
+ *
+ * Original bytes go to `<session dir>/checkpoints/<sha256>` (content-addressed, so an unchanged file costs
+ * nothing twice, and shared by the sessions in that directory so a fork or clone still finds them); a
+ * `file_checkpoint` custom entry in the session log records which path and hash belong to which turn.
+ * Nothing lives in memory, so checkpoints survive a restart and follow the session's branches.
+ *
+ * Covers what `fileChangesOf` can see: `edit`, `write`, and shell commands whose targets can be read off
+ * (redirects, sed -i, cp, mv, rm, tee). A command that changes files in a way that cannot be traced (a
+ * script that writes files) is recorded as untraced and cannot be undone.
+ */
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import type { SessionEntry } from "./session-manager.ts";
+import { fileChangesOf } from "./tool-runs.ts";
+import { resolveToCwd } from "./tools/path-utils.ts";
+
+export const FILE_CHECKPOINT_ENTRY_TYPE = "file_checkpoint";
+/** Files bigger than this are not saved; a rewind reports them as not restorable. */
+export const MAX_CHECKPOINT_BYTES = 10 * 1024 * 1024;
+
+export interface FileCheckpoint {
+	/** Id of the user message the change ran under. */
+	turnId: string;
+	/** Absolute path. */
+	path: string;
+	/** sha256 of the original bytes; null when the file did not exist. Absent when the original was not saved. */
+	hash?: string | null;
+	/** Why the original was not saved (too large, not a regular file). */
+	skipped?: string;
+	/** A shell command that changes files in a way whose targets cannot be read off it. */
+	untraced?: string;
+}
+
+/** The part of SessionManager the checkpoints use. */
+export interface CheckpointSession {
+	isPersisted(): boolean;
+	getLeafEntry(): SessionEntry | undefined;
+	getEntry(id: string): SessionEntry | undefined;
+	getCheckpointDirectory(): string;
+	appendCustomEntry(customType: string, data?: unknown): string;
+}
+
+function isMissing(error: unknown): boolean {
+	const code = (error as NodeJS.ErrnoException | undefined)?.code;
+	return code === "ENOENT" || code === "ENOTDIR";
+}
+
+function checkpointOf(entry: SessionEntry): FileCheckpoint | undefined {
+	return entry.type === "custom" && entry.customType === FILE_CHECKPOINT_ENTRY_TYPE
+		? (entry.data as FileCheckpoint)
+		: undefined;
+}
+
+export class FileCheckpoints {
+	private readonly session: CheckpointSession;
+	private readonly cwd: string;
+
+	constructor(session: CheckpointSession, cwd: string) {
+		this.session = session;
+		this.cwd = cwd;
+	}
+
+	/** Saves the original of every file the call is about to change, once per user turn. Never blocks or throws. */
+	beforeToolCall(toolName: string, args: Record<string, unknown>): void {
+		if (!this.session.isPersisted()) return;
+		const changes = fileChangesOf(toolName, args);
+		if (!changes) return;
+		try {
+			const turn = this.currentTurn();
+			if (!turn) return;
+			for (const path of changes.paths) {
+				const absolute = resolveToCwd(path, this.cwd);
+				if (turn.seen.has(absolute)) continue;
+				turn.seen.add(absolute);
+				this.record({ turnId: turn.turnId, path: absolute, ...this.saveOriginal(absolute) });
+			}
+			if (changes.untraced) this.record({ turnId: turn.turnId, path: "", untraced: changes.untraced });
+		} catch (error) {
+			console.error(`[file-checkpoints] could not checkpoint ${toolName}: ${(error as Error).message}`);
+		}
+	}
+
+	private record(checkpoint: FileCheckpoint): void {
+		this.session.appendCustomEntry(FILE_CHECKPOINT_ENTRY_TYPE, checkpoint);
+	}
+
+	/** The user message the leaf's turn started with, and the paths already checkpointed since it. */
+	private currentTurn(): { turnId: string; seen: Set<string> } | undefined {
+		const seen = new Set<string>();
+		for (
+			let entry = this.session.getLeafEntry();
+			entry;
+			entry = entry.parentId ? this.session.getEntry(entry.parentId) : undefined
+		) {
+			if (entry.type === "message" && entry.message.role === "user") return { turnId: entry.id, seen };
+			const checkpoint = checkpointOf(entry);
+			if (checkpoint?.path) seen.add(checkpoint.path);
+		}
+		return undefined;
+	}
+
+	private saveOriginal(absolute: string): Pick<FileCheckpoint, "hash" | "skipped"> {
+		let size: number;
+		try {
+			const stat = statSync(absolute);
+			if (!stat.isFile()) return { skipped: "not a regular file" };
+			size = stat.size;
+		} catch (error) {
+			if (isMissing(error)) return { hash: null };
+			return { skipped: (error as Error).message };
+		}
+		if (size > MAX_CHECKPOINT_BYTES) return { skipped: `larger than ${MAX_CHECKPOINT_BYTES} bytes` };
+		const bytes = readFileSync(absolute);
+		const hash = createHash("sha256").update(bytes).digest("hex");
+		const blob = join(this.session.getCheckpointDirectory(), hash);
+		if (!existsSync(blob)) writeFileSync(blob, bytes, { mode: 0o600 });
+		return { hash };
+	}
+}
+
+export interface RewindPlan {
+	/** Files to put back: `hash` is the content to restore, or null to delete a file that did not exist. */
+	restore: Array<{ path: string; hash: string | null }>;
+	/** Files whose original was not saved, so they cannot be restored. */
+	skipped: Array<{ path: string; reason: string }>;
+	/** Shell commands since then whose file changes could not be traced. */
+	untraced: string[];
+}
+
+/**
+ * What putting the files back to their state before `targetEntryId` (a user message) would do. The earliest
+ * checkpoint of each path since then is the state before that turn. `branch` is the session's root-to-leaf path.
+ */
+export function planFileRewind(branch: SessionEntry[], targetEntryId: string): RewindPlan {
+	const start = branch.findIndex((entry) => entry.id === targetEntryId);
+	if (start < 0) throw new Error(`Entry ${targetEntryId} is not on the current branch`);
+	const plan: RewindPlan = { restore: [], skipped: [], untraced: [] };
+	const seen = new Set<string>();
+	for (const entry of branch.slice(start)) {
+		const checkpoint = checkpointOf(entry);
+		if (!checkpoint) continue;
+		if (checkpoint.untraced) {
+			if (!plan.untraced.includes(checkpoint.untraced)) plan.untraced.push(checkpoint.untraced);
+			continue;
+		}
+		if (seen.has(checkpoint.path)) continue;
+		seen.add(checkpoint.path);
+		if (checkpoint.hash === undefined) {
+			plan.skipped.push({ path: checkpoint.path, reason: checkpoint.skipped ?? "original not saved" });
+		} else {
+			plan.restore.push({ path: checkpoint.path, hash: checkpoint.hash });
+		}
+	}
+	return plan;
+}
+
+export interface RewindResult extends Omit<RewindPlan, "restore"> {
+	restored: string[];
+	deleted: string[];
+	failed: Array<{ path: string; error: string }>;
+}
+
+/** Puts the files of a plan back. One file failing does not stop the others. */
+export function applyFileRewind(plan: RewindPlan, checkpointDirectory: string): RewindResult {
+	const result: RewindResult = {
+		restored: [],
+		deleted: [],
+		failed: [],
+		skipped: plan.skipped,
+		untraced: plan.untraced,
+	};
+	for (const { path, hash } of plan.restore) {
+		try {
+			if (hash === null) {
+				if (existsSync(path)) {
+					rmSync(path, { force: true });
+					result.deleted.push(path);
+				}
+				continue;
+			}
+			const bytes = readFileSync(join(checkpointDirectory, hash));
+			mkdirSync(dirname(path), { recursive: true });
+			writeFileSync(path, bytes);
+			result.restored.push(path);
+		} catch (error) {
+			result.failed.push({ path, error: (error as Error).message });
+		}
+	}
+	return result;
+}

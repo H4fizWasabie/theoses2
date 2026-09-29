@@ -104,6 +104,13 @@ import {
 	type TurnStartEvent,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
+import {
+	applyFileRewind,
+	FileCheckpoints,
+	planFileRewind,
+	type RewindPlan,
+	type RewindResult,
+} from "./file-checkpoints.ts";
 import { createMemoryPromotion, type MemoryPromotion } from "./memory-promotion.ts";
 import { FileMemoryStore } from "./memory-store.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
@@ -451,6 +458,7 @@ export class AgentSession {
 	private readonly _memoryStore = new FileMemoryStore();
 	private readonly _memoryPromotion: MemoryPromotion;
 	private readonly _taskPlanGuard: TaskPlanGuard;
+	private readonly _fileCheckpoints: FileCheckpoints;
 
 	private readonly _tools: ToolRegistry;
 
@@ -500,6 +508,7 @@ export class AgentSession {
 			emit: (event) => this._emit(event),
 			prepareSummarizer: () => this._prepareSummarizer(),
 		});
+		this._fileCheckpoints = new FileCheckpoints(this.sessionManager, this._cwd);
 		this._taskPlanGuard = new TaskPlanGuard({
 			cwd: this._cwd,
 			getPlan: () => this.sessionManager.getTaskPlan(),
@@ -614,6 +623,7 @@ export class AgentSession {
 	 */
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
+			this._fileCheckpoints.beforeToolCall(toolCall.name, args as Record<string, unknown>);
 			const planGate = this._taskPlanGuard.beforeToolCall(toolCall.name, args as Record<string, unknown>);
 			if (planGate) return planGate;
 			const runner = this._extensionRunner;
@@ -1139,6 +1149,17 @@ export class AgentSession {
 	/** File-based prompt templates */
 	get promptTemplates(): ReadonlyArray<PromptTemplate> {
 		return this._resourceLoader.getPrompts().prompts;
+	}
+
+	/** What putting the files back to how they were before the user message `userEntryId` would do (file-checkpoints.ts). */
+	previewFileRewind(userEntryId: string): RewindPlan {
+		return planFileRewind(this.sessionManager.getBranch(), userEntryId);
+	}
+
+	/** Puts the files changed since the user message `userEntryId` back to how they were before it. Leaves the conversation alone. */
+	rewindFiles(userEntryId: string): RewindResult {
+		if (this._isAgentRunActive) throw new Error("Stop the current run before rewinding files");
+		return applyFileRewind(this.previewFileRewind(userEntryId), this.sessionManager.getCheckpointDirectory());
 	}
 
 	// =========================================================================
