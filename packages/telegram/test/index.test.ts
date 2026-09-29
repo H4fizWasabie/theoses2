@@ -6,6 +6,7 @@ const registry = vi.hoisted(() => ({ session: undefined as unknown, gate: undefi
 
 vi.mock("theoses-coding-agent", async (importOriginal) => ({
 	describeFinalError: (await importOriginal<{ describeFinalError: typeof describeFinalError }>()).describeFinalError,
+	describeRewindResult: (await importOriginal<{ describeRewindResult: unknown }>()).describeRewindResult,
 	configureHttpDispatcher: vi.fn(),
 	getAgentDir: vi.fn(() => "/tmp/telegram-test-agent-dir"),
 	createChannelSessions: vi.fn(() => ({
@@ -46,6 +47,9 @@ function fakeChannelSession(
 		}),
 		switchModel: vi.fn(),
 		storeArtifact: vi.fn(),
+		rewindPoints: vi.fn(() => [{ entryId: "e1", text: "change a" }]),
+		previewRewind: vi.fn(() => "Restore 1 file to how they were before."),
+		rewind: vi.fn(() => ({ restored: ["/w/a"], deleted: [], failed: [], skipped: [], untraced: [] })),
 	};
 	registry.session = session;
 	registry.gate = undefined;
@@ -509,5 +513,68 @@ describe("Telegram /model", () => {
 		await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledWith(1, "Model: openrouter/some/model"));
 		expect(session.switchModel).toHaveBeenCalledWith("openrouter/some/model");
 		expect(session.submit).not.toHaveBeenCalled();
+	});
+});
+
+describe("Telegram /rewind", () => {
+	function botWithSession() {
+		const session = fakeChannelSession(async () => ({ outcome: "completed" }));
+		const bot = createTelegramBot({ token: "test-token", ownerChatId: "1", cwd: "/tmp/telegram-test" });
+		bot.botInfo = {
+			id: 99,
+			is_bot: true,
+			first_name: "Test",
+			username: "test_bot",
+			can_join_groups: false,
+			can_read_all_group_messages: false,
+			supports_inline_queries: false,
+			can_connect_to_business: false,
+			has_main_web_app: false,
+		};
+		const sendMessage = vi.spyOn(bot.api, "sendMessage").mockResolvedValue({ message_id: 100 } as never);
+		return { session, bot, sendMessage };
+	}
+
+	it("lists the turns without running a turn", async () => {
+		const { session, bot, sendMessage } = botWithSession();
+
+		await bot.handleUpdate(messageUpdate(1, 1, "/rewind"));
+
+		expect(sendMessage).toHaveBeenCalledWith(1, expect.stringContaining('1. "change a"'));
+		expect(session.submit).not.toHaveBeenCalled();
+		expect(session.rewind).not.toHaveBeenCalled();
+	});
+
+	it("rewinds only after the owner confirms", async () => {
+		const { session, bot, sendMessage } = botWithSession();
+
+		await bot.handleUpdate(messageUpdate(1, 1, "/rewind 1"));
+		expect(session.rewind).not.toHaveBeenCalled();
+
+		await bot.handleUpdate(messageUpdate(2, 2, "/rewind 1 yes"));
+		expect(session.rewind).toHaveBeenCalledWith("e1");
+		expect(sendMessage).toHaveBeenLastCalledWith(1, expect.stringContaining("Restored 1 file."));
+	});
+
+	it("answers at once while a turn is running instead of queueing behind it", async () => {
+		let release: (() => void) | undefined;
+		const session = fakeChannelSession(
+			() =>
+				new Promise((resolve) => {
+					release = () => resolve({ outcome: "completed" });
+				}),
+		);
+		const bot = createTelegramBot({ token: "test-token", ownerChatId: "1", cwd: "/tmp/telegram-test" });
+		bot.botInfo = { id: 99, is_bot: true, first_name: "Test", username: "t" } as never;
+		const sendMessage = vi.spyOn(bot.api, "sendMessage").mockResolvedValue({ message_id: 100 } as never);
+
+		const turn = bot.handleUpdate(messageUpdate(1, 1, "start"));
+		await vi.waitFor(() => expect(session.isRunning).toBe(true));
+		await bot.handleUpdate(messageUpdate(2, 2, "/rewind 1 yes"));
+
+		expect(sendMessage).toHaveBeenCalledWith(1, "A turn is running. /stop it first, then rewind.");
+		expect(session.rewind).not.toHaveBeenCalled();
+		release?.();
+		await turn;
 	});
 });

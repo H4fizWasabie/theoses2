@@ -4,6 +4,7 @@ import { Bot, type Context, InputFile } from "grammy";
 import type { Message } from "grammy/types";
 import { type ChannelInput, configureHttpDispatcher, createChannelSessions, getAgentDir } from "theoses-coding-agent";
 import { readInbound, resolvePrompt } from "./inbound.ts";
+import { rewindReply } from "./rewind.ts";
 import { createSendFileTool } from "./send-file.ts";
 import { createTurnQueue, type StopDecision } from "./turn-queue.ts";
 import { createTurnView, type Outbox } from "./turn-view.ts";
@@ -345,6 +346,13 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 		const inbound = readInbound(ctx.message);
 		if (inbound.kind === "stop") {
 			await bot.api.sendMessage(ctx.chat.id, stopReply(await turnQueue.stop(chat)));
+			return;
+		}
+
+		// Answered here, not queued: a rewind asked mid-turn should be refused now, not run after the turn.
+		if (inbound.kind === "rewind") {
+			const session = await channelSessions.open(chat);
+			await bot.api.sendMessage(ctx.chat.id, rewindReply(session, inbound.args));
 			return;
 		}
 

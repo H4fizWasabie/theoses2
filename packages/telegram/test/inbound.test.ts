@@ -28,6 +28,12 @@ describe("readInbound", () => {
 		expect(readInbound(message({ text: "/model" }))).toEqual({ kind: "model", ref: "" });
 	});
 
+	it("reads /rewind with its arguments", () => {
+		expect(readInbound(message({ text: "/rewind" }))).toEqual({ kind: "rewind", args: "" });
+		expect(readInbound(message({ text: " /Rewind 2 yes " }))).toEqual({ kind: "rewind", args: "2 yes" });
+		expect(readInbound(message({ text: "/rewinding" }))).toEqual({ kind: "prompt" });
+	});
+
 	it("reads anything else, including a caption that says stop in passing, as a prompt", () => {
 		expect(readInbound(message({ text: "please stop the server" }))).toEqual({ kind: "prompt" });
 		expect(readInbound(message({ photo: [{ file_id: "p" }] }))).toEqual({ kind: "prompt" });

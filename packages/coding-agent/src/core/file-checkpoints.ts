@@ -253,3 +253,18 @@ export function applyFileRewind(plan: RewindPlan, checkpointDirectory: string): 
 	}
 	return result;
 }
+
+/** Plain-text summary of what a rewind did, for the reply after it ran. */
+export function describeRewindResult(result: RewindResult): string {
+	const lines: string[] = [];
+	if (result.restored.length > 0) lines.push(`Restored ${count(result.restored.length, "file")}.`);
+	if (result.deleted.length > 0) lines.push(`Deleted ${count(result.deleted.length, "file")}.`);
+	for (const { path, error } of result.failed) lines.push(`Could not restore ${path}: ${error}.`);
+	if (result.skipped.length > 0) {
+		lines.push(`Not restorable: ${result.skipped.map((s) => `${s.path} (${s.reason})`).join(", ")}.`);
+	}
+	if (result.untraced.length > 0) {
+		lines.push(`${count(result.untraced.length, "shell command")} changed files in ways that cannot be undone.`);
+	}
+	return lines.length > 0 ? lines.join("\n") : "No files changed since that message.";
+}

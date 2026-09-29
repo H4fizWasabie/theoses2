@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	applyFileRewind,
 	describeRewindPlan,
+	describeRewindResult,
 	FILE_CHECKPOINT_ENTRY_TYPE,
 	FileCheckpoints,
 	MAX_CHECKPOINT_BYTES,
@@ -298,5 +299,32 @@ describe("describeRewindPlan", () => {
 	it("shortens a long list of files it cannot restore", () => {
 		const skipped = ["a", "b", "c", "d", "e"].map((name) => ({ path: `/w/${name}`, reason: "not a regular file" }));
 		expect(describeRewindPlan({ restore: [], skipped, untraced: [] })).toContain(", and 2 more.");
+	});
+});
+
+describe("describeRewindResult", () => {
+	it("counts what was put back and names what failed or cannot be undone", () => {
+		const text = describeRewindResult({
+			restored: ["/w/a", "/w/b"],
+			deleted: ["/w/new"],
+			failed: [{ path: "/w/c", error: "the original is no longer saved (older than 30 days)" }],
+			skipped: [{ path: "/w/big.bin", reason: "larger than 10485760 bytes" }],
+			untraced: ["python3 make.py"],
+		});
+		expect(text).toBe(
+			[
+				"Restored 2 files.",
+				"Deleted 1 file.",
+				"Could not restore /w/c: the original is no longer saved (older than 30 days).",
+				"Not restorable: /w/big.bin (larger than 10485760 bytes).",
+				"1 shell command changed files in ways that cannot be undone.",
+			].join("\n"),
+		);
+	});
+
+	it("says so when nothing needed changing", () => {
+		expect(describeRewindResult({ restored: [], deleted: [], failed: [], skipped: [], untraced: [] })).toBe(
+			"No files changed since that message.",
+		);
 	});
 });

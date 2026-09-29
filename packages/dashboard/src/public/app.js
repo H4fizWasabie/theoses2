@@ -167,6 +167,7 @@ function renderActive() {
   $("message").placeholder = "Message Theoses…";
   $("chat-form").querySelector(".send").disabled = !state.active;
   $("stop-chat").hidden = !state.active || !state.pending;
+  $("rewind-files").disabled = !state.active || Boolean(state.pending);
   renderRail();
 }
 
@@ -477,6 +478,30 @@ $("stop-chat").addEventListener("click", async () => {
   try {
     await request(`/api/sessions/${encodeURIComponent(state.active.id)}/stop`, { method: "POST" });
     $("chat-status").textContent = activity ? `Halted. Was running: ${activity}.` : "Halted the in-progress reply.";
+  } catch (error) {
+    $("chat-status").textContent = error.message;
+  }
+});
+
+// Rewind puts files back to how they were before a chosen turn; the conversation stays as it is.
+$("rewind-files").addEventListener("click", async () => {
+  if (!state.active) return;
+  const base = `/api/sessions/${encodeURIComponent(state.active.id)}/rewind`;
+  try {
+    const { points } = await request(base);
+    if (points.length === 0) {
+      $("chat-status").textContent = "No turn has changed files yet.";
+      return;
+    }
+    const list = points.map((point, index) => `${index + 1}. ${point.text.replace(/\s+/g, " ").slice(0, 70)}`).join("\n");
+    const answer = window.prompt(`Put files back to before which turn? (newest first)\n${list}`, "1");
+    const point = points[Number(answer) - 1];
+    if (!point) return;
+    const { preview } = await request(`${base}?entry=${encodeURIComponent(point.entryId)}`);
+    if (!window.confirm(`${preview}\nThe conversation stays as it is. Continue?`)) return;
+    const { message } = await request(base, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entryId: point.entryId }) });
+    $("chat-status").textContent = message;
+    void loadTree();
   } catch (error) {
     $("chat-status").textContent = error.message;
   }
