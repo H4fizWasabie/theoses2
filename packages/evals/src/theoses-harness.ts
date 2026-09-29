@@ -36,6 +36,8 @@ type TheosesCodingAgentHarnessOptions = {
 	name?: string;
 	model?: TheosesCodingAgentModelSelection;
 	noTools?: CreateAgentSessionOptions["noTools"];
+	/** Allowlist of tool names; only these are available. Leave unset for the default tool set. */
+	tools?: CreateAgentSessionOptions["tools"];
 	transformSystemPrompt?: (defaultPrompt: string) => string;
 	/** Defaults to "off". Set it to match production when measuring a baseline. */
 	thinkingLevel?: CreateAgentSessionOptions["thinkingLevel"];
@@ -160,6 +162,7 @@ async function runTheosesCodingAgent<TOutput extends JsonValue>(
 				model,
 				thinkingLevel: options.thinkingLevel ?? "off",
 				noTools: options.noTools,
+				tools: options.tools,
 			})
 		).session;
 
