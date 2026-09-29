@@ -53,6 +53,7 @@ import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
+import { markBusy } from "./busy-marker.ts";
 import { formatClockAnnotation, stripClockAnnotation } from "./clock.ts";
 import {
 	activeContextWindowTurns,
@@ -1148,6 +1149,7 @@ export class AgentSession {
 		this._isAgentRunActive = true;
 		this._lastOperationResult = undefined;
 		this._taskPlanGuard.startOperation();
+		const releaseBusy = markBusy(this.sessionId);
 		try {
 			// The caller (prompt()/sendCustomMessage()) already refreshed _baseSystemPrompt once for this
 			// operation; no rebuild here, just apply whichever prompt is current.
@@ -1158,9 +1160,14 @@ export class AgentSession {
 			}
 			return this._lastOperationResult;
 		} finally {
-			this._systemPromptOverride = undefined;
-			this._flushPendingBashMessages();
-			await this._emitAgentSettled();
+			try {
+				this._systemPromptOverride = undefined;
+				this._flushPendingBashMessages();
+				await this._emitAgentSettled();
+			} finally {
+				// Last, so the self-updater does not restart the service in the middle of settlement.
+				releaseBusy();
+			}
 		}
 	}
 
