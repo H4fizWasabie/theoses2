@@ -40,6 +40,16 @@ prompt, and grade the workspace by running `node --test`, including grader-owned
 answer fails its test (`judgeThreshold: 1`), so the pass rate is a correctness rate. Every task has a reference solution, and
 `test/coding-tasks.test.ts` proves each one fails as seeded and passes solved.
 
+`src/coding-recovery.eval.ts` (3 tasks) is set up so the obvious first edit is rejected by the edit tool (duplicate target line,
+whitespace differing from the prompt, a value the prompt describes wrongly), and scores whether the agent recovers.
+
+`src/coding-replay.eval.ts` replays real fixes from this repository (`src/replay-tasks.ts`). The workspace is a `git archive` of
+the fix commit's parent with the installed `node_modules` linked in, the prompt is the bug as reported, and the grader is the
+regression test that fix added, written into the workspace after the run. `test/replay-tasks.test.ts` proves each task's test
+fails at the parent and passes with the fix's source files. It needs the fix commits, so it skips in a shallow clone, and the
+eval workflow checks out full history. To add a task, pick a fix whose test fails on an assertion at the parent (not on a name the
+agent could not guess) and write the prompt from the issue, not from the diff.
+
 Summarize any run directory, with optional floors that make the exit code 1:
 
 ```bash
