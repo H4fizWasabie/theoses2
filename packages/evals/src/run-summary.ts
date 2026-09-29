@@ -22,9 +22,9 @@ export type TaskSummary = {
 
 export type SuiteSummary = { suite: string; runs: number; passed: number; tasks: TaskSummary[] };
 
-/** Harness names are `coding-<task>`, `coding-hard-<task>` (coding-suite.ts) and `plan-off-<task>` / `plan-on-<task>` (coding-plan-ab.eval.ts). */
+/** Harness names are `coding-<task>`, `coding-hard-<task>`, `coding-recovery-<task>` (coding-suite.ts) and `plan-off-<task>` / `plan-on-<task>` (coding-plan-ab.eval.ts). */
 export function suiteOf(harness: string): string {
-	for (const prefix of ["coding-hard", "plan-off", "plan-on", "coding"]) {
+	for (const prefix of ["coding-hard", "coding-recovery", "plan-off", "plan-on", "coding"]) {
 		if (harness.startsWith(`${prefix}-`)) return prefix;
 	}
 	return harness;
