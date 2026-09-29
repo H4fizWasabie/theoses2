@@ -29,7 +29,9 @@ export function describeCodingTasks(suite: string, tasks: CodingTask[]): void {
 			output: ({ session }): CodingOutput => gradeWorkspace(session.sessionManager.getCwd(), task),
 		});
 
-		describeEval(`Theoses ${suite}: ${task.id}`, { harness, judges: [CodingJudge], judgeThreshold: null }, (it) => {
+		// Threshold 1: a wrong answer fails the test. With null a run that broke the tests still counted as passed,
+		// and the first hard-set baseline was reported as 33/33 when 26 answers were right.
+		describeEval(`Theoses ${suite}: ${task.id}`, { harness, judges: [CodingJudge], judgeThreshold: 1 }, (it) => {
 			it(
 				"solves the task",
 				async ({ run }) => {
