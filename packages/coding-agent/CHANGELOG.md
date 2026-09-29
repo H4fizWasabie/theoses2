@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- refactor: the tool registry now lives in `core/tool-registry.ts` instead of `AgentSession`. It builds the session's tool set from built-in, SDK, external and extension sources and decides which tools are active (allow/exclude lists, deferred external tools and the `tool_search` pair, `taskPlan.enabled`). `AgentSession` keeps the public tool accessors and applies the active names the registry returns. No behaviour change.
+
 ## [1.0.99] - 2026-09-28
 
 ## [1.0.98] - 2026-09-28

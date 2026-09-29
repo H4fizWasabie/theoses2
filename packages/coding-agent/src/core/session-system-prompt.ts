@@ -21,8 +21,8 @@ export interface SessionSystemPromptSources {
 	resourceLoader: Pick<ResourceLoader, "getSystemPrompt" | "getAppendSystemPrompt" | "getSkills" | "getAgentsFiles">;
 	sessionManager: Pick<SessionManager, "getWorkingNote" | "getArtifactCatalog">;
 	settingsManager: Pick<SettingsManager, "getThinkingBudgets">;
-	getToolPromptSnippets(): Map<string, string>;
-	getToolPromptGuidelines(): Map<string, string[]>;
+	getToolPromptSnippets(): ReadonlyMap<string, string>;
+	getToolPromptGuidelines(): ReadonlyMap<string, string[]>;
 }
 
 /**
