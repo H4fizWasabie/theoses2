@@ -1,6 +1,6 @@
 {
 	"name": "theoses-server",
-	"version": "1.0.102",
+	"version": "1.0.103",
 	"description": "experimental server package for pi",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -46,8 +46,8 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"theoses-ai": "^1.0.102",
-		"theoses-protocol": "^1.0.102"
+		"theoses-ai": "^1.0.103",
+		"theoses-protocol": "^1.0.103"
 	},
 	"devDependencies": {
 		"shx": "0.4.0",
