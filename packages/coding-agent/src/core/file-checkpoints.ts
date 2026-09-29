@@ -12,7 +12,7 @@
  * script that writes files) is recorded as untraced and cannot be undone.
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { SessionEntry } from "./session-manager.ts";
 import { fileChangesOf } from "./tool-runs.ts";
@@ -21,6 +21,8 @@ import { resolveToCwd } from "./tools/path-utils.ts";
 export const FILE_CHECKPOINT_ENTRY_TYPE = "file_checkpoint";
 /** Files bigger than this are not saved; a rewind reports them as not restorable. */
 export const MAX_CHECKPOINT_BYTES = 10 * 1024 * 1024;
+/** Original bytes not used by any checkpoint for this long are deleted (`sweepCheckpoints`). */
+export const CHECKPOINT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface FileCheckpoint {
 	/** Id of the user message the change ran under. */
@@ -117,9 +119,40 @@ export class FileCheckpoints {
 		const bytes = readFileSync(absolute);
 		const hash = createHash("sha256").update(bytes).digest("hex");
 		const blob = join(this.session.getCheckpointDirectory(), hash);
-		if (!existsSync(blob)) writeFileSync(blob, bytes, { mode: 0o600 });
+		if (existsSync(blob)) {
+			// Reusing a blob counts as using it, so the sweep keeps it for as long as a recent checkpoint names it.
+			const now = new Date();
+			utimesSync(blob, now, now);
+		} else {
+			writeFileSync(blob, bytes, { mode: 0o600 });
+		}
 		return { hash };
 	}
+}
+
+/**
+ * Deletes original bytes in `directory` that no checkpoint has written or reused in `maxAgeMs`, so the directory
+ * does not grow without bound. A rewind past that point reports those files as not restorable. Only files named
+ * like a blob (a sha256) are touched. Returns how many were deleted. Never throws.
+ */
+export function sweepCheckpoints(
+	directory: string,
+	maxAgeMs: number = CHECKPOINT_RETENTION_MS,
+	now: number = Date.now(),
+): number {
+	let removed = 0;
+	try {
+		for (const name of readdirSync(directory)) {
+			if (!/^[0-9a-f]{64}$/.test(name)) continue;
+			const blob = join(directory, name);
+			if (now - statSync(blob).mtimeMs <= maxAgeMs) continue;
+			rmSync(blob, { force: true });
+			removed++;
+		}
+	} catch (error) {
+		if (!isMissing(error)) console.error(`[file-checkpoints] sweep failed: ${(error as Error).message}`);
+	}
+	return removed;
 }
 
 export interface RewindPlan {
@@ -204,7 +237,13 @@ export function applyFileRewind(plan: RewindPlan, checkpointDirectory: string): 
 				}
 				continue;
 			}
-			const bytes = readFileSync(join(checkpointDirectory, hash));
+			let bytes: Buffer;
+			try {
+				bytes = readFileSync(join(checkpointDirectory, hash));
+			} catch (error) {
+				if (isMissing(error)) throw new Error("the original is no longer saved (older than 30 days)");
+				throw error;
+			}
 			mkdirSync(dirname(path), { recursive: true });
 			writeFileSync(path, bytes);
 			result.restored.push(path);
