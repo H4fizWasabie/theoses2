@@ -1,9 +1,18 @@
 name: Evals
 
 # Model-backed coding evals against the production model (GLM 5.3 flash at thinking max). Costs real money, so it runs
-# only on demand and once a week, never on pull requests: a public repo must not hand a paid key to PR code.
-# A full run is about 16 tasks x 3 passes, roughly 5 cents; the OPENROUTER_API_KEY secret has a hard credit limit.
+# on demand, once a week, and on pushes to main that change what the model is told (the system prompt) or what it can
+# call (the tools). Never on pull requests: a public repo must not hand a paid key to PR code, so a prompt or tool
+# change is measured right after it lands, and the floors below fail the job if it made the agent worse.
+# A run is about 16 tasks, roughly 2 cents per pass; the OPENROUTER_API_KEY secret has a hard credit limit.
 on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/coding-agent/src/core/system-prompt.ts"
+      - "packages/coding-agent/src/core/session-system-prompt.ts"
+      - "packages/coding-agent/src/core/tools/**"
+      - "packages/agent/src/**"
   workflow_dispatch:
     inputs:
       passes:
