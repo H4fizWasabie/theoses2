@@ -97,12 +97,12 @@ function toTranscriptEvents(messages: AgentSession["messages"]): TranscriptEvent
 
 async function promptAgent(session: AgentSession, input: string, signal: AbortSignal | undefined): Promise<string> {
 	signal?.throwIfAborted();
-	const previousMessageCount = session.messages.length;
+	// Not an index into the message list: the sliding window and compaction shorten it during a long run.
+	const startedAt = Date.now();
 	await session.prompt(input);
-	const assistant = session.messages
-		.slice(previousMessageCount)
+	const assistant = [...session.messages]
 		.reverse()
-		.find((message) => message.role === "assistant");
+		.find((message) => message.role === "assistant" && message.timestamp >= startedAt);
 	if (!assistant) throw new Error("Agent run completed without an assistant message.");
 	if (assistant.stopReason !== "stop") {
 		throw new Error(
