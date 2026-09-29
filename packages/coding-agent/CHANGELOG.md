@@ -4,6 +4,7 @@
 
 - fix: the built-in default model for `together` is now `moonshotai/Kimi-K3`. models.dev dropped `Kimi-K2.6` from Together, so the old default pointed at a model that no longer exists. The Together tests in `packages/ai` moved to K3 too, which is what broke `tsgo` in CI.
 - refactor: the tool registry now lives in `core/tool-registry.ts` instead of `AgentSession`. It builds the session's tool set from built-in, SDK, external and extension sources and decides which tools are active (allow/exclude lists, deferred external tools and the `tool_search` pair, `taskPlan.enabled`). `AgentSession` keeps the public tool accessors and applies the active names the registry returns. No behaviour change.
+- refactor: manual and automatic compaction now share one Compaction Run (`core/compaction/run.ts`) that owns the extension hooks, summarizer call, compaction entry, and every `compaction_end` / `session_compact_failed` event. The two paths in `AgentSession` had drifted apart. One behaviour change: `isCompacting` is now false when `compaction_end` listeners run for automatic compaction, as it already was for manual.
 
 ## [1.0.99] - 2026-09-28
 

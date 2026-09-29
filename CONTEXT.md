@@ -32,6 +32,10 @@ _Avoid_: stop marker, boundary marker
 The fire-and-forget work that runs after a Channel Session turn ends successfully (memory consolidation, task-boundary detection). It never blocks or fails the reply. Triggered by the Channel Session itself when an operation finishes with outcome `completed` and no retry is pending; adapters never trigger it. Only non-CLI Channel Sessions (Telegram, dashboard) settle. Plain CLI coding runs still reach Durable Memory, but only through compaction distillation of the turns compaction drops.
 _Avoid_: post-turn hook (implies an event seam that doesn't exist), background turn work
 
+**Compaction Run**:
+One execution of context compaction, from preparation to `compaction_end`, whether triggered manually (`/compact`, RPC, extensions) or automatically (overflow, threshold, turns). Owns the `session_before_compact` and `session_compact` hooks, the summarizer call, appending the compaction entry, rebuilding message state, and every `compaction_end` / `session_compact_failed` event, including failures that never started a run. The trigger decision and overflow-retry bookkeeping stay with the Channel Session's engine, not the run. Distinct from the pure summarizer in `compaction/compaction.ts`.
+_Avoid_: compaction pass, compact job
+
 **Tool Registry**:
 The session's set of available tools, built from built-in, SDK, external (sidecar, MCP) and extension sources, plus the rule that decides which of them are active: allow/exclude lists, external tools deferred behind `tool_search`, `taskPlan.enabled` hiding `task_plan`. Implemented by `core/tool-registry.ts`. It does not own the active set (the engine's Agent does) and does not execute tools beyond routing `tool_call`: a refresh returns the names that should be active and the session applies them.
 _Avoid_: tool manager, tool catalog

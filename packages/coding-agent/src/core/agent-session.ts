@@ -64,15 +64,14 @@ import {
 	compact,
 	countUserTurnsSince,
 	estimateContextTokens,
-	estimateTokens,
 	generateBranchSummary,
 	historyTurnHardCap,
 	lastCompactionBoundary,
-	prepareCompaction,
 	shouldCompact,
 	shouldCompactByTurns,
 	shouldDeferCompactionForCache,
 } from "./compaction/index.ts";
+import { type CompactionRun, createCompactionRun, type Summarizer } from "./compaction/run.ts";
 import { pruneFinishedTurnOutputs } from "./context-pruning.ts";
 import { DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS } from "./defaults.ts";
 import { createExploreToolDefinition } from "./explorer.ts";
@@ -91,9 +90,7 @@ import {
 	type MessageUpdateEvent,
 	type RegisteredTool,
 	type ReplacedSessionContext,
-	type SessionBeforeCompactResult,
 	type SessionBeforeTreeResult,
-	type SessionCompactFailedEvent,
 	type SessionStartEvent,
 	type ShutdownHandler,
 	type ToolDefinition,
@@ -121,7 +118,6 @@ import { exportSessionToJsonl } from "./session-export.ts";
 import { saveImageFile } from "./session-images.ts";
 import {
 	type BranchSummaryEntry,
-	type CompactionEntry,
 	getLatestCompactionEntry,
 	limitActiveContextMessages,
 	type OperationFinishedEntry,
@@ -380,14 +376,6 @@ export interface SessionStats {
 	contextUsage?: ContextUsage;
 }
 
-function estimateMessagesTokens(messages: AgentMessage[]): number {
-	let tokens = 0;
-	for (const message of messages) {
-		tokens += estimateTokens(message);
-	}
-	return tokens;
-}
-
 // ============================================================================
 // Constants
 // ============================================================================
@@ -420,8 +408,7 @@ export class AgentSession {
 	private _researchJobs = new ResearchJobs();
 
 	// Compaction state
-	private _compactionAbortController: AbortController | undefined = undefined;
-	private _autoCompactionAbortController: AbortController | undefined = undefined;
+	private readonly _compactionRun: CompactionRun;
 	private _overflowRecoveryAttempted = false;
 
 	// Branch summarization state
@@ -500,6 +487,17 @@ export class AgentSession {
 			sessionManager: this.sessionManager,
 			modelRuntime: this._modelRuntime,
 			memoryStore: this._memoryStore,
+		});
+		this._compactionRun = createCompactionRun({
+			sessionManager: this.sessionManager,
+			getExtensionRunner: () => this._extensionRunner,
+			memoryPromotion: this._memoryPromotion,
+			getCompactionSettings: () => this.settingsManager.getCompactionSettings(),
+			setMessages: (messages) => {
+				this.agent.state.messages = messages;
+			},
+			emit: (event) => this._emit(event),
+			prepareSummarizer: () => this._prepareSummarizer(),
 		});
 		this._taskPlanGuard = new TaskPlanGuard({
 			cwd: this._cwd,
@@ -713,12 +711,6 @@ export class AgentSession {
 			steering: [...this._steeringMessages],
 			followUp: [...this._followUpMessages],
 		});
-	}
-
-	private async _emitSessionCompactFailed(event: Omit<SessionCompactFailedEvent, "type">): Promise<void> {
-		if (this._extensionRunner.hasHandlers("session_compact_failed")) {
-			await this._extensionRunner.emit({ type: "session_compact_failed", ...event });
-		}
 	}
 
 	private _getIdleWaitPromise(): Promise<void> {
@@ -1100,11 +1092,7 @@ export class AgentSession {
 
 	/** Whether compaction or branch summarization is currently running */
 	get isCompacting(): boolean {
-		return (
-			this._autoCompactionAbortController !== undefined ||
-			this._compactionAbortController !== undefined ||
-			this._branchSummaryAbortController !== undefined
-		);
+		return this._compactionRun.activeReason !== undefined || this._branchSummaryAbortController !== undefined;
 	}
 
 	/** All messages including custom types like BashExecutionMessage */
@@ -1272,7 +1260,7 @@ export class AgentSession {
 				}
 			}
 
-			if (this._compactionAbortController !== undefined) {
+			if (this._compactionRun.activeReason === "manual") {
 				throw new Error(
 					"Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.",
 				);
@@ -2012,6 +2000,28 @@ export class AgentSession {
 		return this.model;
 	}
 
+	/** Resolves model and auth once per Compaction Run; `undefined` when no model is selected. */
+	private async _prepareSummarizer(): Promise<Summarizer | undefined> {
+		if (!this.model) return undefined;
+		const {
+			model: requestModel,
+			apiKey,
+			headers,
+			env,
+		} = await this._getSummarizationRequestAuth(this._summarizationModel() ?? this.model);
+		return (preparation, { customInstructions, signal, reason }) =>
+			this._runDefaultCompaction(
+				preparation,
+				requestModel,
+				apiKey,
+				headers,
+				customInstructions,
+				signal,
+				env,
+				reason,
+			);
+	}
+
 	/** Generate Theoses's built-in compaction summary for manual and automatic compaction. */
 	private async _runDefaultCompaction(
 		preparation: CompactionPreparation,
@@ -2044,10 +2054,9 @@ export class AgentSession {
 	 *
 	 * This is the manual entry point used by `/compact`, RPC, and extensions. It is
 	 * separate from automatic threshold/overflow compaction, which enters through
-	 * `_checkCompaction()` and `_runAutoCompaction()`. After preparation and the
-	 * `session_before_compact` hook, both paths call the lower-level `compact()`
-	 * function imported from `./compaction/index.ts`, unless the hook cancels or
-	 * supplies a custom result.
+	 * `_checkCompaction()` and `_runAutoCompaction()`. Both execute the same
+	 * Compaction Run (`./compaction/run.ts`); this method only maps its outcome to
+	 * a result or a thrown error.
 	 *
 	 * Aborts the current agent operation first. Manual compaction never retries or
 	 * continues the interrupted agent turn.
@@ -2056,166 +2065,16 @@ export class AgentSession {
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
 		await this.abort();
-		this._compactionAbortController = new AbortController();
-		this._emit({ type: "compaction_start", reason: "manual" });
-		let fromExtension = false;
-
-		try {
-			if (!this.model) {
-				throw new Error(formatNoModelSelectedMessage());
-			}
-
-			const {
-				model: requestModel,
-				apiKey,
-				headers,
-				env,
-			} = await this._getSummarizationRequestAuth(this._summarizationModel() ?? this.model);
-
-			const pathEntries = this.sessionManager.getBranch();
-			const settings = this.settingsManager.getCompactionSettings();
-
-			const preparation = prepareCompaction(pathEntries, settings);
-			if (!preparation) {
-				// Check why we can't compact
-				const lastEntry = pathEntries[pathEntries.length - 1];
-				if (lastEntry?.type === "compaction") {
-					throw new Error("Already compacted");
-				}
-				throw new Error("Nothing to compact (session too small)");
-			}
-			this._memoryPromotion.promoteDropped(preparation.messagesToSummarizeEntryIds);
-
-			let extensionCompaction: CompactionResult | undefined;
-
-			if (this._extensionRunner.hasHandlers("session_before_compact")) {
-				const result = (await this._extensionRunner.emit({
-					type: "session_before_compact",
-					preparation,
-					branchEntries: pathEntries,
-					customInstructions,
-					reason: "manual",
-					willRetry: false,
-					signal: this._compactionAbortController.signal,
-				})) as SessionBeforeCompactResult | undefined;
-
-				if (result?.cancel) {
-					throw new Error("Compaction cancelled");
-				}
-
-				if (result?.compaction) {
-					extensionCompaction = result.compaction;
-					fromExtension = true;
-				}
-			}
-
-			let summary: string;
-			let firstKeptEntryId: string;
-			let tokensBefore: number;
-			let usage: Usage | undefined;
-			let details: unknown;
-
-			if (extensionCompaction) {
-				// Extension provided compaction content
-				summary = extensionCompaction.summary;
-				firstKeptEntryId = extensionCompaction.firstKeptEntryId;
-				tokensBefore = extensionCompaction.tokensBefore;
-				usage = extensionCompaction.usage;
-				details = extensionCompaction.details;
-			} else {
-				// Shared default summary generator, also used by automatic compaction.
-				const result = await this._runDefaultCompaction(
-					preparation,
-					requestModel,
-					apiKey,
-					headers,
-					customInstructions,
-					this._compactionAbortController.signal,
-					env,
-					"manual",
-				);
-				summary = result.summary;
-				firstKeptEntryId = result.firstKeptEntryId;
-				tokensBefore = result.tokensBefore;
-				usage = result.usage;
-				details = result.details;
-			}
-
-			if (this._compactionAbortController.signal.aborted) {
-				throw new Error("Compaction cancelled");
-			}
-
-			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
-			const newEntries = this.sessionManager.getEntries();
-			const sessionContext = this.sessionManager.buildSessionContext();
-			this.agent.state.messages = sessionContext.messages;
-			const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
-
-			// Get the saved compaction entry for the extension event
-			const savedCompactionEntry = newEntries.find((e) => e.type === "compaction" && e.summary === summary) as
-				| CompactionEntry
-				| undefined;
-
-			if (this._extensionRunner && savedCompactionEntry) {
-				await this._extensionRunner.emit({
-					type: "session_compact",
-					compactionEntry: savedCompactionEntry,
-					fromExtension,
-					reason: "manual",
-					willRetry: false,
-				});
-			}
-
-			const compactionResult: CompactionResult = {
-				summary,
-				firstKeptEntryId,
-				tokensBefore,
-				estimatedTokensAfter,
-				usage,
-				details,
-			};
-			// compaction_end listeners may submit queued prompts, so expose idle state before notifying them.
-			this._compactionAbortController = undefined;
-			this._emit({
-				type: "compaction_end",
-				reason: "manual",
-				result: compactionResult,
-				aborted: false,
-				willRetry: false,
-			});
-			return compactionResult;
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			const aborted = message === "Compaction cancelled" || (error instanceof Error && error.name === "AbortError");
-			const errorMessage = aborted ? undefined : `Compaction failed: ${message}`;
-			this._compactionAbortController = undefined;
-			this._emit({
-				type: "compaction_end",
-				reason: "manual",
-				result: undefined,
-				aborted,
-				willRetry: false,
-				errorMessage,
-			});
-			await this._emitSessionCompactFailed({
-				reason: "manual",
-				errorMessage,
-				aborted,
-				willRetry: false,
-				fromExtension,
-			});
-			throw error;
-		} finally {
-			this._compactionAbortController = undefined;
-		}
+		const outcome = await this._compactionRun.run({ reason: "manual", customInstructions });
+		if (outcome.kind === "completed") return outcome.result;
+		throw outcome.kind === "skipped" ? new Error("Nothing to compact") : outcome.error;
 	}
 
 	/**
 	 * Cancel in-progress compaction (manual or auto).
 	 */
 	abortCompaction(): void {
-		this._compactionAbortController?.abort();
-		this._autoCompactionAbortController?.abort();
+		this._compactionRun.abort();
 	}
 
 	/**
@@ -2237,10 +2096,7 @@ export class AgentSession {
 	 * 3. Threshold without retry: valid or estimated context usage crossed the
 	 *    configured threshold; compact without retrying the completed response.
 	 *
-	 * Each case calls `_runAutoCompaction()`. After preparation and the
-	 * `session_before_compact` hook, that method calls the lower-level `compact()`
-	 * function imported from `./compaction/index.ts`, unless the hook cancels or
-	 * supplies a custom result.
+	 * Each case calls `_runAutoCompaction()`, which executes a Compaction Run.
 	 *
 	 * @param assistantMessage The assistant message to check
 	 * @param skipAbortedCheck If false, include aborted messages (for pre-prompt check). Default: true
@@ -2296,21 +2152,7 @@ export class AgentSession {
 				const errorMessage = contextOverflow
 					? "Context overflow recovery failed after one compact-and-retry attempt. Try reducing context or switching to a larger-context model."
 					: "Truncated response recovery failed after one compact-and-retry attempt.";
-				this._emit({
-					type: "compaction_end",
-					reason: "overflow",
-					result: undefined,
-					aborted: false,
-					willRetry: false,
-					errorMessage,
-				});
-				await this._emitSessionCompactFailed({
-					reason: "overflow",
-					errorMessage,
-					aborted: false,
-					willRetry: false,
-					fromExtension: false,
-				});
+				await this._compactionRun.reportFailure("overflow", errorMessage);
 				return false;
 			}
 
@@ -2378,201 +2220,34 @@ export class AgentSession {
 
 	/**
 	 * Execute threshold or overflow compaction. Manual compaction uses
-	 * `AgentSession.compact()` instead. Both paths call the lower-level `compact()`
-	 * function imported from `./compaction/index.ts` after preparation and extension
-	 * interception.
+	 * `AgentSession.compact()` instead. Both execute the same Compaction Run; this
+	 * method maps its outcome to the post-run loop's continue flag and, for overflow
+	 * retry, drops the failed assistant message again.
 	 *
 	 * @param reason Automatic trigger selected by `_checkCompaction()`
 	 * @param willRetry Whether to continue the interrupted turn after overflow compaction
 	 * @returns Whether the post-run loop should call `agent.continue()`
 	 */
 	private async _runAutoCompaction(reason: "overflow" | "threshold" | "turns", willRetry: boolean): Promise<boolean> {
-		const settings = this.settingsManager.getCompactionSettings();
-		let started = false;
-		let fromExtension = false;
+		const outcome = await this._compactionRun.run({ reason, willRetry });
+		if (outcome.kind !== "completed") return false;
 
-		try {
-			if (!this.model) {
-				return false;
+		if (willRetry) {
+			const messages = this.agent.state.messages;
+			const lastMsg = messages[messages.length - 1];
+			// The overflow response was persisted on message_end before _checkCompaction() removed it
+			// from agent state. Rebuilding state from the new compaction can restore that kept entry,
+			// leaving an assistant as the final message. agent.continue() rejects that state, so remove
+			// the retriable error or truncated-length response again before continuing the interrupted turn.
+			if (lastMsg?.role === "assistant" && (lastMsg.stopReason === "error" || lastMsg.stopReason === "length")) {
+				this.agent.state.messages = messages.slice(0, -1);
 			}
-
-			const {
-				model: requestModel,
-				apiKey,
-				headers,
-				env,
-			} = await this._getSummarizationRequestAuth(this._summarizationModel() ?? this.model);
-
-			const pathEntries = this.sessionManager.getBranch();
-
-			const preparation = prepareCompaction(pathEntries, settings, reason === "turns" ? "turns" : "tokens");
-			if (!preparation) {
-				return false;
-			}
-			this._emit({ type: "compaction_start", reason });
-			this._autoCompactionAbortController = new AbortController();
-			this._memoryPromotion.promoteDropped(preparation.messagesToSummarizeEntryIds);
-			started = true;
-
-			let extensionCompaction: CompactionResult | undefined;
-
-			if (this._extensionRunner.hasHandlers("session_before_compact")) {
-				const extensionResult = (await this._extensionRunner.emit({
-					type: "session_before_compact",
-					preparation,
-					branchEntries: pathEntries,
-					customInstructions: undefined,
-					reason,
-					willRetry,
-					signal: this._autoCompactionAbortController.signal,
-				})) as SessionBeforeCompactResult | undefined;
-
-				if (extensionResult?.cancel) {
-					this._emit({
-						type: "compaction_end",
-						reason,
-						result: undefined,
-						aborted: true,
-						willRetry: false,
-					});
-					await this._emitSessionCompactFailed({
-						reason,
-						aborted: true,
-						willRetry: false,
-						fromExtension: false,
-					});
-					return false;
-				}
-
-				if (extensionResult?.compaction) {
-					extensionCompaction = extensionResult.compaction;
-					fromExtension = true;
-				}
-			}
-
-			let summary: string;
-			let firstKeptEntryId: string;
-			let tokensBefore: number;
-			let usage: Usage | undefined;
-			let details: unknown;
-
-			if (extensionCompaction) {
-				// Extension provided compaction content
-				summary = extensionCompaction.summary;
-				firstKeptEntryId = extensionCompaction.firstKeptEntryId;
-				tokensBefore = extensionCompaction.tokensBefore;
-				usage = extensionCompaction.usage;
-				details = extensionCompaction.details;
-			} else {
-				// Shared default summary generator, also used by manual compaction.
-				const compactResult = await this._runDefaultCompaction(
-					preparation,
-					requestModel,
-					apiKey,
-					headers,
-					undefined,
-					this._autoCompactionAbortController.signal,
-					env,
-					reason,
-				);
-				summary = compactResult.summary;
-				firstKeptEntryId = compactResult.firstKeptEntryId;
-				tokensBefore = compactResult.tokensBefore;
-				usage = compactResult.usage;
-				details = compactResult.details;
-			}
-
-			if (this._autoCompactionAbortController.signal.aborted) {
-				this._emit({
-					type: "compaction_end",
-					reason,
-					result: undefined,
-					aborted: true,
-					willRetry: false,
-				});
-				await this._emitSessionCompactFailed({
-					reason,
-					aborted: true,
-					willRetry: false,
-					fromExtension,
-				});
-				return false;
-			}
-
-			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
-			const newEntries = this.sessionManager.getEntries();
-			const sessionContext = this.sessionManager.buildSessionContext();
-			this.agent.state.messages = sessionContext.messages;
-			const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
-
-			// Get the saved compaction entry for the extension event
-			const savedCompactionEntry = newEntries.find((e) => e.type === "compaction" && e.summary === summary) as
-				| CompactionEntry
-				| undefined;
-
-			if (this._extensionRunner && savedCompactionEntry) {
-				await this._extensionRunner.emit({
-					type: "session_compact",
-					compactionEntry: savedCompactionEntry,
-					fromExtension,
-					reason,
-					willRetry,
-				});
-			}
-
-			const result: CompactionResult = {
-				summary,
-				firstKeptEntryId,
-				tokensBefore,
-				estimatedTokensAfter,
-				usage,
-				details,
-			};
-			this._emit({ type: "compaction_end", reason, result, aborted: false, willRetry });
-
-			if (willRetry) {
-				const messages = this.agent.state.messages;
-				const lastMsg = messages[messages.length - 1];
-				// The overflow response was persisted on message_end before _checkCompaction() removed it
-				// from agent state. Rebuilding state from the new compaction can restore that kept entry,
-				// leaving an assistant as the final message. agent.continue() rejects that state, so remove
-				// the retriable error or truncated-length response again before continuing the interrupted turn.
-				if (lastMsg?.role === "assistant" && (lastMsg.stopReason === "error" || lastMsg.stopReason === "length")) {
-					this.agent.state.messages = messages.slice(0, -1);
-				}
-				return true;
-			}
-
-			// Auto-compaction can complete while follow-up/steering/custom messages are waiting.
-			// Continue once so queued messages are delivered.
-			return this.agent.hasQueuedMessages();
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : "compaction failed";
-			if (started) {
-				const formattedErrorMessage =
-					reason === "overflow"
-						? `Context overflow recovery failed: ${errorMessage}`
-						: `Auto-compaction failed: ${errorMessage}`;
-				this._emit({
-					type: "compaction_end",
-					reason,
-					result: undefined,
-					aborted: false,
-					willRetry: false,
-					errorMessage: formattedErrorMessage,
-				});
-				await this._emitSessionCompactFailed({
-					reason,
-					errorMessage: formattedErrorMessage,
-					aborted: false,
-					willRetry: false,
-					fromExtension,
-				});
-			}
-			return false;
-		} finally {
-			this._autoCompactionAbortController = undefined;
+			return true;
 		}
+
+		// Auto-compaction can complete while follow-up/steering/custom messages are waiting.
+		// Continue once so queued messages are delivered.
+		return this.agent.hasQueuedMessages();
 	}
 
 	/**
