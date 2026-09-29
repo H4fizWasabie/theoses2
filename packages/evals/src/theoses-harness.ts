@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { contentText } from "theoses-ai";
 import {
@@ -37,6 +37,8 @@ type TheosesCodingAgentHarnessOptions = {
 	model?: TheosesCodingAgentModelSelection;
 	noTools?: CreateAgentSessionOptions["noTools"];
 	transformSystemPrompt?: (defaultPrompt: string) => string;
+	/** Files written into the workspace before the run, keyed by relative path. */
+	files?: Record<string, string>;
 };
 
 type TheosesCodingAgentHarnessWithOutput<TOutput extends JsonValue> = TheosesCodingAgentHarnessOptions & {
@@ -128,6 +130,11 @@ async function runTheosesCodingAgent<TOutput extends JsonValue>(
 	let outcome: { success: true; result: SimpleHarnessResult<string | TOutput> } | { success: false; error: unknown };
 	try {
 		await Promise.all([mkdir(cwd), mkdir(agentDir)]);
+		for (const [relativePath, content] of Object.entries(options.files ?? {})) {
+			const target = join(cwd, relativePath);
+			await mkdir(dirname(target), { recursive: true });
+			await writeFile(target, content);
+		}
 		const services = await createAgentSessionServices({
 			cwd,
 			agentDir,
