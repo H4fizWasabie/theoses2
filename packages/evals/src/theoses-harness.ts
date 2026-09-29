@@ -39,6 +39,8 @@ type TheosesCodingAgentHarnessOptions = {
 	transformSystemPrompt?: (defaultPrompt: string) => string;
 	/** Defaults to "off". Set it to match production when measuring a baseline. */
 	thinkingLevel?: CreateAgentSessionOptions["thinkingLevel"];
+	/** In-memory settings for the eval session. Defaults differ from a deployed agent's settings.json. */
+	settings?: Parameters<typeof SettingsManager.inMemory>[0];
 	/** Files written into the workspace before the run, keyed by relative path. */
 	files?: Record<string, string>;
 };
@@ -141,7 +143,7 @@ async function runTheosesCodingAgent<TOutput extends JsonValue>(
 			cwd,
 			agentDir,
 			modelRuntime,
-			settingsManager: SettingsManager.inMemory(),
+			settingsManager: SettingsManager.inMemory(options.settings),
 			...(options.transformSystemPrompt
 				? { resourceLoaderOptions: { systemPromptOverride: () => transformedSystemPrompt } }
 				: {}),

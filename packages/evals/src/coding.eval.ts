@@ -6,6 +6,9 @@ import { createTheosesCodingAgentHarness, type TheosesCodingAgentInput } from ".
 
 // Each task seeds a tiny Node project, gives the agent one prompt, then grades the workspace by running
 // `node --test`. Test files are protected: editing them to force a pass scores 0. Add tasks to grow the baseline.
+// Above the package-wide 120s so a slow agent run is scored on its result, not killed mid-fix.
+const TASK_TIMEOUT_MS = 300_000;
+
 type CodingTask = {
 	id: string;
 	prompt: string;
@@ -182,6 +185,9 @@ for (const task of tasks) {
 		files: task.files,
 		// Production runs at "max" (settings.json defaultThinkingLevel); baseline the same.
 		thinkingLevel: "max",
+		// The deployed agent sets taskPlan.enabled=false; the library default is true, which adds
+		// task-plan and independent plan-review round trips that pushed a trivial rename past the timeout.
+		settings: { taskPlan: { enabled: false } },
 		output: ({ session }): CodingOutput => {
 			const cwd = session.sessionManager.getCwd();
 			const protectedIntact = task.protectedFiles.every(
@@ -193,8 +199,12 @@ for (const task of tasks) {
 	});
 
 	describeEval(`Theoses coding: ${task.id}`, { harness, judges: [CodingJudge], judgeThreshold: null }, (it) => {
-		it("solves the task", async ({ run }) => {
-			await run(task.prompt);
-		});
+		it(
+			"solves the task",
+			async ({ run }) => {
+				await run(task.prompt);
+			},
+			TASK_TIMEOUT_MS,
+		);
 	});
 }
