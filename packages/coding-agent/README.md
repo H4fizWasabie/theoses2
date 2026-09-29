@@ -375,6 +375,8 @@ The default export can also be `async`. theoses waits for async extension factor
 
 Place in `~/.theoses/agent/extensions/` or `.theoses/extensions/`. See [docs/extensions.md](docs/extensions.md) and [examples/extensions/](examples/extensions/).
 
+For a shell command at a fixed point of a run (block a tool call, format after an edit, refuse to stop until the tests pass) you do not need an extension: see [command hooks](docs/hooks.md).
+
 ### Themes
 
 Built-in: `dark`, `light`. Themes hot-reload: modify the active theme file and theoses immediately applies changes.
