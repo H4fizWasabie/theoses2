@@ -7,10 +7,7 @@ import { buildPrompt, PLAN_REVIEW_CUSTOM_TYPE, parseReview, type ReviewOutcome }
 import {
 	applyPlanAction,
 	formatPlanStatus,
-	MAX_STOP_PUSHES,
 	needsReview,
-	planStopCheck,
-	TASK_PLAN_CHECK_CUSTOM_TYPE,
 	type TaskPlan,
 	type TaskPlanInput,
 } from "../src/core/task-plan.ts";
@@ -242,61 +239,7 @@ describe("applyPlanAction", () => {
 	});
 });
 
-describe("planStopCheck", () => {
-	it("pushes back while items are open, up to the limit", () => {
-		const plan = created();
-		let run: AgentMessage[] = [user("go"), ...tool("edit", { path: "carousel.py" }, "ok"), reply("Done.")];
-		for (let i = 0; i < MAX_STOP_PUSHES; i++) {
-			const result = planStopCheck(plan, run);
-			expect(result.problem).toContain("still has open items");
-			run = [
-				...run,
-				{ role: "custom", customType: TASK_PLAN_CHECK_CUSTOM_TYPE, content: "", display: true, timestamp: 0 },
-			];
-		}
-		expect(planStopCheck(plan, run)).toMatchObject({ gaveUp: true });
-	});
-
-	it("leaves runs that neither changed files nor touched the plan alone", () => {
-		expect(planStopCheck(created(), [user("how is it going?"), reply("Fine.")])).toEqual({});
-	});
-
-	it("reopens a verify item closed before a later file change", () => {
-		const base = created({ items: [] });
-		const plan: TaskPlan = { ...base, items: base.items.map((i) => ({ ...i, status: "done" as const })) };
-		const run = [
-			user("go"),
-			...tool("bash", { command: "npm test" }, "ok"),
-			...tool("edit", { path: "a.ts" }, "ok"),
-			reply("Done."),
-		];
-		const result = planStopCheck(plan, run);
-		expect(result.plan?.items[0]).toMatchObject({ kind: "verify", status: "open" });
-		expect(result.problem).toContain("reopened");
-	});
-
-	it("reopens only the latest verify item; an earlier closed verify item stays closed (#387)", () => {
-		const base = created({ items: [] });
-		const plan: TaskPlan = {
-			...base,
-			items: [
-				{ id: 1, kind: "verify", text: "first gate", status: "done" },
-				{ id: 2, kind: "step", text: "extra step", status: "done" },
-				{ id: 3, kind: "verify", text: "second gate", status: "done" },
-			],
-		};
-		const run = [
-			user("go"),
-			...tool("bash", { command: "npm test" }, "ok"),
-			...tool("edit", { path: "a.ts" }, "ok"),
-			reply("Done."),
-		];
-		const result = planStopCheck(plan, run);
-		expect(result.plan?.items[0]).toMatchObject({ id: 1, status: "done" });
-		expect(result.plan?.items[2]).toMatchObject({ id: 3, status: "open" });
-		expect(result.problem).toContain("reopened");
-	});
-
+describe("task plan replays", () => {
 	it("replays 2026-09-27: steps added after the render gate closed need their own verify, and closing it doesn't touch the render gate (#387)", () => {
 		const items = [
 			{ id: 1, kind: "step" as const, text: "render 02", status: "done" as const },
@@ -339,12 +282,6 @@ describe("planStopCheck", () => {
 			...tool("bash", { command: 'cat >> state/ledger.jsonl <<\'EOF\'\n{"post":"02"}\nEOF' }, "ok"),
 			reply("Posted."),
 		];
-		// verify 5 was already closed and untouched by this change; verify 8 was never closed, so nothing
-		// reopens here — the plan is still open on item 8, which is the actual gap.
-		const stop = planStopCheck(added, ledgerChange);
-		expect(stop.plan).toBeUndefined();
-		expect(stop.problem).toContain("still has open items");
-
 		const passed = [
 			...ledgerChange,
 			...tool("bash", { command: "node tools/check-ledger.mjs 02" }, "ledger has 02, Status: posted"),
@@ -461,17 +398,28 @@ describe("TaskPlanGuard", () => {
 		rmSync(dir, { recursive: true, force: true });
 	});
 
-	it("blocks file changes without an open plan, and allows reads and scratch writes", () => {
+	it("never blocks a file change, with or without a plan", () => {
 		const g = guard();
-		expect(g.beforeToolCall("edit", { path: "run.sh" })).toMatchObject({ block: true });
-		expect(g.beforeToolCall("bash", { command: "sed -i '105d' run.sh" })?.reason).toContain("create a task plan");
-		expect(g.beforeToolCall("bash", { command: "grep -n gate run.sh" })).toBeUndefined();
-		expect(g.beforeToolCall("bash", { command: "npm test > /tmp/out" })).toBeUndefined();
-		expect(g.beforeToolCall("read", { path: "run.sh" })).toBeUndefined();
+		expect(g.beforeToolCall("edit", { path: "run.sh" })).toBeUndefined();
+		expect(g.beforeToolCall("bash", { command: "sed -i '105d' run.sh" })).toBeUndefined();
 		plan = created();
 		expect(g.beforeToolCall("edit", { path: "run.sh" })).toBeUndefined();
 		plan = { ...plan, items: plan.items.map((i) => ({ ...i, status: "done" as const })) };
-		expect(g.beforeToolCall("write", { path: "new.ts" })?.reason).toContain("task plan is closed");
+		expect(g.beforeToolCall("write", { path: "new.ts" })).toBeUndefined();
+	});
+
+	it("snapshots files only while a plan is open", () => {
+		const file = join(dir, "run.sh");
+		writeFileSync(file, "before\n");
+		const g = guard();
+		g.beforeToolCall("edit", { path: "run.sh" });
+		writeFileSync(file, "after-no-plan\n");
+		expect(g.diff()).toBe("");
+		plan = created();
+		g.beforeToolCall("edit", { path: "run.sh" });
+		writeFileSync(file, "after-plan\n");
+		expect(g.diff()).toContain("-after-no-plan");
+		expect(g.diff()).toContain("+after-plan");
 	});
 
 	it("does nothing when disabled", async () => {
@@ -482,7 +430,7 @@ describe("TaskPlanGuard", () => {
 		expect(await g.beforeStop()).toEqual([]);
 	});
 
-	it("replays 2026-09-26: the run cannot end with run.sh still open, and the failed edit is flagged", async () => {
+	it("replays 2026-09-26: the failed edit is flagged, and the open item shows in the status instead of holding the run", async () => {
 		const g = guard();
 		plan = created();
 		run = [
@@ -495,9 +443,9 @@ describe("TaskPlanGuard", () => {
 		const [first] = await g.beforeStop();
 		expect(first).toMatchObject({ customType: "claim-check" });
 		run = [...run, first, reply("Done and verified.")];
-		const [second] = await g.beforeStop();
-		expect(second).toMatchObject({ customType: TASK_PLAN_CHECK_CUSTOM_TYPE });
-		expect(JSON.stringify(second)).toContain("run.sh");
+		expect(await g.beforeStop()).toEqual([]);
+		expect(reviews).toHaveLength(0);
+		expect(g.planStatus()).toContain("☐ run.sh");
 	});
 
 	it("reviews a closed plan once with a diff from snapshots, and pushes must-fix findings", async () => {

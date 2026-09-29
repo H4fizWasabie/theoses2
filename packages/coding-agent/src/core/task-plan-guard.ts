@@ -1,10 +1,10 @@
 /**
- * Session-side Task Plan enforcement (issue #382), installed by agent-session.ts on the main agent only
- * (sub-agents report to it; its plan covers their work):
- *   - beforeToolCall: a file change (edit, write, or a shell command that changes files) needs an open
- *     plan, and each file is snapshotted before its first change so the reviewer can see a diff even
- *     outside git;
- *   - beforeStop: claim check, then open-item push-backs, then one independent review;
+ * Session-side Task Plan support (issue #382), installed by agent-session.ts on the main agent only
+ * (sub-agents report to it; its plan covers their work). The plan is optional: nothing here blocks a
+ * file change or holds a run open for a plan.
+ *   - beforeToolCall: while a plan is open, each file is snapshotted before its first change so the
+ *     reviewer can see a diff even outside git;
+ *   - beforeStop: claim check, then one independent review of a plan the model finished;
  *   - planStatus: the one-line plan status the channel appends to the final reply.
  */
 import { readFileSync, statSync } from "node:fs";
@@ -13,17 +13,7 @@ import type { AgentMessage, BeforeToolCallResult } from "theoses-agent-core";
 import { claimCheck, FINAL_REPLY_NOTE } from "./claim-check.ts";
 import { createCustomMessage } from "./messages.ts";
 import { formatFindings, logReview, PLAN_REVIEW_CUSTOM_TYPE, type ReviewOutcome } from "./plan-reviewer.ts";
-import {
-	formatPlan,
-	formatPlanStatus,
-	isPlanOpen,
-	needsReview,
-	planStopCheck,
-	runTouchedPlan,
-	TASK_PLAN_CHECK_CUSTOM_TYPE,
-	type TaskPlan,
-	verifyOutput,
-} from "./task-plan.ts";
+import { formatPlanStatus, isPlanOpen, needsReview, runTouchedPlan, type TaskPlan, verifyOutput } from "./task-plan.ts";
 import { COMMAND_TOOLS, commandEffect, FILE_TOOLS, firstLine, textOf } from "./tool-runs.ts";
 import { resolveToCwd } from "./tools/path-utils.ts";
 
@@ -70,7 +60,7 @@ export class TaskPlanGuard {
 		this.deps = deps;
 	}
 
-	/** Refuses a file change without an open plan; snapshots the files it is about to change. */
+	/** While a plan is open, snapshots the files a tool call is about to change. Never blocks. */
 	beforeToolCall(toolName: string, args: Record<string, unknown>): BeforeToolCallResult | undefined {
 		if (!this.deps.enabled()) return undefined;
 		let paths: string[];
@@ -88,14 +78,10 @@ export class TaskPlanGuard {
 			return undefined;
 		}
 
+		// ponytail: changes made before the model opens a plan are not snapshotted, so the reviewer's diff
+		// starts at plan creation; snapshot every change and key by plan if that gap matters.
 		const plan = this.deps.getPlan();
-		if (!plan || !isPlanOpen(plan)) {
-			const reason =
-				plan && !plan.abandoned
-					? `Blocked: this changes files, but your task plan is closed.\n${formatPlan(plan)}\nIf this is more work on the same task, task_plan add an item for it first; if it is a new task, task_plan create a new plan.`
-					: 'Blocked: create a task plan before changing files. Call task_plan with action "create": the goal, one item per file/stage/config this task touches, a verify check that runs the changed code, and kind "fix" if you are correcting something broken.';
-			return { block: true, reason };
-		}
+		if (!plan || !isPlanOpen(plan)) return undefined;
 
 		if (this.snapshotPlan !== plan.createdAt) {
 			this.snapshotPlan = plan.createdAt;
@@ -159,7 +145,7 @@ export class TaskPlanGuard {
 	async beforeStop(): Promise<AgentMessage[]> {
 		const run = this.deps.runMessages();
 		const enabled = this.deps.enabled();
-		let plan = enabled ? this.deps.getPlan() : undefined;
+		const plan = enabled ? this.deps.getPlan() : undefined;
 		const verifyCovered =
 			plan !== undefined &&
 			!plan.abandoned &&
@@ -169,18 +155,6 @@ export class TaskPlanGuard {
 		const claim = claimCheck(run, { verifyCovered });
 		if (claim) return [claim];
 		if (!enabled) return [];
-
-		const stop = planStopCheck(plan, run);
-		if (stop.plan) {
-			this.deps.setPlan(stop.plan);
-			plan = stop.plan;
-		}
-		if (stop.problem) {
-			return [push(TASK_PLAN_CHECK_CUSTOM_TYPE, "task plan check", stop.problem)];
-		}
-		if (stop.gaveUp && plan) {
-			console.error(`[task-plan] ended with open items: ${firstLine(formatPlan(plan).replace(/\n/g, " | "), 300)}`);
-		}
 
 		const reviewedThisRun = run.some((m) => m.role === "custom" && m.customType === PLAN_REVIEW_CUSTOM_TYPE);
 		if (!reviewedThisRun && runTouchedPlan(run) && needsReview(plan)) {

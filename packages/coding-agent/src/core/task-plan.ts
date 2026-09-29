@@ -1,16 +1,18 @@
 /**
  * Task Plan (issue #382): the list of everything a change involves, kept by the model through the
- * `task_plan` tool and enforced by the harness, so a task cannot be reported done while part of it
- * is still open.
+ * `task_plan` tool. The model decides whether to use it; the harness never requires a plan and
+ * never holds a run open for one. When the model does plan, the plan is held to its own rules.
  *
  * Why: on 2026-09-26 a workspace redesign touched two stages. The model rewrote the first, a failed
- * edit silently dropped the second, and "done" was judged from memory instead of a list. The next
- * scheduled run failed on the untouched stage. A plan the harness can read turns "half done" into a
- * state it can see:
- *   - no file change without an open plan (agent-session.ts, before each tool call);
+ * edit silently dropped the second, and "done" was judged from memory instead of a list. A plan the
+ * harness can read turns "half done" into a state it can see:
  *   - a `fix` plan starts with root cause / siblings / fix scope, so a fix looks past the symptom;
  *   - a verify item is only accepted once a check command passed after the last file change;
- *   - the run cannot end with open items (at most MAX_STOP_PUSHES push-backs, then it is logged).
+ *   - open or deferred items show in the status line under the final reply.
+ * A finished multi-item plan or fix gets one independent review (plan-reviewer.ts).
+ *
+ * The plan was mandatory until 2026-09-29: no file change without one, no end of run with open items.
+ * Both forced a plan and extra round trips onto small tasks, so the model now chooses.
  *
  * State lives in the session as `task_plan` custom entries (latest wins), so it survives restarts and
  * "continue". Pure functions only; the session wiring is in agent-session.ts.
@@ -19,12 +21,9 @@ import type { AgentMessage } from "theoses-agent-core";
 import { checkAfterLastChange, firstLine, runChangesFiles, toolRuns } from "./tool-runs.ts";
 
 export const TASK_PLAN_ENTRY_TYPE = "task_plan";
-export const TASK_PLAN_CHECK_CUSTOM_TYPE = "task-plan-check";
 export const MAX_PLAN_ITEMS = 12;
-export const MAX_STOP_PUSHES = 2;
 /** Fix-item notes shorter than this are a tick, not an analysis. */
 const MIN_FIX_NOTE_CHARS = 20;
-const REOPENED_NOTE = "reopened: files changed after this was closed";
 
 export type PlanKind = "change" | "fix";
 export type PlanItemKind = "step" | "verify" | "root-cause" | "siblings" | "fix-scope";
@@ -77,7 +76,7 @@ export function openItems(plan: TaskPlan | undefined): PlanItem[] {
 	return plan.items.filter((item) => item.status === "open");
 }
 
-/** A plan that still has work in it: file changes are allowed and the run cannot end yet. */
+/** A plan that still has work in it. */
 export function isPlanOpen(plan: TaskPlan | undefined): boolean {
 	return openItems(plan).length > 0;
 }
@@ -227,10 +226,9 @@ export function applyPlanAction(
 			const item = current.items.find((i) => i.id === input.id);
 			if (!item) return { error: `No item ${input.id}.\n${formatPlan(current)}` };
 			const status = input.status ?? item.status;
-			// Issue #388: a note written for a closed status (a deferral reason) or by a reopen is stale once
-			// the status changes; a note written while open (e.g. fix analysis) carries into the close.
-			const carried =
-				status === item.status || (item.status === "open" && item.note !== REOPENED_NOTE) ? item.note : undefined;
+			// Issue #388: a note written for a closed status (a deferral reason) is stale once the status
+			// changes; a note written while open (e.g. fix analysis) carries into the close.
+			const carried = status === item.status || item.status === "open" ? item.note : undefined;
 			const note = input.note?.trim() || carried;
 			if (status === "deferred" && !input.note?.trim()) {
 				return { error: "Deferring needs a `note` with the reason." };
@@ -262,50 +260,4 @@ export function applyPlanAction(
 /** True when this run did anything the plan governs: changed files or touched the plan. */
 export function runTouchedPlan(runMessages: AgentMessage[]): boolean {
 	return toolRuns(runMessages).some((run) => run.name === "task_plan" || runChangesFiles(run));
-}
-
-export interface PlanStopResult {
-	/** Plan to persist (a verify item reopened because files changed after it was closed). */
-	plan?: TaskPlan;
-	/** Push-back text, when the run must not end yet. */
-	problem?: string;
-	/** Push-backs are exhausted and the run ends with open items. */
-	gaveUp?: boolean;
-}
-
-/**
- * Stop-time check: the run may not end while its plan has open items, or with the latest verify item
- * closed before the latest file change. Earlier verify items that already closed stay closed — a later
- * change doesn't undo what they already proved (issue #387). Only applies to runs that changed files or
- * touched the plan, so a question asked mid-task is not pushed back.
- */
-export function planStopCheck(plan: TaskPlan | undefined, runMessages: AgentMessage[]): PlanStopResult {
-	if (!plan || plan.abandoned || !runTouchedPlan(runMessages)) return {};
-	let next = plan;
-	let reopened = false;
-	const runs = toolRuns(runMessages);
-	if (runs.some(runChangesFiles) && verifyEvidenceProblem(runMessages)) {
-		const latestVerify = plan.items.reduce<PlanItem | undefined>(
-			(latest, item) => (item.kind === "verify" && (!latest || item.id > latest.id) ? item : latest),
-			undefined,
-		);
-		if (latestVerify && latestVerify.status !== "open") {
-			next = {
-				...plan,
-				items: plan.items.map((item) =>
-					item.id === latestVerify.id ? { ...item, status: "open" as const, note: REOPENED_NOTE } : item,
-				),
-			};
-			reopened = true;
-		}
-	}
-	if (!isPlanOpen(next)) return next === plan ? {} : { plan: next };
-
-	const pushes = runMessages.filter((m) => m.role === "custom" && m.customType === TASK_PLAN_CHECK_CUSTOM_TYPE).length;
-	if (pushes >= MAX_STOP_PUSHES) return { plan: next === plan ? undefined : next, gaveUp: true };
-	const reopenHint = reopened
-		? " The latest verify item reopened because files changed after it closed: any check that exercises what changed since then closes it again — rerunning the original command only helps if it covers those changes."
-		: "";
-	const problem = `Your task plan still has open items, so the task is not done:\n${formatPlan(next)}\nFinish each open item and close it with task_plan update (a verify item needs a passing check after your last change).${reopenHint} If an item cannot be done now, set it to deferred with the reason. If the plan no longer applies, abandon it with a reason. Tell the user plainly about anything deferred.`;
-	return { plan: next === plan ? undefined : next, problem };
 }
