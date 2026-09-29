@@ -1,0 +1,72 @@
+name: Evals
+
+# Model-backed coding evals against the production model (GLM 5.3 flash at thinking max). Costs real money, so it runs
+# only on demand and once a week, never on pull requests: a public repo must not hand a paid key to PR code.
+# A full run is about 16 tasks x 3 passes, roughly 5 cents; the OPENROUTER_API_KEY secret has a hard credit limit.
+on:
+  workflow_dispatch:
+    inputs:
+      passes:
+        description: "Passes per task"
+        default: "1"
+        type: choice
+        options: ["1", "2", "3"]
+  schedule:
+    - cron: "0 3 * * 1"
+
+concurrency:
+  group: evals
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  evals:
+    # Forks have no secret; skip there instead of failing.
+    if: github.repository == 'H4fizWasabie/theoses2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      EVAL_DIR: ${{ runner.temp }}/evals
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Generate the model catalog
+        run: npm --prefix packages/ai run generate-models
+
+      - name: Run the coding evals
+        # A wrong answer fails its test; the floors below decide whether the job fails, so keep going here.
+        continue-on-error: true
+        run: |
+          for pass in $(seq 1 "${{ inputs.passes || '1' }}"); do
+            THEOSES_EVAL_ARTIFACT_DIR="$EVAL_DIR/pass-$pass" npm run eval -- \
+              --provider openrouter --model z-ai/glm-5.3-flash \
+              src/coding.eval.ts src/coding-hard.eval.ts || true
+          done
+
+      - name: Summarize
+        # Floors from the first baseline on the production model: the easy set 15/15, the hard set 26/33 (79%).
+        run: node packages/evals/scripts/summarize-runs.ts "$EVAL_DIR" --floor coding=1 --floor coding-hard=0.7
+
+      - name: Upload run records
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: eval-runs
+          path: ${{ runner.temp }}/evals
+          retention-days: 30

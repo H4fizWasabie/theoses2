@@ -33,6 +33,29 @@ Each invocation prints an ignored `.eval/` artifact directory. `runs.jsonl` inde
 native Theoses session JSONL attachments under `sessions/`. These files may contain prompts, responses, source code, and tool
 output.
 
+## Coding evals and their pass rate
+
+`src/coding.eval.ts` (5 easy tasks) and `src/coding-hard.eval.ts` (11 hard ones) seed a tiny Node project, give the agent one
+prompt, and grade the workspace by running `node --test`, including grader-owned hidden tests the agent never sees. A wrong
+answer fails its test (`judgeThreshold: 1`), so the pass rate is a correctness rate. Every task has a reference solution, and
+`test/coding-tasks.test.ts` proves each one fails as seeded and passes solved.
+
+Summarize any run directory, with optional floors that make the exit code 1:
+
+```bash
+node scripts/summarize-runs.ts .eval/<run> --floor coding=1 --floor coding-hard=0.7
+```
+
+The first baseline on the production model (GLM 5.3 flash, thinking `max`, task plan off): easy 15/15, hard 26/33.
+
+## Evals in CI
+
+`.github/workflows/evals.yml` runs both suites against the production model on demand (`workflow_dispatch`, with 1 to 3
+passes) and every Monday. It never runs on pull requests, because a public repo must not give a paid key to PR code. It needs
+the `OPENROUTER_API_KEY` Actions secret, which should have a hard credit limit on the OpenRouter side; a run costs a few cents.
+The job summary shows the per-task table, the run records are uploaded as the `eval-runs` artifact, and the job fails when the
+easy set drops below 100% or the hard set below 70%. Those floors sit under the first baseline and should rise as the agent improves.
+
 ## Writing evals
 
 Follow [`vitest-evals`](https://github.com/getsentry/vitest-evals) for general suite, judge, assertion, and normalized
