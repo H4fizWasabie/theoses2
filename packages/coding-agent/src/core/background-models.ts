@@ -10,7 +10,7 @@ import type { Api, Model } from "theoses-ai";
 export type BackgroundModelName = "consolidation" | "explorer" | "research" | "reviewer";
 
 export interface BackgroundModelSetting {
-	/** OpenRouter model id, e.g. "deepseek/deepseek-v4-flash-0731". */
+	/** OpenRouter model id, e.g. "inclusionai/ling-3.0-flash-vl". */
 	model?: string;
 	/**
 	 * OpenRouter provider `order`, using the endpoints API's `provider_name` (not the pricing page's
@@ -77,27 +77,29 @@ export interface BackgroundModelSource {
 }
 
 /**
- * Shared defaults, overridable per name through `backgroundModels.<name>` in settings.json. The paid
- * DeepSeek V4 Flash 0731 at fp8, Baidu first and DeepInfra as the only fallback (about $0.05 to $0.06
- * per million input tokens). The free `:free` variant these used to default to was withdrawn by
- * OpenRouter on 2026-09-20, which silently stopped consolidation and task-boundary summaries until
- * the setting was overridden.
+ * Shared defaults, overridable per name through `backgroundModels.<name>` in settings.json: Ling 3.0 Flash VL
+ * on DeepInfra at fp16, the routing the production consolidation already runs on. Abah ruled out DeepSeek models
+ * for background work; the default used to be DeepSeek V4 Flash 0731, and before that a `:free` variant that
+ * OpenRouter withdrew on 2026-09-20, which silently stopped consolidation and task-boundary summaries until the
+ * setting was overridden. A default that is not in the catalog now fails loudly instead.
  *
  * Provider slugs must match the endpoints API's `provider_name`, not the pricing page's marketing
- * label (issues #180/#190: "Baidu Qianfan" and "AkashML" silently matched nothing): "Baidu" and
- * "DeepInfra". Baidu can answer 429 on its shared pool, which is why DeepInfra is second.
+ * label (issues #180/#190: "Baidu Qianfan" and "AkashML" silently matched nothing).
  */
 const DEFAULTS: ResolvedBackgroundModelSetting = {
-	model: "deepseek/deepseek-v4-flash-0731",
-	providers: ["Baidu", "DeepInfra"],
-	quantizations: ["fp8"],
+	model: "inclusionai/ling-3.0-flash-vl",
+	providers: ["DeepInfra"],
+	quantizations: ["fp16"],
 };
 
 /**
- * The task-plan reviewer (issue #382) deliberately uses a different model family from the worker, whose
- * blind spots it would otherwise share. GPT-6 Luna is the one the ICM workspaces already run on.
+ * The explorer and research run on Novita at bf16 (as in production); the task-plan reviewer (issue #382)
+ * deliberately uses a different model family from the worker, whose blind spots it would otherwise share.
+ * GPT-6 Luna is the one the ICM workspaces already run on.
  */
 const NAME_DEFAULTS: Partial<Record<BackgroundModelName, ResolvedBackgroundModelSetting>> = {
+	explorer: { model: DEFAULTS.model, providers: ["Novita"], quantizations: ["bf16"] },
+	research: { model: DEFAULTS.model, providers: ["Novita"], quantizations: ["bf16"] },
 	reviewer: { model: "openai/gpt-6-luna", providers: ["OpenAI"], quantizations: [] },
 };
 

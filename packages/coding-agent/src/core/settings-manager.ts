@@ -119,6 +119,8 @@ export interface Settings {
 	taskPlan?: { enabled?: boolean };
 	// Shell commands run at fixed points of an agent run, keyed by event name (see command-hooks.ts). Validated on read.
 	hooks?: Record<string, unknown>;
+	// Patterns for models that cannot be selected at all (see excluded-models.ts), e.g. ["*deepseek*"].
+	excludedModels?: string[];
 	defaultThinkingLevel?: ThinkingLevel;
 	modelThinkingLevels?: Record<string, ThinkingLevel>; // per-model default thinking level overrides keyed by "provider/modelId"
 	transport?: TransportSetting; // default: "auto"
@@ -923,6 +925,19 @@ export class SettingsManager {
 			parseHooks(this.globalSettings.hooks, "user"),
 			this.projectTrusted ? parseHooks(this.projectSettings.hooks, "project") : {},
 		);
+	}
+
+	/**
+	 * Patterns for models that cannot be selected (excluded-models.ts): the user's, then a trusted project's. Concatenated,
+	 * not merged, so a project cannot lift the owner's exclusions by declaring its own list.
+	 */
+	getExcludedModels(): string[] {
+		const strings = (value: unknown): string[] =>
+			Array.isArray(value) ? value.filter((v): v is string => typeof v === "string" && v.trim() !== "") : [];
+		return [
+			...strings(this.globalSettings.excludedModels),
+			...(this.projectTrusted ? strings(this.projectSettings.excludedModels) : []),
+		];
 	}
 
 	getContextPruningSettings(): { toolResultMaxChars: number; toolCallArgsMaxChars: number; keepRecentImages: number } {

@@ -2,13 +2,19 @@ import { describe, expect, it, vi } from "vitest";
 import { type BackgroundModelName, resolveBackgroundModel } from "../src/core/background-models.ts";
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
 
-const DEFAULT_MODEL_ID = "deepseek/deepseek-v4-flash-0731";
+const DEFAULT_MODEL_ID = "inclusionai/ling-3.0-flash-vl";
 const MAX_TOKENS: Partial<Record<BackgroundModelName, number>> = {
 	consolidation: 32000,
 	explorer: 8000,
 	research: 16000,
 };
 const NAMES = Object.keys(MAX_TOKENS) as BackgroundModelName[];
+// The routing the production settings.json already runs each name on.
+const ROUTING: Partial<Record<BackgroundModelName, { order: string[]; quantizations: string[] }>> = {
+	consolidation: { order: ["DeepInfra"], quantizations: ["fp16"] },
+	explorer: { order: ["Novita"], quantizations: ["bf16"] },
+	research: { order: ["Novita"], quantizations: ["bf16"] },
+};
 
 function runtimeWithModel(): { runtime: ModelRuntime; getModel: ReturnType<typeof vi.fn> } {
 	const getModel = vi.fn(() => ({
@@ -25,19 +31,23 @@ function routingOf(model: unknown): Record<string, unknown> {
 	return (model as { compat: { openRouterRouting: Record<string, unknown> } }).compat.openRouterRouting;
 }
 
-describe("default DeepSeek V4 Flash 0731 routing", () => {
-	it.each(NAMES)("%s asks for the paid variant and pins Baidu then DeepInfra with no other fallbacks", (name) => {
+describe("default Ling 3.0 Flash VL routing", () => {
+	it.each(NAMES)("%s uses Ling 3.0 Flash VL on its own provider with no other fallbacks", (name) => {
 		const { runtime, getModel } = runtimeWithModel();
 
 		const model = resolveBackgroundModel(runtime, name);
 
 		expect(getModel).toHaveBeenCalledWith("openrouter", DEFAULT_MODEL_ID);
-		expect(routingOf(model)).toMatchObject({
-			order: ["Baidu", "DeepInfra"],
-			quantizations: ["fp8"],
-			allow_fallbacks: false,
-		});
+		expect(routingOf(model)).toMatchObject({ ...ROUTING[name], allow_fallbacks: false });
 		expect(model.maxTokens).toBe(MAX_TOKENS[name]);
+	});
+
+	it("never defaults any background job to a DeepSeek model", () => {
+		const { runtime, getModel } = runtimeWithModel();
+
+		for (const name of [...NAMES, "reviewer" as const]) resolveBackgroundModel(runtime, name);
+
+		for (const call of getModel.mock.calls) expect(String(call[1])).not.toMatch(/deepseek/i);
 	});
 
 	it("does not default to a free variant, which OpenRouter can withdraw", () => {

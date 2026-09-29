@@ -54,3 +54,27 @@ describe("SettingsManager.getCommandHooks", () => {
 		expect(manager(undefined, undefined, true).getCommandHooks()).toEqual({});
 	});
 });
+
+describe("SettingsManager.getExcludedModels", () => {
+	function withExclusions(user: unknown, project: unknown, projectTrusted: boolean): SettingsManager {
+		const storage = new InMemorySettingsStorage();
+		storage.withLock("global", () => JSON.stringify({ excludedModels: user }));
+		storage.withLock("project", () => JSON.stringify({ excludedModels: project }));
+		return SettingsManager.fromStorage(storage, { projectTrusted });
+	}
+
+	it("adds a trusted project's patterns to the user's, never replacing them", () => {
+		expect(withExclusions(["*deepseek*"], ["*qwen*"], true).getExcludedModels()).toEqual(["*deepseek*", "*qwen*"]);
+		expect(withExclusions(["*deepseek*"], [], true).getExcludedModels()).toEqual(["*deepseek*"]);
+	});
+
+	it("ignores an untrusted project's patterns, blank entries and non-strings", () => {
+		expect(withExclusions(["*deepseek*", "", 3, null], ["*qwen*"], false).getExcludedModels()).toEqual([
+			"*deepseek*",
+		]);
+	});
+
+	it("is empty when nothing is configured", () => {
+		expect(withExclusions(undefined, undefined, true).getExcludedModels()).toEqual([]);
+	});
+});

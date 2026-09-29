@@ -148,6 +148,7 @@ export async function createAgentSessionServices(
 		}));
 	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
 	modelRuntime.setBackgroundModels(settingsManager.getBackgroundModels());
+	modelRuntime.setExcludedModels(settingsManager.getExcludedModels());
 	const resourceLoader = new DefaultResourceLoader({
 		...(options.resourceLoaderOptions ?? {}),
 		cwd,

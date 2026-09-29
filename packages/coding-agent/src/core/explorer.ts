@@ -3,7 +3,7 @@
  *
  * Codebase scouting (grep/read dumps) lands on the main agent's context and stays there for
  * turns — driving up cost and context pollution, since explore output is used briefly but paid
- * for on every subsequent turn. This module spawns a cheap, isolated agent (DeepSeek flash tier
+ * for on every subsequent turn. This module spawns a cheap, isolated agent (a flash-tier model
  * via OpenRouter) with a strictly read-only toolset (read/grep/find/ls) whose entire job is to
  * answer ONE scouting question and return a *distilled* answer capped by the tier's line/token
  * budget — never raw tool dumps.
@@ -268,7 +268,7 @@ export function createExploreToolDefinition(deps: ExploreToolDeps): ToolDefiniti
 		name: "explore",
 		label: "explore",
 		description:
-			"Spawn a background explorer sub-agent (read-only, cheap DeepSeek model) to scout a codebase question and return a distilled, line-capped answer instead of raw grep/read dumps. Use for codebase scouting questions ('which file handles X', 'map this subsystem'); it keeps its tool dumps out of your context. Up to 3 explorers run concurrently, so you may call explore several times in parallel for independent questions.",
+			"Spawn a background explorer sub-agent (read-only, cheap background model) to scout a codebase question and return a distilled, line-capped answer instead of raw grep/read dumps. Use for codebase scouting questions ('which file handles X', 'map this subsystem'); it keeps its tool dumps out of your context. Up to 3 explorers run concurrently, so you may call explore several times in parallel for independent questions.",
 		promptSnippet:
 			"Scout a codebase question with an isolated read-only sub-agent; returns a distilled, capped answer",
 		promptGuidelines: [

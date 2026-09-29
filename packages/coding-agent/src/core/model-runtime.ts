@@ -42,6 +42,7 @@ import { getAgentDir } from "../config.ts";
 import { operationSignal, raceWithAbortSignal } from "../utils/abort.ts";
 import { AuthStorage as DefaultAuthStorage } from "./auth-storage.ts";
 import type { BackgroundModelConfig, BackgroundModelName, BackgroundModelSetting } from "./background-models.ts";
+import { createModelExcluder, type ModelRef } from "./excluded-models.ts";
 import { ModelConfig } from "./model-config.ts";
 import { FileModelsStore } from "./models-store.ts";
 import {
@@ -152,6 +153,19 @@ export class ModelRuntime implements Models {
 	private availabilityError: string | undefined;
 	private readonly credentialOperations = new Map<string, Promise<unknown>>();
 	private backgroundModels: BackgroundModelConfig = {};
+	private isExcluded: (model: ModelRef) => boolean = () => false;
+
+	/**
+	 * Carries `settings.json`'s `excludedModels` (excluded-models.ts). An excluded model is missing from every listing
+	 * and lookup, so it cannot be picked, cycled to, used as a background model, or restored from a saved session.
+	 */
+	setExcludedModels(patterns: readonly string[]): void {
+		this.isExcluded = createModelExcluder(patterns);
+	}
+
+	private permitted<T extends readonly Model<Api>[]>(models: T): Model<Api>[] {
+		return models.filter((model) => !this.isExcluded(model));
+	}
 
 	/** Carries `settings.json`'s `backgroundModels` to the background resolvers, which only receive a runtime. */
 	setBackgroundModels(config: BackgroundModelConfig): void {
@@ -394,11 +408,12 @@ export class ModelRuntime implements Models {
 	}
 
 	getModels(providerId?: string): readonly Model<Api>[] {
-		return this.models.getModels(providerId);
+		return this.permitted(this.models.getModels(providerId));
 	}
 
 	getModel(providerId: string, modelId: string): Model<Api> | undefined {
-		return this.models.getModel(providerId, modelId);
+		const model = this.models.getModel(providerId, modelId);
+		return model && !this.isExcluded(model) ? model : undefined;
 	}
 
 	async checkAuth(providerId: string, options?: AuthOperationOptions): Promise<AuthCheck | undefined> {
@@ -411,7 +426,7 @@ export class ModelRuntime implements Models {
 			try {
 				const available = await this.models.getAvailable(providerId, options);
 				if (errorSeq === this.availabilityErrorSeq) this.availabilityError = undefined;
-				return available;
+				return this.permitted(available);
 			} catch (error) {
 				if (errorSeq === this.availabilityErrorSeq && !options?.signal?.aborted) {
 					this.availabilityError = error instanceof Error ? error.message : String(error);
@@ -420,11 +435,11 @@ export class ModelRuntime implements Models {
 			}
 		}
 		await this.queueAvailabilityRefresh(options?.signal);
-		return this.snapshot.available;
+		return this.permitted(this.snapshot.available);
 	}
 
 	getAvailableSnapshot(): readonly Model<Api>[] {
-		return this.snapshot.available;
+		return this.permitted(this.snapshot.available);
 	}
 
 	getError(): string | undefined {
