@@ -25,7 +25,8 @@ run_case() { # tag
 echo "success path (v1.0.102):"
 run_case v1.0.102
 [[ -f "$work/rel-v1.0.102.tmp/source/package.json" ]] || { echo "FAIL: source/package.json missing"; exit 1; }
-[[ ! -w "$work/rel-v1.0.102.tmp/source/package.json" ]] || { echo "FAIL: source is writable"; exit 1; }
+# Mode bits, not -w: the updater (and so this test) runs as root, for whom -w is always true.
+[[ "$(stat -c %A "$work/rel-v1.0.102.tmp/source/package.json")" != *w* ]] || { echo "FAIL: source is writable"; exit 1; }
 echo "ok   source extracted, stripped one level, read-only"
 
 echo "failure path (nonexistent release):"
