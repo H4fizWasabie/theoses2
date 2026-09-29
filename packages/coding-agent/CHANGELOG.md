@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.103] - 2026-09-29
 
 - feat: `scripts/theoses-updater/update.sh` now also installs the release's `theoses-<version>-source.tar.gz` (checksum-verified) read-only at `/opt/theoses2-releases/<tag>/source`, so `/opt/theoses2-releases/current/source` is always the exact source of the running release. The service bundle ships only `dist/`, so an agent auditing its own runtime read a git checkout that had drifted 14 releases behind (v1.0.88) and labelled the audit "v1.0.102" without checking. A missing or bad source asset is logged and never blocks an update.
