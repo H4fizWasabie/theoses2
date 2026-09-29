@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.101] - 2026-09-29
 
 - feat: the Task Plan is now optional. The model decides whether to use `task_plan`; the harness no longer refuses a file change for lack of an open plan and no longer holds a run open with `task-plan-check` push-backs while items are open. Open and deferred items still show in the plan status line under the final reply, a verify item still closes only after a passing check, and a plan the model finishes still gets one independent review. The `task_plan` description and guidelines now say to skip it for small single-step changes. Removed `planStopCheck`, `MAX_STOP_PUSHES` and `TASK_PLAN_CHECK_CUSTOM_TYPE`, and the reopening of the latest verify item after later file changes. Why: on a trivial rename in an eval, a mandatory plan plus the independent review added several round trips and pushed the run past a 120 s timeout.
