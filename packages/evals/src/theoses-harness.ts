@@ -39,6 +39,8 @@ type TheosesCodingAgentHarnessOptions = {
 	transformSystemPrompt?: (defaultPrompt: string) => string;
 	/** Defaults to "off". Set it to match production when measuring a baseline. */
 	thinkingLevel?: CreateAgentSessionOptions["thinkingLevel"];
+	/** Called with a copy of every provider request body, in order. For diagnostics such as prompt-cache prefix checks. */
+	onPayload?: (payload: unknown) => void;
 	/** In-memory settings for the eval session. Defaults differ from a deployed agent's settings.json. */
 	settings?: Parameters<typeof SettingsManager.inMemory>[0];
 	/** Files written into the workspace before the run, keyed by relative path. */
@@ -166,6 +168,13 @@ async function runTheosesCodingAgent<TOutput extends JsonValue>(
 			transformedSystemPrompt = options.transformSystemPrompt(evalSession.systemPrompt);
 			if (!transformedSystemPrompt.trim()) throw new Error("Transformed eval system prompt must not be empty.");
 			await evalSession.reload();
+		}
+		if (options.onPayload) {
+			const observe = options.onPayload;
+			evalSession.agent.onPayload = (payload) => {
+				observe(structuredClone(payload));
+				return undefined;
+			};
 		}
 		let abortPromise: Promise<void> | undefined;
 		const abort = () => {
