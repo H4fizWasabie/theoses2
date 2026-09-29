@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	applyFileRewind,
+	describeRewindPlan,
 	FILE_CHECKPOINT_ENTRY_TYPE,
 	FileCheckpoints,
 	MAX_CHECKPOINT_BYTES,
@@ -164,5 +165,38 @@ describe("file checkpoints", () => {
 
 		expect(result.failed).toHaveLength(1);
 		expect(result.restored).toHaveLength(1);
+	});
+});
+
+describe("describeRewindPlan", () => {
+	it("says so when nothing changed", () => {
+		expect(describeRewindPlan({ restore: [], skipped: [], untraced: [] })).toBe(
+			"No files changed since that message.",
+		);
+	});
+
+	it("counts restores and deletions, and names what cannot be undone", () => {
+		const text = describeRewindPlan({
+			restore: [
+				{ path: "/w/a", hash: "h1" },
+				{ path: "/w/b", hash: "h2" },
+				{ path: "/w/new", hash: null },
+			],
+			skipped: [{ path: "/w/big.bin", reason: "larger than 10485760 bytes" }],
+			untraced: ["python3 make.py", "sh gen.sh"],
+		});
+		expect(text).toBe(
+			[
+				"Restore 2 files to how they were before.",
+				"Delete 1 file created since then.",
+				"Cannot restore 1 file: /w/big.bin (larger than 10485760 bytes).",
+				"2 shell commands changed files in ways that cannot be undone.",
+			].join("\n"),
+		);
+	});
+
+	it("shortens a long list of files it cannot restore", () => {
+		const skipped = ["a", "b", "c", "d", "e"].map((name) => ({ path: `/w/${name}`, reason: "not a regular file" }));
+		expect(describeRewindPlan({ restore: [], skipped, untraced: [] })).toContain(", and 2 more.");
 	});
 });

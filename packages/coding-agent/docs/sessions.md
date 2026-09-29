@@ -29,6 +29,7 @@ For the JSONL file format and SessionManager API, see [Session Format](session-f
 | `/session` | Show session info |
 | `/tree` | Navigate the current session tree |
 | `/fork` | Create a new session from a previous user message |
+| `/rewind` | Put files back to before a previous user message, optionally forking before it |
 | `/clone` | Duplicate the current active branch into a new session |
 | `/compact [prompt]` | Summarize older context; see [Compaction](compaction.md) |
 | `/export [file]` | Export session to HTML |

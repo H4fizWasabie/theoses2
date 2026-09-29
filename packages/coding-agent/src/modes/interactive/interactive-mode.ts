@@ -78,6 +78,7 @@ import type {
 	ProjectTrustContext,
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.ts";
+import { describeRewindPlan } from "../../core/file-checkpoints.ts";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.ts";
 import { configureHttpDispatcher, formatHttpIdleTimeoutMs } from "../../core/http-dispatcher.ts";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
@@ -2858,6 +2859,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/rewind") {
+				this.showRewindSelector();
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/clone") {
 				this.editor.setText("");
 				await this.handleCloneCommand();
@@ -4913,6 +4919,66 @@ export class InteractiveMode {
 			);
 			return { component: selector, focus: selector.getMessageList() };
 		});
+	}
+
+	private showRewindSelector(): void {
+		if (this.session.isStreaming) {
+			this.showStatus("Stop the current run before rewinding");
+			return;
+		}
+		const userMessages = this.session.getUserMessagesForForking();
+		if (userMessages.length === 0) {
+			this.showStatus("No messages to rewind to");
+			return;
+		}
+
+		this.showSelector((done) => {
+			const selector = new UserMessageSelectorComponent(
+				userMessages.map((m) => ({ id: m.entryId, text: m.text })),
+				async (entryId) => {
+					done();
+					await this.rewindTo(entryId);
+				},
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+				userMessages[userMessages.length - 1]?.entryId,
+				{
+					title: "Rewind to Message",
+					description: "Select a user message to put files back to how they were before it",
+				},
+			);
+			return { component: selector, focus: selector.getMessageList() };
+		});
+	}
+
+	/** Confirms what would change, restores the files, and optionally forks the conversation from just before the message. */
+	private async rewindTo(entryId: string): Promise<void> {
+		try {
+			const restoreFiles = "Restore files";
+			const restoreAndFork = "Restore files and fork before this message";
+			const choice = await this.showExtensionSelector(
+				`Rewind\n${describeRewindPlan(this.session.previewFileRewind(entryId))}`,
+				[restoreFiles, restoreAndFork, "Cancel"],
+			);
+			if (choice !== restoreFiles && choice !== restoreAndFork) return;
+
+			const result = this.session.rewindFiles(entryId);
+			let summary = `Restored ${result.restored.length}, deleted ${result.deleted.length}`;
+			if (result.failed.length > 0) summary += `, ${result.failed.length} failed (${result.failed[0].path})`;
+
+			if (choice === restoreAndFork) {
+				const forked = await this.runtimeHost.fork(entryId);
+				if (!forked.cancelled) {
+					this.editor.setText(forked.selectedText ?? "");
+					summary += "; forked to a new session before that message";
+				}
+			}
+			this.showStatus(summary);
+		} catch (error: unknown) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
 	}
 
 	private async handleCloneCommand(): Promise<void> {
