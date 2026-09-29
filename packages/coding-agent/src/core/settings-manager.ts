@@ -9,6 +9,7 @@ import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { stripBom } from "../utils/text.ts";
 import type { BackgroundModelConfig } from "./background-models.ts";
+import { type CommandHooksConfig, mergeHooks, parseHooks } from "./command-hooks.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 import type {
 	HttpSidecarToolSourceOptions,
@@ -116,6 +117,8 @@ export interface Settings {
 	backgroundModels?: BackgroundModelConfig;
 	// Task Plan enforcement and its reviewer (issue #382); `enabled: false` is the kill switch. Default: on.
 	taskPlan?: { enabled?: boolean };
+	// Shell commands run at fixed points of an agent run, keyed by event name (see command-hooks.ts). Validated on read.
+	hooks?: Record<string, unknown>;
 	defaultThinkingLevel?: ThinkingLevel;
 	modelThinkingLevels?: Record<string, ThinkingLevel>; // per-model default thinking level overrides keyed by "provider/modelId"
 	transport?: TransportSetting; // default: "auto"
@@ -909,6 +912,17 @@ export class SettingsManager {
 			maxHistoryTurns: this.getCompactionMaxHistoryTurns(),
 			maxDeferredTurns: this.getCompactionMaxDeferredTurns(),
 		};
+	}
+
+	/**
+	 * Command hooks: the user's, then the project's when the project is trusted. Read from the two scopes
+	 * separately and concatenated, because the merged `settings` would let a project's array replace the user's.
+	 */
+	getCommandHooks(): CommandHooksConfig {
+		return mergeHooks(
+			parseHooks(this.globalSettings.hooks, "user"),
+			this.projectTrusted ? parseHooks(this.projectSettings.hooks, "project") : {},
+		);
 	}
 
 	getContextPruningSettings(): { toolResultMaxChars: number; toolCallArgsMaxChars: number; keepRecentImages: number } {

@@ -54,7 +54,18 @@ import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { markBusy } from "./busy-marker.ts";
+import { FINAL_REPLY_NOTE } from "./claim-check.ts";
 import { formatClockAnnotation, stripClockAnnotation } from "./clock.ts";
+import {
+	type HookRunContext,
+	MAX_STOP_HOOK_PUSHES,
+	runSessionHooks as runCommandSessionHooks,
+	runPostToolUse,
+	runPreToolUse,
+	runStopHooks,
+	runUserPromptSubmit,
+	STOP_HOOK_CUSTOM_TYPE,
+} from "./command-hooks.ts";
 import {
 	activeContextWindowTurns,
 	CACHE_WARM_WINDOW_MS,
@@ -113,7 +124,7 @@ import {
 } from "./file-checkpoints.ts";
 import { createMemoryPromotion, type MemoryPromotion } from "./memory-promotion.ts";
 import { FileMemoryStore } from "./memory-store.ts";
-import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
+import { type BashExecutionMessage, type CustomMessage, createCustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { reviewPlan } from "./plan-reviewer.ts";
@@ -138,7 +149,7 @@ import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { TaskPlanGuard } from "./task-plan-guard.ts";
 import { createToolRegistry, type ToolRegistry } from "./tool-registry.ts";
-import { currentRunMessages } from "./tool-runs.ts";
+import { currentRunMessages, textOf } from "./tool-runs.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { generateUnifiedPatch } from "./tools/edit-diff.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
@@ -621,32 +632,80 @@ export class AgentSession {
 	 * registered tool execution to the extension context. Tool call and tool result interception now
 	 * happens here instead of in wrappers.
 	 */
+	private _hookContext(): HookRunContext {
+		return { cwd: this._cwd, sessionId: this.sessionId, signal: this.agent.signal };
+	}
+
+	/** Runs the owner's SessionStart or SessionEnd command hooks (command-hooks.ts). */
+	async runSessionHooks(event: "SessionStart" | "SessionEnd", reason: string): Promise<void> {
+		await runCommandSessionHooks(this.settingsManager.getCommandHooks(), event, this._hookContext(), reason);
+	}
+
+	/**
+	 * Stop hooks (command-hooks.ts). One that blocks feeds its reason back as a custom message so the run continues,
+	 * at most MAX_STOP_HOOK_PUSHES times per run, so a hook that never relents cannot hold a run open forever.
+	 */
+	private async _runStopHooks(): Promise<AgentMessage[]> {
+		const hooks = this.settingsManager.getCommandHooks();
+		if (!hooks.Stop) return [];
+		const run = currentRunMessages(this.agent.state.messages);
+		const pushes = run.filter((m) => m.role === "custom" && m.customType === STOP_HOOK_CUSTOM_TYPE).length;
+		if (pushes >= MAX_STOP_HOOK_PUSHES) return [];
+		const last = [...run].reverse().find((m) => m.role === "assistant");
+		const lastAssistantText = last?.role === "assistant" ? textOf(last.content) : "";
+		const reason = await runStopHooks(hooks, this._hookContext(), { stopHookActive: pushes > 0, lastAssistantText });
+		if (reason === undefined) return [];
+		return [
+			createCustomMessage(
+				STOP_HOOK_CUSTOM_TYPE,
+				`[System: stop hook]\n${reason}\n\n${FINAL_REPLY_NOTE}`,
+				true,
+				undefined,
+				new Date().toISOString(),
+			),
+		];
+	}
+
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
-			this._fileCheckpoints.beforeToolCall(toolCall.name, args as Record<string, unknown>);
-			const planGate = this._taskPlanGuard.beforeToolCall(toolCall.name, args as Record<string, unknown>);
+			const input = args as Record<string, unknown>;
+			const planGate = this._taskPlanGuard.beforeToolCall(toolCall.name, input);
 			if (planGate) return planGate;
-			const runner = this._extensionRunner;
-			if (!runner.hasHandlers("tool_call")) {
-				return undefined;
-			}
+			// The owner's command hooks run first: one can block the call or rewrite its input, and the extensions
+			// and the checkpoint below see the rewritten input.
+			const hookBlock = await runPreToolUse(this.settingsManager.getCommandHooks(), this._hookContext(), {
+				toolName: toolCall.name,
+				toolCallId: toolCall.id,
+				input,
+			});
+			if (hookBlock) return hookBlock;
 
-			try {
-				return await runner.emitToolCall({
-					type: "tool_call",
-					toolName: toolCall.name,
-					toolCallId: toolCall.id,
-					input: args as Record<string, unknown>,
-				});
-			} catch (err) {
-				if (err instanceof Error) {
-					throw err;
+			const runner = this._extensionRunner;
+			let result: Awaited<ReturnType<typeof runner.emitToolCall>> | undefined;
+			if (runner.hasHandlers("tool_call")) {
+				try {
+					result = await runner.emitToolCall({
+						type: "tool_call",
+						toolName: toolCall.name,
+						toolCallId: toolCall.id,
+						input,
+					});
+				} catch (err) {
+					if (err instanceof Error) {
+						throw err;
+					}
+					throw new Error(`Extension failed, blocking execution: ${String(err)}`);
 				}
-				throw new Error(`Extension failed, blocking execution: ${String(err)}`);
 			}
+			// Last, so the checkpoint saves the file the tool will really change and nothing for a blocked call.
+			if (!result?.block) this._fileCheckpoints.beforeToolCall(toolCall.name, input);
+			return result;
 		};
 
-		this.agent.beforeStop = () => this._taskPlanGuard.beforeStop();
+		this.agent.beforeStop = async () => {
+			const pushed = await this._taskPlanGuard.beforeStop();
+			return pushed.length > 0 ? pushed : await this._runStopHooks();
+		};
 
 		this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
 			const runner = this._extensionRunner;
@@ -669,14 +728,31 @@ export class AgentSession {
 				autoResizeImages: this.settingsManager.getImageAutoResize(),
 			});
 
-			if (!hookResult && normalizedContent === content) {
+			// The owner's PostToolUse hooks run last, on what the model would now see, and can add context to it.
+			const finalIsError = hookResult?.isError ?? isError;
+			const hookContext = await runPostToolUse(this.settingsManager.getCommandHooks(), this._hookContext(), {
+				toolName: toolCall.name,
+				toolCallId: toolCall.id,
+				input: args as Record<string, unknown>,
+				content: normalizedContent,
+				isError: finalIsError,
+			});
+			const finalContent =
+				hookContext.length > 0
+					? [
+							...normalizedContent,
+							...hookContext.map((text) => ({ type: "text" as const, text: `[Hook] ${text}` })),
+						]
+					: normalizedContent;
+
+			if (!hookResult && finalContent === content) {
 				return undefined;
 			}
 
 			return {
-				content: normalizedContent,
+				content: finalContent,
 				details: hookResult?.details,
-				isError: hookResult?.isError ?? isError,
+				isError: finalIsError,
 				usage: hookResult?.usage,
 			};
 		};
@@ -1297,6 +1373,27 @@ export class AgentSession {
 			// Emit input event for extension interception (before skill/template expansion)
 			let currentText = text;
 			let currentImages = normalizeImages(options?.images);
+			// The owner's UserPromptSubmit hooks see what a person typed, not what an extension sent on their behalf.
+			if ((options?.source ?? "interactive") !== "extension") {
+				const submitted = await runUserPromptSubmit(
+					this.settingsManager.getCommandHooks(),
+					this._hookContext(),
+					currentText,
+				);
+				if (submitted.action === "handled") {
+					await this.sendCustomMessage(
+						{
+							customType: "hook-blocked",
+							content: `A hook blocked this prompt: ${submitted.reason}`,
+							display: true,
+						},
+						{ triggerTurn: false },
+					);
+					preflightResult?.(true);
+					return;
+				}
+				if (submitted.action === "transform") currentText = submitted.text;
+			}
 			if (this._extensionRunner.hasHandlers("input")) {
 				const inputResult = await this._extensionRunner.emitInput(
 					currentText,
@@ -2312,6 +2409,7 @@ export class AgentSession {
 
 		this._applyExtensionBindings(this._extensionRunner);
 		await this._extensionRunner.emit(this._sessionStartEvent);
+		await this.runSessionHooks("SessionStart", this._sessionStartEvent.reason);
 		await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
 	}
 
@@ -2631,6 +2729,7 @@ export class AgentSession {
 	async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {
 		const oldRunner = this._extensionRunner;
 		const previousFlagValues = oldRunner.getFlagValues();
+		await this.runSessionHooks("SessionEnd", "reload");
 		await emitSessionShutdownEvent(oldRunner, { type: "session_shutdown", reason: "reload" });
 		oldRunner.invalidate();
 		await this.settingsManager.reload();
@@ -2651,6 +2750,7 @@ export class AgentSession {
 		if (hasBindings) {
 			await options?.beforeSessionStart?.();
 			await this._extensionRunner.emit({ type: "session_start", reason: "reload" });
+			await this.runSessionHooks("SessionStart", "reload");
 			await this.extendResourcesFromExtensions("reload");
 		}
 	}
