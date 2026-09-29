@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { contentText } from "theoses-ai";
+import { type AssistantMessage, contentText } from "theoses-ai";
 import {
 	type AgentSession,
 	type CreateAgentSessionOptions,
@@ -102,7 +102,7 @@ async function promptAgent(session: AgentSession, input: string, signal: AbortSi
 	await session.prompt(input);
 	const assistant = [...session.messages]
 		.reverse()
-		.find((message) => message.role === "assistant" && message.timestamp >= startedAt);
+		.find((message): message is AssistantMessage => message.role === "assistant" && message.timestamp >= startedAt);
 	if (!assistant) throw new Error("Agent run completed without an assistant message.");
 	if (assistant.stopReason !== "stop") {
 		throw new Error(
