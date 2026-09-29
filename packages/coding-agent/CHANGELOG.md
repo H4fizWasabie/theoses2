@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.102] - 2026-09-29
 
 - fix: an `AgentSession` operation now leaves a marker file `<agent dir>/busy/<pid>-<session id>` for its whole run (retries, continuations and turn settlement included) and removes it at the end. `scripts/theoses-updater/update.sh` treats a marker whose pid is alive as busy and ignores (and deletes) one left by a dead process, keeping the session-file mtime check as a fallback for services on an older release. The mtime check alone missed long tool runs and long reasoning at `xhigh`/`max`, because a session file is only written when a message ends, so the updater restarted services mid-turn (#413). A marker that cannot be written never fails the turn.
