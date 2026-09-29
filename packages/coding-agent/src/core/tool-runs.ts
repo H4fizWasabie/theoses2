@@ -292,6 +292,26 @@ function inDir(dir: string | undefined, path: string): string {
 	return dir && !isAbsolute(path) && !path.startsWith("~") && !path.startsWith("$") ? join(dir, path) : path;
 }
 
+export interface FileChanges {
+	/** Targets of the change: an edit/write path, or what could be read off a shell command. */
+	paths: string[];
+	/** Directories a shell command changed files in, when its targets could not be read off. */
+	dirs: string[];
+	/** The shell command itself, when it changes files in a way whose targets cannot be read off. */
+	untraced?: string;
+}
+
+/** The files a tool call is about to change, or undefined when it changes none (or none outside scratch space). */
+export function fileChangesOf(toolName: string, args: Record<string, unknown>): FileChanges | undefined {
+	if (FILE_TOOLS.has(toolName) && typeof args.path === "string") return { paths: [args.path], dirs: [] };
+	if (COMMAND_TOOLS.has(toolName) && typeof args.command === "string") {
+		const effect = commandEffect(args.command);
+		if (!effect.changesFiles) return undefined;
+		return { paths: effect.paths, dirs: effect.dirs, untraced: effect.unknownChange ? args.command : undefined };
+	}
+	return undefined;
+}
+
 /** True when this tool run changed (or tried to change) files. A failed edit/write changed nothing. */
 export function runChangesFiles(run: ToolRun): boolean {
 	if (FILE_TOOLS.has(run.name)) return !run.isError;

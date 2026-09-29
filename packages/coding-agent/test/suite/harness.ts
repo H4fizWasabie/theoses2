@@ -71,6 +71,8 @@ export interface HarnessOptions {
 	modelsJson?: Record<string, unknown>;
 	/** e.g. a channel header, to make the session a Channel Session. */
 	sessionOptions?: NewSessionOptions;
+	/** Back the session with a log file under `<tempDir>/sessions` instead of memory. */
+	persist?: boolean;
 }
 
 export interface Harness {
@@ -108,7 +110,9 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 	const withConfiguredAuth = options.withConfiguredAuth ?? true;
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};
 
-	const sessionManager = SessionManager.inMemory(undefined, options.sessionOptions);
+	const sessionManager = options.persist
+		? SessionManager.create(tempDir, join(tempDir, "sessions"), options.sessionOptions)
+		: SessionManager.inMemory(undefined, options.sessionOptions);
 	const settingsManager = SettingsManager.inMemory(options.settings);
 
 	const authStorage = AuthStorage.inMemory();

@@ -14,7 +14,7 @@ import { claimCheck, FINAL_REPLY_NOTE } from "./claim-check.ts";
 import { createCustomMessage } from "./messages.ts";
 import { formatFindings, logReview, PLAN_REVIEW_CUSTOM_TYPE, type ReviewOutcome } from "./plan-reviewer.ts";
 import { formatPlanStatus, isPlanOpen, needsReview, runTouchedPlan, type TaskPlan, verifyOutput } from "./task-plan.ts";
-import { COMMAND_TOOLS, commandEffect, FILE_TOOLS, firstLine, textOf } from "./tool-runs.ts";
+import { fileChangesOf, firstLine, textOf } from "./tool-runs.ts";
 import { resolveToCwd } from "./tools/path-utils.ts";
 
 /** Files bigger than this are listed in the diff by name only. */
@@ -63,20 +63,9 @@ export class TaskPlanGuard {
 	/** While a plan is open, snapshots the files a tool call is about to change. Never blocks. */
 	beforeToolCall(toolName: string, args: Record<string, unknown>): BeforeToolCallResult | undefined {
 		if (!this.deps.enabled()) return undefined;
-		let paths: string[];
-		let dirs: string[] = [];
-		let untraced: string | undefined;
-		if (FILE_TOOLS.has(toolName) && typeof args.path === "string") {
-			paths = [args.path];
-		} else if (COMMAND_TOOLS.has(toolName) && typeof args.command === "string") {
-			const effect = commandEffect(args.command);
-			if (!effect.changesFiles) return undefined;
-			paths = effect.paths;
-			dirs = effect.dirs;
-			if (effect.unknownChange) untraced = args.command;
-		} else {
-			return undefined;
-		}
+		const changes = fileChangesOf(toolName, args);
+		if (!changes) return undefined;
+		const { paths, dirs, untraced } = changes;
 
 		// ponytail: changes made before the model opens a plan are not snapshotted, so the reviewer's diff
 		// starts at plan creation; snapshot every change and key by plan if that gap matters.
