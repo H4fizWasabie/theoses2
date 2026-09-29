@@ -26,11 +26,13 @@ KEEP_RELEASES=3
 HEALTH_CHECK_ATTEMPTS=10
 HEALTH_CHECK_INTERVAL=3
 # Idle-wait before restarting (theoses2#246): restart_and_check kills both services outright,
-# dropping any in-flight task with no resume. Session .jsonl files are written to on every
-# streamed delta, so a file modified within IDLE_BUSY_WINDOW_SECONDS is a reliable "something is
-# actively running" signal without needing a new health endpoint. IDLE_MAX_WAIT_SECONDS caps how
-# long an update can be deferred for a busy session - past that, proceed anyway rather than let a
-# stuck/never-idle session block updates forever.
+# dropping any in-flight task with no resume. A running operation leaves a marker file
+# ${AGENT_DIR}/busy/<pid>-<session> (AgentSession, theoses2#413); a marker whose pid is gone is a
+# crash leftover and is ignored. A session .jsonl file is only written when a message ends, so a
+# long tool run or long reasoning looks idle by mtime; that check remains as a fallback for services
+# on a release that predates markers (a file modified within IDLE_BUSY_WINDOW_SECONDS).
+# IDLE_MAX_WAIT_SECONDS caps how long an update can be deferred for a busy session - past that,
+# proceed anyway rather than let a stuck/never-idle session block updates forever.
 IDLE_BUSY_WINDOW_SECONDS=20
 IDLE_POLL_INTERVAL_SECONDS=30
 IDLE_MAX_WAIT_SECONDS=1200
@@ -145,19 +147,29 @@ rm -rf "$target_dir"
 mv "${target_dir}.tmp" "$target_dir"
 
 is_busy() {
+    local marker pid
+    for marker in "${AGENT_DIR}"/busy/*; do
+        [[ -e "$marker" ]] || continue
+        pid="$(basename "$marker")"
+        pid="${pid%%-*}"
+        if kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+        rm -f "$marker"
+    done
     [[ -d "${AGENT_DIR}/sessions" ]] || return 1
     find "${AGENT_DIR}/sessions" -name '*.jsonl' -newermt "-${IDLE_BUSY_WINDOW_SECONDS} seconds" -print -quit 2>/dev/null | grep -q .
 }
 
-# Waits for no session file to have been written to in the last IDLE_BUSY_WINDOW_SECONDS,
-# polling every IDLE_POLL_INTERVAL_SECONDS, up to IDLE_MAX_WAIT_SECONDS total. Always returns 0
+# Waits for no operation to be running (see is_busy), polling every
+# IDLE_POLL_INTERVAL_SECONDS, up to IDLE_MAX_WAIT_SECONDS total. Always returns 0
 # (proceeds with the restart either way) - this defers a disruptive restart when it easily can,
 # it does not block releases indefinitely on a session that never goes idle.
 wait_for_idle() {
     if ! is_busy; then
         return 0
     fi
-    log "a session looks active (file written within ${IDLE_BUSY_WINDOW_SECONDS}s), deferring restart"
+    log "an operation is running (busy marker, or a session file written within ${IDLE_BUSY_WINDOW_SECONDS}s), deferring restart"
     local waited=0
     while is_busy && (( waited < IDLE_MAX_WAIT_SECONDS )); do
         sleep "$IDLE_POLL_INTERVAL_SECONDS"
