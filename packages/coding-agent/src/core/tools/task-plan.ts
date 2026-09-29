@@ -67,12 +67,12 @@ export function createTaskPlanToolDefinition(deps: TaskPlanToolDeps): ToolDefini
 		name: "task_plan",
 		label: "task_plan",
 		description:
-			"The plan for the current task: every piece of the change plus the check that proves it. Required before changing any file; the harness will not let the task end while items are open.",
-		promptSnippet: "Plan every piece of a change and prove it before calling it done",
+			"An optional plan for the current task: every piece of the change plus the check that proves it. Use it when it helps you keep track; nothing requires it.",
+		promptSnippet: "Optionally plan a multi-part change and prove each part before calling it done",
 		promptGuidelines: [
-			"Before your first file change in a task, create a task_plan listing every file, stage or config the change touches, plus a verify check that runs the changed code. Add items as you discover more work.",
-			'For anything broken (a bug, an error, a failed run), use kind "fix": find the root cause rather than patching where it failed, search for every other place that relies on the same assumption, and fix or rule out each one.',
-			"Close each item with task_plan update as you finish it. Say plainly what you deferred or could not verify; never report a task done while part of it is open.",
+			"Use task_plan when a task touches several files, stages or configs, or when a fix might have siblings that share its cause. Skip it for small single-step changes and for questions. If you use it, list every piece of the change plus a verify check that runs the changed code, and add items as you discover more work.",
+			'For anything broken (a bug, an error, a failed run) where you do plan, use kind "fix": find the root cause rather than patching where it failed, search for every other place that relies on the same assumption, and fix or rule out each one.',
+			"If you plan, close each item with task_plan update as you finish it. Say plainly what you deferred or could not verify; never report a task done while part of it is open.",
 		],
 		parameters: taskPlanSchema,
 		execute: async (_toolCallId, input: TaskPlanToolInput) => {

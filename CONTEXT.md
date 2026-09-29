@@ -41,8 +41,8 @@ The session's set of available tools, built from built-in, SDK, external (sideca
 _Avoid_: tool manager, tool catalog
 
 **Task Plan**:
-The list of every piece of a change plus the check that proves it, kept by the model through the `task_plan` tool and enforced by the harness: no file change without an open plan, no end of the run while items are open, and a verify item closes only after a check command passed since the last file change. A `fix` plan starts with root cause, siblings and fix scope. Persisted as `task_plan` custom entries in the session log (latest wins), so it survives restarts. Distinct from the Working Note, which records facts; the Task Plan records obligations.
-_Avoid_: todo list (implies optional), checklist
+The list of every piece of a change plus the check that proves it, kept by the model through the `task_plan` tool, which the model chooses to use or not: the harness never blocks a file change for lack of a plan and never holds a run open for open items. A plan the model does keep is held to its own rules: a verify item closes only after a check command passed since the last file change, and open or deferred items show in the status line under the final reply. A `fix` plan starts with root cause, siblings and fix scope. Persisted as `task_plan` custom entries in the session log (latest wins), so it survives restarts. Distinct from the Working Note, which records facts; the Task Plan records obligations.
+_Avoid_: todo list, checklist
 
 **Plan Review**:
 One independent review of a finished Task Plan (fixes and multi-item changes), by a sub-agent with fresh context and a different model family (`backgroundModels.reviewer`), which can read the codebase. Must-fix findings go back to the worker once; the result shows in the plan status line.
