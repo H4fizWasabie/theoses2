@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -9,6 +18,7 @@ import {
 	FileCheckpoints,
 	MAX_CHECKPOINT_BYTES,
 	planFileRewind,
+	sweepCheckpoints,
 } from "../src/core/file-checkpoints.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 
@@ -165,6 +175,96 @@ describe("file checkpoints", () => {
 
 		expect(result.failed).toHaveLength(1);
 		expect(result.restored).toHaveLength(1);
+	});
+});
+
+describe("sweeping old checkpoint bytes", () => {
+	const DAY = 24 * 60 * 60 * 1000;
+	let root: string;
+	let workspace: string;
+	let session: SessionManager;
+	let checkpoints: FileCheckpoints;
+
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "checkpoint-sweep-"));
+		workspace = join(root, "ws");
+		mkdirSync(workspace);
+		session = SessionManager.create(workspace, join(root, "sessions"));
+		checkpoints = new FileCheckpoints(session, workspace);
+	});
+
+	afterEach(() => {
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	const blobs = () => readdirSync(session.getCheckpointDirectory());
+	const ageBlobs = (days: number) => {
+		const then = new Date(Date.now() - days * DAY);
+		for (const name of blobs()) utimesSync(join(session.getCheckpointDirectory(), name), then, then);
+	};
+
+	/** One user turn that overwrites `a.txt`, so its previous content is checkpointed. */
+	function overwrite(content: string) {
+		session.appendMessage({ role: "user", content: "turn", timestamp: Date.now() });
+		checkpoints.beforeToolCall("write", { path: "a.txt" });
+		writeFileSync(join(workspace, "a.txt"), content);
+	}
+
+	it("removes original bytes nobody has used for a month, and keeps recent ones", () => {
+		writeFileSync(join(workspace, "a.txt"), "old original");
+		overwrite("v1");
+		ageBlobs(40);
+		writeFileSync(join(workspace, "a.txt"), "fresh original");
+		overwrite("v2");
+		expect(blobs()).toHaveLength(2);
+
+		const removed = sweepCheckpoints(session.getCheckpointDirectory());
+
+		expect(removed).toBe(1);
+		expect(blobs()).toHaveLength(1);
+	});
+
+	it("keeps a blob that a recent checkpoint reused", () => {
+		writeFileSync(join(workspace, "a.txt"), "same original");
+		overwrite("v1");
+		ageBlobs(40);
+		writeFileSync(join(workspace, "a.txt"), "same original");
+		overwrite("v2");
+
+		expect(sweepCheckpoints(session.getCheckpointDirectory())).toBe(0);
+		expect(blobs()).toHaveLength(1);
+	});
+
+	it("leaves files that are not checkpoint blobs alone", () => {
+		writeFileSync(join(workspace, "a.txt"), "original");
+		overwrite("v1");
+		const stray = join(session.getCheckpointDirectory(), "notes.txt");
+		writeFileSync(stray, "not ours");
+		ageBlobs(40);
+
+		sweepCheckpoints(session.getCheckpointDirectory());
+
+		expect(existsSync(stray)).toBe(true);
+	});
+
+	it("does nothing when the directory does not exist", () => {
+		expect(sweepCheckpoints(join(root, "nowhere"))).toBe(0);
+	});
+
+	it("tells the user a rewind cannot restore a file whose original was swept", () => {
+		writeFileSync(join(workspace, "a.txt"), "original");
+		overwrite("v1");
+		const first = session.getBranch().find((e) => e.type === "message");
+		ageBlobs(40);
+		sweepCheckpoints(session.getCheckpointDirectory());
+
+		const result = applyFileRewind(
+			planFileRewind(session.getBranch(), first?.id as string),
+			session.getCheckpointDirectory(),
+		);
+
+		expect(result.restored).toEqual([]);
+		expect(result.failed[0].error).toContain("no longer saved");
 	});
 });
 

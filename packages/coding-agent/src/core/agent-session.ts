@@ -121,6 +121,7 @@ import {
 	planFileRewind,
 	type RewindPlan,
 	type RewindResult,
+	sweepCheckpoints,
 } from "./file-checkpoints.ts";
 import { createMemoryPromotion, type MemoryPromotion } from "./memory-promotion.ts";
 import { FileMemoryStore } from "./memory-store.ts";
@@ -520,6 +521,7 @@ export class AgentSession {
 			prepareSummarizer: () => this._prepareSummarizer(),
 		});
 		this._fileCheckpoints = new FileCheckpoints(this.sessionManager, this._cwd);
+		if (this.sessionManager.isPersisted()) sweepCheckpoints(this.sessionManager.getCheckpointDirectory());
 		this._taskPlanGuard = new TaskPlanGuard({
 			cwd: this._cwd,
 			getPlan: () => this.sessionManager.getTaskPlan(),
