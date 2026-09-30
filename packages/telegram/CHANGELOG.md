@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.106] - 2026-09-30
 
 - feat: `/rewind`. `/rewind` lists the last five turns that changed files, `/rewind <number>` previews putting the files back to before that turn and quotes the turn, `/rewind <number> yes` does it. The conversation is left alone. It is answered at once, not queued, so asking mid-turn gets "A turn is running. /stop it first" instead of running after the turn.
 ## [1.0.105] - 2026-09-29
