@@ -20,6 +20,7 @@ import {
 	normalizeToLF,
 	restoreLineEndings,
 } from "./edit-diff.ts";
+import { siblingHint } from "./edit-siblings.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { renderToolPath, str } from "./render-utils.ts";
@@ -111,6 +112,8 @@ const defaultEditOperations: EditOperations = {
 export interface EditToolOptions {
 	/** Custom operations for file editing. Default: local filesystem */
 	operations?: EditOperations;
+	/** Say where else the replaced text appears (edit-siblings.ts). Default: on. */
+	siblingHint?: boolean;
 }
 
 function prepareEditArguments(input: unknown): EditToolInput {
@@ -373,11 +376,14 @@ export function createEditToolDefinition(
 
 				const diffResult = generateDiffString(baseContent, newContent);
 				const patch = generateUnifiedPatch(path, baseContent, newContent);
+				// Only for the local file system: an edit over a custom transport has no project to search.
+				const hint =
+					options?.operations || options?.siblingHint === false ? "" : await siblingHint(cwd, absolutePath, edits);
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Successfully replaced ${edits.length} block(s) in ${path}.`,
+							text: `Successfully replaced ${edits.length} block(s) in ${path}.${hint}`,
 						},
 					],
 					details: { diff: diffResult.diff, patch, firstChangedLine: diffResult.firstChangedLine },

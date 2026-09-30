@@ -34,6 +34,8 @@ export function suiteOf(harness: string): string {
 		"task-on",
 		"prompt-off",
 		"prompt-on",
+		"hint-off",
+		"hint-on",
 		"diagnose",
 		"coding",
 	]) {

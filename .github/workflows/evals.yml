@@ -25,10 +25,10 @@ on:
         default: "z-ai/glm-5.3-flash"
         type: string
       suite:
-        description: "coding = the easy, hard, edit-recovery and real-fix replay sets; plan-ab = the hard set with the task plan off vs on (3 repetitions each); task-ab = the same with the task sub-agent tool off vs on; prompt-ab = the same with and without the working-discipline paragraph in the system prompt; diagnose = the two tasks the production model always fails, for use with `model`"
+        description: "coding = the easy, hard, edit-recovery and real-fix replay sets; plan-ab = the hard set with the task plan off vs on (3 repetitions each); task-ab = the same with the task sub-agent tool off vs on; prompt-ab = the same with and without the working-discipline paragraph in the system prompt; hint-ab = the same with and without the edit sibling hint; diagnose = the two tasks the production model always fails, for use with `model`"
         default: "coding"
         type: choice
-        options: ["coding", "plan-ab", "task-ab", "prompt-ab", "diagnose"]
+        options: ["coding", "plan-ab", "task-ab", "prompt-ab", "hint-ab", "diagnose"]
   schedule:
     - cron: "0 3 * * 1"
 
@@ -79,7 +79,7 @@ jobs:
         # A wrong answer fails its test; the floors below decide whether the job fails, so keep going here.
         continue-on-error: true
         run: |
-          if [ "$SUITE" = "plan-ab" ]; then files="src/coding-plan-ab.eval.ts"; elif [ "$SUITE" = "task-ab" ]; then files="src/coding-task-ab.eval.ts"; elif [ "$SUITE" = "prompt-ab" ]; then files="src/coding-prompt-ab.eval.ts"; elif [ "$SUITE" = "diagnose" ]; then files="src/coding-diagnose.eval.ts"; else files="src/coding.eval.ts src/coding-hard.eval.ts src/coding-recovery.eval.ts src/coding-replay.eval.ts"; fi
+          if [ "$SUITE" = "plan-ab" ]; then files="src/coding-plan-ab.eval.ts"; elif [ "$SUITE" = "task-ab" ]; then files="src/coding-task-ab.eval.ts"; elif [ "$SUITE" = "prompt-ab" ]; then files="src/coding-prompt-ab.eval.ts"; elif [ "$SUITE" = "hint-ab" ]; then files="src/coding-hint-ab.eval.ts"; elif [ "$SUITE" = "diagnose" ]; then files="src/coding-diagnose.eval.ts"; else files="src/coding.eval.ts src/coding-hard.eval.ts src/coding-recovery.eval.ts src/coding-replay.eval.ts"; fi
           for pass in $(seq 1 "$PASSES"); do
             THEOSES_EVAL_ARTIFACT_DIR="$EVAL_DIR/pass-$pass" npm run eval -- \
               --provider openrouter --model "$MODEL" \
@@ -91,7 +91,7 @@ jobs:
         # 24/32, 18/22, 16/21; recovery 6/6 and 7/9; replay 7/8 (0.5, only 8 runs and costlier).
         # The A/B suites compare two arms and have no floor.
         run: |
-          if [ "$SUITE" = "plan-ab" ] || [ "$SUITE" = "task-ab" ] || [ "$SUITE" = "prompt-ab" ] || [ "$SUITE" = "diagnose" ]; then
+          if [ "$SUITE" = "plan-ab" ] || [ "$SUITE" = "task-ab" ] || [ "$SUITE" = "prompt-ab" ] || [ "$SUITE" = "hint-ab" ] || [ "$SUITE" = "diagnose" ]; then
             node packages/evals/scripts/summarize-runs.ts "$EVAL_DIR"
           else
             node packages/evals/scripts/summarize-runs.ts "$EVAL_DIR" --floor coding=0.85 --floor coding-hard=0.7 --floor coding-recovery=0.7 --floor coding-replay=0.5
