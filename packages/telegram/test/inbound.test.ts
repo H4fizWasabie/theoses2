@@ -28,6 +28,13 @@ describe("readInbound", () => {
 		expect(readInbound(message({ text: "/model" }))).toEqual({ kind: "model", ref: "" });
 	});
 
+	it("reads /thinking with and without a level", () => {
+		expect(readInbound(message({ text: "/thinking high" }))).toEqual({ kind: "thinking", level: "high" });
+		expect(readInbound(message({ text: " /Thinking  MAX " }))).toEqual({ kind: "thinking", level: "max" });
+		expect(readInbound(message({ text: "/thinking" }))).toEqual({ kind: "thinking", level: "" });
+		expect(readInbound(message({ text: "/thinkingfoo" }))).toEqual({ kind: "prompt" });
+	});
+
 	it("reads /rewind with its arguments", () => {
 		expect(readInbound(message({ text: "/rewind" }))).toEqual({ kind: "rewind", args: "" });
 		expect(readInbound(message({ text: " /Rewind 2 yes " }))).toEqual({ kind: "rewind", args: "2 yes" });

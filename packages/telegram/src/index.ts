@@ -324,6 +324,17 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				await bot.api.sendMessage(id, reply);
 				return undefined;
 			}
+			if (inbound?.kind === "thinking") {
+				let reply: string;
+				if (inbound.level) {
+					const set = await session.setThinkingLevel(inbound.level);
+					reply = "error" in set ? set.error : `Thinking: ${set.level} (now the default)`;
+				} else {
+					reply = `Current thinking level: ${session.thinkingLevel}\nAvailable: ${session.thinkingLevels.join(", ")}\nSet the default with: /thinking <level>`;
+				}
+				await bot.api.sendMessage(id, reply);
+				return undefined;
+			}
 
 			const input = resume
 				? AUTO_RESUME_INPUT

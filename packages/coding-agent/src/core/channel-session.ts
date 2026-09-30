@@ -19,6 +19,8 @@ export interface ChannelSession {
 	readonly sessionFile: string | undefined;
 	readonly model: Model<Api> | undefined;
 	readonly thinkingLevel: ThinkingLevel;
+	/** The thinking levels the current model accepts. */
+	readonly thinkingLevels: readonly ThinkingLevel[];
 	/** A turn is in progress, including retry backoff. */
 	readonly isRunning: boolean;
 	/** Runs one turn after any earlier submit finishes. `onEvent` sees only this turn's events. */
@@ -27,6 +29,8 @@ export interface ChannelSession {
 	stop(): Promise<{ wasRunning: boolean; runningTool?: string }>;
 	/** Session-only switch to the exact `provider/id` match; settings.json's default is untouched. */
 	switchModel(reference: string): Promise<{ model: Model<Api> } | { error: string }>;
+	/** Sets the level for this session and as settings.json's default, so it survives restarts, and resolves once the default is saved. A level the model does not accept is refused, not clamped. */
+	setThinkingLevel(level: string): Promise<{ level: ThinkingLevel } | { error: string }>;
 	storeArtifact(label: string, fileName: string, data: Uint8Array): string;
 	/** The newest user messages whose turn changed files, newest first: what `rewind` can put back (file-checkpoints.ts). */
 	rewindPoints(limit?: number): RewindPoint[];
@@ -125,6 +129,9 @@ export function createChannelSessions(options: ChannelSessionsOptions) {
 			get thinkingLevel() {
 				return session.thinkingLevel;
 			},
+			get thinkingLevels() {
+				return session.getAvailableThinkingLevels();
+			},
 			get isRunning() {
 				return session.isStreaming;
 			},
@@ -161,6 +168,21 @@ export function createChannelSessions(options: ChannelSessionsOptions) {
 					return { error: `Couldn't switch model: ${error instanceof Error ? error.message : String(error)}` };
 				}
 				return { model: match };
+			},
+			async setThinkingLevel(level) {
+				const levels = session.getAvailableThinkingLevels();
+				const match = levels.find((available) => available === level);
+				if (!match)
+					return { error: `"${level}" is not available for this model. Use one of: ${levels.join(", ")}.` };
+				session.setThinkingLevel(match, { persist: true });
+				// Settings writes are queued and record failures instead of throwing; wait so the caller only reports a saved default.
+				await session.settingsManager.flush();
+				const failed = session.settingsManager.drainErrors().find((entry) => entry.scope === "global");
+				if (failed)
+					return {
+						error: `Level set for this session, but saving it as the default failed: ${failed.error.message}`,
+					};
+				return { level: match };
 			},
 			storeArtifact(label, fileName, data) {
 				return sessionManager.storeArtifact(label, fileName, data);

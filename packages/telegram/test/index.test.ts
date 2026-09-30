@@ -46,6 +46,9 @@ function fakeChannelSession(
 			return { wasRunning };
 		}),
 		switchModel: vi.fn(),
+		thinkingLevel: "high",
+		thinkingLevels: ["off", "low", "high"],
+		setThinkingLevel: vi.fn(),
 		storeArtifact: vi.fn(),
 		rewindPoints: vi.fn(() => [{ entryId: "e1", text: "change a" }]),
 		previewRewind: vi.fn(() => "Restore 1 file to how they were before."),
@@ -513,6 +516,68 @@ describe("Telegram /model", () => {
 		await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledWith(1, "Model: openrouter/some/model"));
 		expect(session.switchModel).toHaveBeenCalledWith("openrouter/some/model");
 		expect(session.submit).not.toHaveBeenCalled();
+	});
+});
+
+describe("Telegram /thinking", () => {
+	function botWithSession() {
+		const session = fakeChannelSession(async () => ({ outcome: "completed" }));
+		const bot = createTelegramBot({ token: "test-token", ownerChatId: "1", cwd: "/tmp/telegram-test" });
+		bot.botInfo = {
+			id: 99,
+			is_bot: true,
+			first_name: "Test",
+			username: "test_bot",
+			can_join_groups: false,
+			can_read_all_group_messages: false,
+			supports_inline_queries: false,
+			can_connect_to_business: false,
+			has_main_web_app: false,
+		};
+		const sendMessage = vi.spyOn(bot.api, "sendMessage").mockResolvedValue({ message_id: 100 } as never);
+		return { session, bot, sendMessage };
+	}
+
+	it("reports the current level and the available ones without running a turn", async () => {
+		const { session, bot, sendMessage } = botWithSession();
+
+		await bot.handleUpdate(messageUpdate(1, 1, "/thinking"));
+
+		await vi.waitFor(() =>
+			expect(sendMessage).toHaveBeenCalledWith(
+				1,
+				"Current thinking level: high\nAvailable: off, low, high\nSet the default with: /thinking <level>",
+			),
+		);
+		expect(session.submit).not.toHaveBeenCalled();
+		expect(session.setThinkingLevel).not.toHaveBeenCalled();
+	});
+
+	it("sets the named level and confirms it", async () => {
+		const { session, bot, sendMessage } = botWithSession();
+		session.setThinkingLevel.mockResolvedValue({ level: "low" });
+
+		await bot.handleUpdate(messageUpdate(1, 1, "/thinking low"));
+
+		await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledWith(1, "Thinking: low (now the default)"));
+		expect(session.setThinkingLevel).toHaveBeenCalledWith("low");
+		expect(session.submit).not.toHaveBeenCalled();
+	});
+
+	it("relays the refusal for a level the model does not accept", async () => {
+		const { session, bot, sendMessage } = botWithSession();
+		session.setThinkingLevel.mockResolvedValue({
+			error: '"max" is not available for this model. Use one of: off, low, high.',
+		});
+
+		await bot.handleUpdate(messageUpdate(1, 1, "/thinking max"));
+
+		await vi.waitFor(() =>
+			expect(sendMessage).toHaveBeenCalledWith(
+				1,
+				'"max" is not available for this model. Use one of: off, low, high.',
+			),
+		);
 	});
 });
 
