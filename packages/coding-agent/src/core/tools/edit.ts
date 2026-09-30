@@ -21,6 +21,7 @@ import {
 	restoreLineEndings,
 } from "./edit-diff.ts";
 import { siblingHint } from "./edit-siblings.ts";
+import { changedSnippet } from "./edit-snippet.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { renderToolPath, str } from "./render-utils.ts";
@@ -114,6 +115,8 @@ export interface EditToolOptions {
 	operations?: EditOperations;
 	/** Say where else the replaced text appears (edit-siblings.ts). Default: on. */
 	siblingHint?: boolean;
+	/** Add the lines around the change to the result (edit-snippet.ts). Default: off. */
+	resultSnippet?: boolean;
 }
 
 function prepareEditArguments(input: unknown): EditToolInput {
@@ -377,13 +380,15 @@ export function createEditToolDefinition(
 				const diffResult = generateDiffString(baseContent, newContent);
 				const patch = generateUnifiedPatch(path, baseContent, newContent);
 				// Only for the local file system: an edit over a custom transport has no project to search.
+				const shown = options?.resultSnippet ? changedSnippet(baseContent, newContent) : "";
+				const snippet = shown ? `\nNow reads (line, tab, text):\n${shown}` : "";
 				const hint =
 					options?.operations || options?.siblingHint === false ? "" : await siblingHint(cwd, absolutePath, edits);
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Successfully replaced ${edits.length} block(s) in ${path}.${hint}`,
+							text: `Successfully replaced ${edits.length} block(s) in ${path}.${snippet}${hint}`,
 						},
 					],
 					details: { diff: diffResult.diff, patch, firstChangedLine: diffResult.firstChangedLine },
