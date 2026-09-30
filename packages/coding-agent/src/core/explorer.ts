@@ -34,23 +34,28 @@ import { wrapToolDefinition } from "./tools/tool-definition-wrapper.ts";
 
 export const MAX_CONCURRENT_EXPLORERS = 3;
 
+// 2026-09-30: 22 of 34 explore results on the VPS were INCOMPLETE, 20 of them on the turn cap with input far
+// below the token cap (median 53K). Turns were raised with the token caps, which grow with the square of the turns.
 const TIER_CAPS = {
-	"quick-scan": { lines: 30, approxTokens: 800, maxTurns: 8, maxInputTokens: 200_000 },
-	"deep-map": { lines: 80, approxTokens: 2000, maxTurns: 15, maxInputTokens: 400_000 },
+	"quick-scan": { lines: 30, approxTokens: 800, maxTurns: 12, maxInputTokens: 300_000 },
+	"deep-map": { lines: 80, approxTokens: 2000, maxTurns: 22, maxInputTokens: 700_000 },
 } as const;
 
 export type ExplorerTier = keyof typeof TIER_CAPS;
 
 export interface ExplorerResult {
-	/** The distilled answer (capped, footer ensured). Never raw tool dumps. */
+	/** The distilled answer (capped, footer ensured). Never raw tool dumps. A job cut short still writes what it read. */
 	answer: string;
-	/** false when the budget ran out and the answer is partial — see the INCOMPLETE contract. */
+	/** false when a cap cut the job off before it answered on its own; `answer` then holds what it had read, or INCOMPLETE if nothing. */
 	complete: boolean;
 	tier: ExplorerTier;
+	/** Includes the final write-up turn, so it can exceed maxTurns by one. */
 	turnsUsed: number;
 	maxTurns: number;
 	inputTokens: number;
 	outputTokens: number;
+	/** The cap that cut the job off, e.g. "12-turn cap"; undefined when none did. */
+	stoppedBy?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,7 +120,7 @@ Rules:
 1. Pointers, not pastes: reference \`file:line\` locations instead of quoting code. You may read 200-line files internally; the answer carries findings + paths only.
 2. Answer format: 1–3 sentence direct answer first, then at most 5 short secondary bullets (caveats, related spots).${structural}
 3. End with one budget footer line: \`~<K> in, <turns>/${caps.maxTurns} turns\` (input tokens spent so far, turns used).
-5. You have at most ${caps.maxTurns} turns and ~${caps.maxInputTokens / 1000}K input tokens. Stop early rather than pad: if you hit the budget before answering fully, output exactly \`INCOMPLETE: <one line on what is missing>\` plus the footer — nothing else.
+5. You have at most ${caps.maxTurns} turns and ~${caps.maxInputTokens / 1000}K input tokens. Stop early rather than pad. If the budget runs out before you have answered, you get one final turn with no tools: write the answer from what you have read, and say which part of the question you could not verify.
 5. Read-only: read, grep, find, ls only. You cannot edit files or run commands.
 6. Answer from evidence you gathered. If you could not find the answer, say so explicitly instead of guessing specifics.`;
 }
@@ -135,12 +140,17 @@ function enforceAnswerCap(answer: string, tier: ExplorerTier): string {
 	return `${truncated}\n[truncated by harness: exceeded ${tier} cap of ${caps.lines} lines]`;
 }
 
+const FINALIZE_PROMPT =
+	"Stop exploring. Write the final answer now from what you have read, in the required format, with file:line pointers. Say plainly which part of the question you could not verify. Do not call any tools.";
+
 function ensureBudgetFooter(answer: string, tier: ExplorerTier, turns: number, inputTokens: number): string {
 	// The explorer was told to emit its own footer; append the authoritative one only when it forgot.
 	// Footer shape is `~<K> in, <turns>/<max> turns` (no brackets) — match that, not a literal "turns]".
 	if (/~\d+K in, \d+\/\d+ turns\s*$/.test(answer.trimEnd())) return answer;
 	const kIn = Math.round(inputTokens / 1000);
-	return `${answer}\n~${kIn}K in, ${turns}/${TIER_CAPS[tier].maxTurns} turns`;
+	const maxTurns = TIER_CAPS[tier].maxTurns;
+	// The final write-up turn runs outside the cap; the footer never shows more turns than the cap.
+	return `${answer}\n~${kIn}K in, ${Math.min(turns, maxTurns)}/${maxTurns} turns`;
 }
 
 export interface RunExplorerOptions {
@@ -199,27 +209,48 @@ async function runExplorerWithSlot(
 	});
 
 	let stats: { turns: number; inputTokens: number; outputTokens: number; stoppedByBudget: boolean };
+	let cutShort = false;
+	let stoppedBy: string | undefined;
 	try {
 		stats = await handle.prompt(options.question);
+		if (stats.stoppedByBudget) {
+			stoppedBy =
+				stats.turns >= caps.maxTurns
+					? `${caps.maxTurns}-turn cap`
+					: `${caps.maxInputTokens / 1000}K input-token cap`;
+		}
+		// A cap can cut the job off mid-research and the model can end without an answer. Either way give it one
+		// last turn, with no tools and outside the caps, to write up what it has read: a cap must never be the
+		// reason the caller gets nothing (it used to return only INCOMPLETE, and did so for 22 of 34 jobs).
+		const messages = handle.agent.state.messages;
+		const answeredOnItsOwn =
+			!endedOnToolCall(messages) &&
+			messages[messages.length - 1]?.role === "assistant" &&
+			lastAssistantText(messages).length > 0;
+		if (!answeredOnItsOwn && !options.signal?.aborted) {
+			cutShort = true;
+			handle.agent.state.tools = [];
+			stats = await handle.prompt(FINALIZE_PROMPT);
+		}
 	} finally {
 		unsubscribe();
 	}
 
-	// Did the run end with a complete answer, or did the budget cut it off mid-work? If the
-	// budget stopped us (or the last assistant turn was a tool call we never got an answer
-	// after), the outcome is INCOMPLETE — the one-line contract, not a padded guess.
 	const rawAnswer = lastAssistantText(handle.agent.state.messages);
-	const pendingToolCall = endedOnToolCall(handle.agent.state.messages);
-	const complete =
-		!stats.stoppedByBudget && !pendingToolCall && rawAnswer.length > 0 && !rawAnswer.startsWith("INCOMPLETE:");
+	const hasAnswer = !endedOnToolCall(handle.agent.state.messages) && rawAnswer.length > 0;
+	const complete = hasAnswer && !cutShort;
 
-	let answer = complete ? rawAnswer : `INCOMPLETE: budget exhausted before a final answer was produced.`;
-	if (complete) {
-		answer = enforceAnswerCap(answer, tier);
-		answer = ensureBudgetFooter(answer, tier, stats.turns, stats.inputTokens);
+	let answer: string;
+	if (hasAnswer) {
+		answer = ensureBudgetFooter(enforceAnswerCap(rawAnswer, tier), tier, stats.turns, stats.inputTokens);
 	} else {
 		const kIn = Math.round(stats.inputTokens / 1000);
-		answer += `\n~${kIn}K in, ${stats.turns}/${caps.maxTurns} turns`;
+		answer = `INCOMPLETE: budget exhausted before a final answer was produced.\n~${kIn}K in, ${Math.min(stats.turns, caps.maxTurns)}/${caps.maxTurns} turns`;
+	}
+	if (cutShort) {
+		console.error(
+			`[explore] ${hasAnswer ? "partial" : "no answer"} (${tier}): ${stats.turns} turns, ${Math.round(stats.inputTokens / 1000)}K in${stoppedBy ? `, hit ${stoppedBy}` : ", ended without an answer"}`,
+		);
 	}
 
 	return {
@@ -230,6 +261,7 @@ async function runExplorerWithSlot(
 		maxTurns: caps.maxTurns,
 		inputTokens: stats.inputTokens,
 		outputTokens: stats.outputTokens,
+		stoppedBy,
 	};
 }
 
@@ -288,7 +320,11 @@ export function createExploreToolDefinition(deps: ExploreToolDeps): ToolDefiniti
 				providerHooks: deps.providerHooks,
 				onStatus: (status) => onUpdate?.({ content: [{ type: "text", text: status }], details: undefined }),
 			});
-			const header = result.complete ? "" : "INCOMPLETE (explorer hit its budget) — consider a narrower re-spawn.\n";
+			const header = result.complete
+				? ""
+				: result.answer.startsWith("INCOMPLETE:")
+					? "INCOMPLETE (explorer hit its budget) — consider a narrower re-spawn.\n"
+					: `PARTIAL (explorer stopped at its ${result.stoppedBy ?? "budget"}; this is what it had read) — consider a narrower re-spawn for the rest.\n`;
 			return {
 				content: [{ type: "text", text: `${header}${result.answer}` }],
 				details: result,
