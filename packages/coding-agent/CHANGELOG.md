@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-- feat: `editSnippet` (off by default). After a successful `edit`, the result can include the lines around the change as the file now reads (numbered, 2 lines of context, merged and capped at 24 lines), so the model does not read the file back to check its edit. Why: in a production scraper build, `read` was 45 of 151 tool calls and roughly a third of them re-read files it had just edited. Ships on by default only if the `snippet-ab` eval shows fewer tool calls without a drop in correctness.
+- feat: `editSnippet` (off by default). After a successful `edit`, the result can include the lines around the change as the file now reads (numbered, 2 lines of context, merged and capped at 24 lines), so the model does not read the file back to check its edit. Why: in a production scraper build, `read` was 45 of 151 tool calls and roughly a third of them re-read files it had just edited. Measured and left off: `snippet-ab` (GLM 5.3 flash, 60 runs per arm, judge score) gave 56/60 correct without it and 52/60 with it, 7.1 against 7.8 tool calls per run and 28% more tokens, so the snippet did not cut read-backs.
 ## [1.0.108] - 2026-09-30
 
 - fix: an `edit` that would leave the file unchanged now says so plainly: "the file already contains the text you asked for, so this edit is done or not needed. Do not repeat it". It used to say the replacement "might indicate an issue with special characters or the text not existing as expected", which is wrong when the edit already landed, and in a live Telegram session gpt-6-luna repeated the same no-op edit five times in a row before switching to a shell script.
