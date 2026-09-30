@@ -1,6 +1,6 @@
 name: Evals
 
-# Model-backed coding evals against the production model (GLM 5.3 flash at thinking max). Costs real money, so it runs
+# Model-backed coding evals against the production model (gpt-6-luna at thinking max since 2026-09-30; GLM 5.3 flash before). Costs real money, so it runs
 # on demand, once a week, and on pushes to main that change what the model is told (the system prompt) or what it can
 # call (the tools). Never on pull requests: a public repo must not hand a paid key to PR code, so a prompt or tool
 # change is measured right after it lands, and the floors below fail the job if it made the agent worse.
@@ -32,7 +32,7 @@ on:
         options: ["default", "off"]
       model:
         description: "OpenRouter model id. Leave the default to measure the production model."
-        default: "z-ai/glm-5.3-flash"
+        default: "openai/gpt-6-luna"
         type: string
       suite:
         description: "coding = the easy, hard, edit-recovery and real-fix replay sets; plan-ab = the hard set with the task plan off vs on (3 repetitions each); task-ab = the same with the task sub-agent tool off vs on; prompt-ab = the same with and without the working-discipline paragraph in the system prompt; hint-ab = the same with and without the edit sibling hint; diagnose = the two tasks the production model always fails, for use with `model`"
@@ -60,7 +60,7 @@ jobs:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       SUITE: ${{ inputs.suite || 'coding' }}
       PASSES: ${{ inputs.passes || '1' }}
-      MODEL: ${{ inputs.model || 'z-ai/glm-5.3-flash' }}
+      MODEL: ${{ inputs.model || 'openai/gpt-6-luna' }}
       EVAL_THINKING_LEVEL: ${{ inputs.thinking || 'max' }}
       EVAL_SIBLING_HINT: ${{ inputs.sibling_hint == 'off' && 'off' || '' }}
     steps:
@@ -99,14 +99,14 @@ jobs:
           done
 
       - name: Summarize
-        # Floors sit under what the production model scored: easy 15/15, 13/15, 15/15, 10/10 (0.85 tolerates one miss in 15); hard 26/33 (79%),
-        # 24/32, 18/22, 16/21; recovery 6/6 and 7/9; replay 7/8 (0.5, only 8 runs and costlier).
+        # Floors sit under what gpt-6-luna scored with the sibling hint on: easy 10/10 and 10/10, hard 25/26 and 22/24, recovery 12/12,
+        # replay 16/16 (2 passes each, so they leave room for one miss). On GLM 5.3 flash these were 87%, 76-82%, 100% and 88%.
         # The A/B suites compare two arms and have no floor.
         run: |
           if [ "$SUITE" = "plan-ab" ] || [ "$SUITE" = "task-ab" ] || [ "$SUITE" = "prompt-ab" ] || [ "$SUITE" = "hint-ab" ] || [ "$SUITE" = "diagnose" ]; then
             node packages/evals/scripts/summarize-runs.ts "$EVAL_DIR"
           else
-            node packages/evals/scripts/summarize-runs.ts "$EVAL_DIR" --floor coding=0.85 --floor coding-hard=0.7 --floor coding-recovery=0.7 --floor coding-replay=0.5
+            node packages/evals/scripts/summarize-runs.ts "$EVAL_DIR" --floor coding=0.9 --floor coding-hard=0.8 --floor coding-recovery=0.8 --floor coding-replay=0.75
           fi
 
       - name: Upload run records
