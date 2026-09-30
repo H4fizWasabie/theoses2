@@ -53,10 +53,10 @@ agent could not guess) and write the prompt from the issue, not from the diff.
 Summarize any run directory, with optional floors that make the exit code 1:
 
 ```bash
-node scripts/summarize-runs.ts .eval/<run> --floor coding=0.9 --floor coding-hard=0.8 --floor coding-recovery=0.8 --floor coding-replay=0.75
+node scripts/summarize-runs.ts .eval/<run> --floor coding=0.85 --floor coding-hard=0.7 --floor coding-recovery=0.7 --floor coding-replay=0.5
 ```
 
-The first baseline (GLM 5.3 flash, thinking `max`, task plan off): easy 15/15, hard 26/33. Production moved to gpt-6-luna on 2026-09-30 (with the edit sibling hint on: easy 10/10, hard 25/26, recovery 12/12, replay 16/16, 2 passes), and the CI workflow now defaults to it. Pass the workflow's `model` input to measure another model.
+The first baseline (GLM 5.3 flash, thinking `max`, task plan off): easy 15/15, hard 26/33. gpt-6-luna was tried as the production model on 2026-09-30 (hard 25/26, replay 16/16 with the sibling hint on) and dropped for GLM 5.3 flash: about 40% slower and dearer per run for a gain on one task. The CI workflow tracks GLM; pass the `model` input to measure another model.
 
 ## Evals in CI
 
@@ -64,7 +64,7 @@ The first baseline (GLM 5.3 flash, thinking `max`, task plan off): easy 15/15, h
 passes) and every Monday. It never runs on pull requests, because a public repo must not give a paid key to PR code. It needs
 the `OPENROUTER_API_KEY` Actions secret, which should have a hard credit limit on the OpenRouter side; a run costs a few cents.
 The job summary shows the per-task table, the run records are uploaded as the `eval-runs` artifact, and the job fails when the
-easy set drops below 90%, the hard set below 80%, the recovery set below 80% or the replay set below 75%. Those floors sit under the first baseline and should rise as the agent improves.
+easy set drops below 85%, the hard set below 70%, the recovery set below 70% or the replay set below 50%. Those floors sit under the first baseline and should rise as the agent improves.
 
 ## Writing evals
 
