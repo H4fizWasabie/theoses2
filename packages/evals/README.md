@@ -35,7 +35,7 @@ output.
 
 ## Coding evals and their pass rate
 
-`src/coding.eval.ts` (5 easy tasks) and `src/coding-hard.eval.ts` (12 hard ones) seed a tiny Node project, give the agent one
+`src/coding.eval.ts` (5 easy tasks) and `src/coding-hard.eval.ts` (13 hard ones) seed a tiny Node project, give the agent one
 prompt, and grade the workspace by running `node --test`, including grader-owned hidden tests the agent never sees. A wrong
 answer fails its test (`judgeThreshold: 1`), so the pass rate is a correctness rate. Every task has a reference solution, and
 `test/coding-tasks.test.ts` proves each one fails as seeded and passes solved.

@@ -809,6 +809,99 @@ test("mixed", () => {
 	},
 ];
 
+// Callers the visible test does not cover: changing what a function returns breaks the files that use it, and only the
+// hidden tests exercise them. The prompt names the function and the new shape, not the callers.
+hardTasks.push({
+	id: "dependents-return-shape",
+	prompt:
+		"parseEntry in parse.mjs should return an object with `key` and `value` fields instead of a two-element array. Make that change. Do not edit the tests.",
+	files: {
+		"parse.mjs": `export function parseEntry(line) {
+	const index = line.indexOf("=");
+	return [line.slice(0, index).trim(), line.slice(index + 1).trim()];
+}
+`,
+		"settings.mjs": `import { parseEntry } from "./parse.mjs";
+
+export function loadSettings(text) {
+	const settings = {};
+	for (const line of text.split("\\n").filter(Boolean)) {
+		const [key, value] = parseEntry(line);
+		settings[key] = value;
+	}
+	return settings;
+}
+`,
+		"env.mjs": `import { parseEntry } from "./parse.mjs";
+
+export function envLines(text) {
+	return text
+		.split("\\n")
+		.filter(Boolean)
+		.map((line) => {
+			const [key, value] = parseEntry(line);
+			return key.toUpperCase() + "=" + value;
+		});
+}
+`,
+		"parse.test.mjs": `import test from "node:test";
+import assert from "node:assert/strict";
+import { parseEntry } from "./parse.mjs";
+
+test("parseEntry returns named fields", () => {
+	assert.deepEqual(parseEntry("name = theo"), { key: "name", value: "theo" });
+	assert.deepEqual(parseEntry("a=b=c"), { key: "a", value: "b=c" });
+});
+`,
+	},
+	protectedFiles: ["parse.test.mjs"],
+	hiddenTests: {
+		"hidden.test.mjs": `import test from "node:test";
+import assert from "node:assert/strict";
+import { loadSettings } from "./settings.mjs";
+import { envLines } from "./env.mjs";
+
+test("loadSettings still reads every entry", () => {
+	assert.deepEqual(loadSettings("a=1\\nb = 2"), { a: "1", b: "2" });
+});
+
+test("envLines still formats every entry", () => {
+	assert.deepEqual(envLines("a=1\\nb = 2"), ["A=1", "B=2"]);
+});
+`,
+	},
+	solution: {
+		"parse.mjs": `export function parseEntry(line) {
+	const index = line.indexOf("=");
+	return { key: line.slice(0, index).trim(), value: line.slice(index + 1).trim() };
+}
+`,
+		"settings.mjs": `import { parseEntry } from "./parse.mjs";
+
+export function loadSettings(text) {
+	const settings = {};
+	for (const line of text.split("\\n").filter(Boolean)) {
+		const { key, value } = parseEntry(line);
+		settings[key] = value;
+	}
+	return settings;
+}
+`,
+		"env.mjs": `import { parseEntry } from "./parse.mjs";
+
+export function envLines(text) {
+	return text
+		.split("\\n")
+		.filter(Boolean)
+		.map((line) => {
+			const { key, value } = parseEntry(line);
+			return key.toUpperCase() + "=" + value;
+		});
+}
+`,
+	},
+});
+
 // The same task worded as the first version was: the prompt names only the failing median test, and the hidden tests
 // still require the two sibling files to be fixed. No model tried (GLM 5.3 flash, gpt-6-luna, claude-sonnet-5.5) passes
 // it, so it stays as a tracked signal of stopping at the reported symptom, not as a pass/fail bar for the agent.
