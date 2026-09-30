@@ -2641,7 +2641,10 @@ export class AgentSession {
 			: createAllToolDefinitions(this._cwd, {
 					read: { autoResizeImages },
 					bash: { commandPrefix: shellCommandPrefix, shellPath },
-					edit: { siblingHint: this.settingsManager.getEditSiblingHint() },
+					edit: {
+						siblingHint: this.settingsManager.getEditSiblingHint(),
+						resultSnippet: this.settingsManager.getEditSnippet(),
+					},
 					workingNote: (note) => this.sessionManager.appendWorkingNote(note),
 					workingNoteClear: () => this.sessionManager.clearWorkingNote(),
 					taskPlan: {

@@ -121,6 +121,8 @@ export interface Settings {
 	taskTool?: { enabled?: boolean };
 	// After an edit, say where else the replaced text appears in the project (tools/edit-siblings.ts). Default: on (hint A/B, issue #426).
 	editSiblingHint?: boolean;
+	// After an edit, show the lines around the change in the result so the model need not read the file back (tools/edit-snippet.ts). Default: off until the eval A/B.
+	editSnippet?: boolean;
 	// Shell commands run at fixed points of an agent run, keyed by event name (see command-hooks.ts). Validated on read.
 	hooks?: Record<string, unknown>;
 	// Patterns for models that cannot be selected at all (see excluded-models.ts), e.g. ["*deepseek*"].
@@ -1297,6 +1299,10 @@ export class SettingsManager {
 
 	getTaskPlanEnabled(): boolean {
 		return this.settings.taskPlan?.enabled ?? true;
+	}
+
+	getEditSnippet(): boolean {
+		return this.settings.editSnippet ?? false;
 	}
 
 	getEditSiblingHint(): boolean {

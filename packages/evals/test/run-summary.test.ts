@@ -29,6 +29,7 @@ describe("suiteOf", () => {
 		expect(suiteOf("prompt-on-sibling-sort-bug")).toBe("prompt-on");
 		expect(suiteOf("diagnose-sibling-sort-bug")).toBe("diagnose");
 		expect(suiteOf("hint-on-sibling-sort-bug")).toBe("hint-on");
+		expect(suiteOf("snippet-on-sibling-sort-bug")).toBe("snippet-on");
 	});
 });
 
