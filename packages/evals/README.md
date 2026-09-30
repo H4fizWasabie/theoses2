@@ -53,7 +53,7 @@ agent could not guess) and write the prompt from the issue, not from the diff.
 Summarize any run directory, with optional floors that make the exit code 1:
 
 ```bash
-node scripts/summarize-runs.ts .eval/<run> --floor coding=1 --floor coding-hard=0.7
+node scripts/summarize-runs.ts .eval/<run> --floor coding=0.85 --floor coding-hard=0.7 --floor coding-recovery=0.7 --floor coding-replay=0.5
 ```
 
 The first baseline on the production model (GLM 5.3 flash, thinking `max`, task plan off): easy 15/15, hard 26/33.
@@ -64,7 +64,7 @@ The first baseline on the production model (GLM 5.3 flash, thinking `max`, task 
 passes) and every Monday. It never runs on pull requests, because a public repo must not give a paid key to PR code. It needs
 the `OPENROUTER_API_KEY` Actions secret, which should have a hard credit limit on the OpenRouter side; a run costs a few cents.
 The job summary shows the per-task table, the run records are uploaded as the `eval-runs` artifact, and the job fails when the
-easy set drops below 100% or the hard set below 70%. Those floors sit under the first baseline and should rise as the agent improves.
+easy set drops below 85%, the hard set below 70%, the recovery set below 70% or the replay set below 50%. Those floors sit under the first baseline and should rise as the agent improves.
 
 ## Writing evals
 
