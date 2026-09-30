@@ -44,6 +44,8 @@ export interface ToolRegistryRefresh {
 	includeAllExtensionTools?: boolean;
 	/** `taskPlan.enabled: false` hides the task_plan tool itself. */
 	taskPlanEnabled: boolean;
+	/** `taskTool.enabled` must be on for the `task` sub-agent tool to be active. */
+	taskToolEnabled: boolean;
 }
 
 export interface ToolRegistry {
@@ -228,10 +230,11 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 		// that used to be the only thing gated on it (the model kept "planning" into a tool
 		// nothing enforced). Filtered here, after allowedToolNames/activeToolNames are merged,
 		// so a caller-supplied list (e.g. --tools) can't push it back in.
-		const activeToolNames = input.taskPlanEnabled
-			? nextActiveToolNames
-			: nextActiveToolNames.filter((name) => name !== "task_plan");
-		return [...new Set(activeToolNames)];
+		const hidden = new Set<string>();
+		if (!input.taskPlanEnabled) hidden.add("task_plan");
+		// Same for the task sub-agent tool: off unless the setting turns it on, whatever list the caller passed.
+		if (!input.taskToolEnabled) hidden.add("task");
+		return [...new Set(nextActiveToolNames.filter((name) => !hidden.has(name)))];
 	}
 
 	return {

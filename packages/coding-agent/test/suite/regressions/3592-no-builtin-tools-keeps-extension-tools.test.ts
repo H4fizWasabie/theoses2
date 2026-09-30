@@ -95,6 +95,7 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 			"remember",
 			"research",
 			"save_note",
+			"task",
 			"task_plan",
 			"tool_call",
 			"tool_search",

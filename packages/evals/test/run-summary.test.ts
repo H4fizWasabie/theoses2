@@ -24,6 +24,8 @@ describe("suiteOf", () => {
 	it("keeps the two arms of the plan A/B apart", () => {
 		expect(suiteOf("plan-off-sibling-sort-bug")).toBe("plan-off");
 		expect(suiteOf("plan-on-sibling-sort-bug")).toBe("plan-on");
+		expect(suiteOf("task-off-sibling-sort-bug")).toBe("task-off");
+		expect(suiteOf("task-on-sibling-sort-bug")).toBe("task-on");
 	});
 });
 

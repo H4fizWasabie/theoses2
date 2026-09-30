@@ -13,7 +13,14 @@
  * second call still counts against the same budget as the first.
  */
 
-import { Agent, type AgentEvent, type AgentMessage, type AgentTool } from "theoses-agent-core";
+import {
+	Agent,
+	type AgentEvent,
+	type AgentMessage,
+	type AgentOptions,
+	type AgentTool,
+	type ThinkingLevel,
+} from "theoses-agent-core";
 import type { Api, AssistantMessage, Model, ModelsRequestTransforms } from "theoses-ai";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { ProviderHooks } from "./provider-hooks.ts";
@@ -48,6 +55,10 @@ export interface CreateBudgetedAgentOptions {
 	signal?: AbortSignal;
 	/** Issue #260/#263: the session's provider hooks, so cost-watch sees this sub-agent's traffic under its own model. */
 	providerHooks?: ProviderHooks;
+	/** Defaults to "off", right for a cheap scouting model; a sub-agent doing the parent's own work passes the parent's level. */
+	thinkingLevel?: ThinkingLevel;
+	/** Runs before every tool call of the sub-agent; a sub-agent that changes files uses the parent's own gate. */
+	beforeToolCall?: AgentOptions["beforeToolCall"];
 }
 
 export interface BudgetedAgentTurnStats {
@@ -79,7 +90,7 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 		initialState: {
 			systemPrompt: options.systemPrompt,
 			model: options.model,
-			thinkingLevel: "off",
+			thinkingLevel: options.thinkingLevel ?? "off",
 			tools: options.tools,
 		},
 		streamFn: (streamModel, context, streamOptions) =>
@@ -91,6 +102,7 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 					? (headers) => hooks.transformHeaders(headers, streamModel)
 					: (streamOptions as ModelsRequestTransforms | undefined)?.transformHeaders,
 			}),
+		beforeToolCall: options.beforeToolCall,
 		onPayload: hooks?.onPayload,
 		onResponse: hooks?.onResponse,
 		shouldStopAfterTurn: () => {
