@@ -21,10 +21,10 @@ on:
         type: choice
         options: ["1", "2", "3"]
       suite:
-        description: "coding = the easy, hard, edit-recovery and real-fix replay sets; plan-ab = the hard set with the task plan off vs on (3 repetitions each); task-ab = the same with the task sub-agent tool off vs on"
+        description: "coding = the easy, hard, edit-recovery and real-fix replay sets; plan-ab = the hard set with the task plan off vs on (3 repetitions each); task-ab = the same with the task sub-agent tool off vs on; prompt-ab = the same with and without the working-discipline paragraph in the system prompt"
         default: "coding"
         type: choice
-        options: ["coding", "plan-ab", "task-ab"]
+        options: ["coding", "plan-ab", "task-ab", "prompt-ab"]
   schedule:
     - cron: "0 3 * * 1"
 
@@ -74,7 +74,7 @@ jobs:
         # A wrong answer fails its test; the floors below decide whether the job fails, so keep going here.
         continue-on-error: true
         run: |
-          if [ "$SUITE" = "plan-ab" ]; then files="src/coding-plan-ab.eval.ts"; elif [ "$SUITE" = "task-ab" ]; then files="src/coding-task-ab.eval.ts"; else files="src/coding.eval.ts src/coding-hard.eval.ts src/coding-recovery.eval.ts src/coding-replay.eval.ts"; fi
+          if [ "$SUITE" = "plan-ab" ]; then files="src/coding-plan-ab.eval.ts"; elif [ "$SUITE" = "task-ab" ]; then files="src/coding-task-ab.eval.ts"; elif [ "$SUITE" = "prompt-ab" ]; then files="src/coding-prompt-ab.eval.ts"; else files="src/coding.eval.ts src/coding-hard.eval.ts src/coding-recovery.eval.ts src/coding-replay.eval.ts"; fi
           for pass in $(seq 1 "$PASSES"); do
             THEOSES_EVAL_ARTIFACT_DIR="$EVAL_DIR/pass-$pass" npm run eval -- \
               --provider openrouter --model z-ai/glm-5.3-flash \
@@ -85,7 +85,7 @@ jobs:
         # Floors from the first baseline on the production model: the easy set 15/15, the hard set 26/33 (79%).
         # The A/B suites compare two arms and have no floor.
         run: |
-          if [ "$SUITE" = "plan-ab" ] || [ "$SUITE" = "task-ab" ]; then
+          if [ "$SUITE" = "plan-ab" ] || [ "$SUITE" = "task-ab" ] || [ "$SUITE" = "prompt-ab" ]; then
             node packages/evals/scripts/summarize-runs.ts "$EVAL_DIR"
           else
             node packages/evals/scripts/summarize-runs.ts "$EVAL_DIR" --floor coding=1 --floor coding-hard=0.7
