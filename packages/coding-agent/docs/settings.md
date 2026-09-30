@@ -280,6 +280,7 @@ Windows paths in JSON must use forward slashes or escaped backslashes:
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `defaultTools` | string[] | - | Built-in tools enabled initially. When omitted, Theoses uses its standard defaults |
+| `editSiblingHint` | boolean | `false` | After a successful edit, tell the model which other files contain the text it just replaced (up to 5, `path:line`), so a fix that has siblings is not left half done. Skips tests, `node_modules`, build output and files outside the working directory |
 | `taskTool.enabled` | boolean | `false` | Offer the `task` tool: the model can hand a self-contained piece of work to a sub-agent with its own context, and only a short summary returns |
 
 `defaultTools` selects the built-in tools enabled at startup. Extension and SDK custom tools remain enabled. Available built-ins are `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls`:
