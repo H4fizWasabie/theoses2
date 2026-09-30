@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.106] - 2026-09-30
 
 - feat: the `task` tool, a sub-agent for one self-contained piece of work. It runs in its own context on the session's model and thinking level with read, grep, find, ls, edit, write and bash, and returns only a summary of at most 40 lines, so its reads, failed attempts and command output never enter the parent's context. Every tool call it makes goes through the parent's gate (task plan guard, owner command hooks, extension `tool_call` handlers, file checkpoints), so `/rewind` undoes what it changed. Runs one at a time; cannot call `task` or `explore`; capped at 30 turns and reports INCOMPLETE with a reminder to check `git diff` when it runs out. Off by default (`taskTool.enabled`) until the eval A/B (`suite=task-ab` in the Evals workflow) shows no regression. The gate the main agent used before every tool call is now one method shared with the sub-agent.
