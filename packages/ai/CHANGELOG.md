@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.109] - 2026-09-30
 
 - feat: add `gpt-6.1-sol` to the `openai-codex` (ChatGPT Plus/Pro subscription) catalog. The Codex backend serves it but models.dev does not list it, and the codex list is hand-maintained in `generate-models.ts`. Cost is copied from `openai/gpt-6-sol` and only feeds estimates; subscription requests are not billed per token. Thinking levels come from the existing `gpt-6` match.
