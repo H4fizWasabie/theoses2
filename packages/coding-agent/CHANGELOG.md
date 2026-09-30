@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.107] - 2026-09-30
 
 - feat: `editSiblingHint` (on by default; `false` turns it off). After a successful `edit`, the result says where else in the project the replaced text appears, for example `Note: the text you replaced (".sort()") also appears in report.mjs:2, invoice.mjs:2. Other instances of the same mistake are part of this bug, not extra work: open each one, fix it if it is the same mistake, and re-run the checks. Skip a place only if it is not the same mistake.` Why: on `sibling-sort-bug`, GLM 5.3 flash, gpt-6-luna and claude-sonnet-5.5 all fix only the file the failing test names, and telling the model in the prompt to look for siblings did not change that (prompt A/B, #426). The hint searches for the part of the text the edit actually changed, widened to the call around it, skips tests, `node_modules`, build output and files outside the working directory, lists at most 5 files, and never fails the edit. On by default because the `hint-ab` eval (GLM 5.3 flash, 51 runs per arm, judge score) showed it helps: 43/51 correct off and 48/51 on, tokens -9%, cost -15%, and `sibling-sort-bug-unstated` went from 0/3 to 3/3. The first wording ("fix it there too if it is the same mistake") did not work: the model saw the siblings in every run and reported them without fixing them as unrequested work (0/3). The note now says the other instances are part of the bug.
