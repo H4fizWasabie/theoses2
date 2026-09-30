@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: `/thinking` shows the current thinking level and the levels the model accepts; `/thinking <level>` sets it and makes it the default in `settings.json`, so the level no longer needs a settings edit and a restart (#466).
+
 ## [1.0.110] - 2026-09-30
 
 ## [1.0.109] - 2026-09-30

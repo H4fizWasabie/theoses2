@@ -167,6 +167,22 @@ describe("Channel Session", () => {
 		});
 	});
 
+	it("sets a supported thinking level as the session level and the settings.json default, and refuses others", async () => {
+		const session = await registry().open("chat-1");
+		expect(session.thinkingLevels).toContain("low");
+
+		expect(await session.setThinkingLevel("low")).toEqual({ level: "low" });
+		expect(session.thinkingLevel).toBe("low");
+		const settings = JSON.parse(readFileSync(join(root, "agent", "settings.json"), "utf8"));
+		expect(settings.defaultThinkingLevel).toBe("low");
+
+		const refused = await session.setThinkingLevel("ludicrous");
+		expect(refused).toEqual({
+			error: expect.stringContaining('"ludicrous" is not available for this model. Use one of:'),
+		});
+		expect(session.thinkingLevel).toBe("low");
+	});
+
 	it("returns the provider error of a failed turn", async () => {
 		writeAgentDir({ retry: { enabled: false } });
 		faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "boom" })]);

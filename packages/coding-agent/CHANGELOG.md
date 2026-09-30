@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: `ChannelSession` gets `thinkingLevels` (the levels the current model accepts) and `setThinkingLevel(level)`, which sets the level for the session and as `settings.json`'s `defaultThinkingLevel` so it survives a restart (`channel-session.ts` re-applies that default on every load). It refuses a level the model does not accept, listing the accepted ones, instead of clamping, and resolves only once the default is saved (#466).
+
 ## [1.0.110] - 2026-09-30
 
 ## [1.0.109] - 2026-09-30

@@ -10,6 +10,7 @@ export type Inbound =
 	| { kind: "stop" }
 	| { kind: "toolCallDetail"; on: boolean }
 	| { kind: "model"; ref: string }
+	| { kind: "thinking"; level: string }
 	| { kind: "rewind"; args: string }
 	| { kind: "prompt" };
 
@@ -27,6 +28,8 @@ export function readInbound(message: Message): Inbound {
 	if (TOOL_CALL_DETAIL_OFF.has(normalized)) return { kind: "toolCallDetail", on: false };
 	const rewind = normalized.match(/^\/rewind(?:\s+(.*))?$/);
 	if (rewind) return { kind: "rewind", args: (rewind[1] ?? "").trim() };
+	const thinking = normalized.match(/^\/thinking(?:\s+(.*))?$/);
+	if (thinking) return { kind: "thinking", level: (thinking[1] ?? "").trim() };
 	const ref = parseModelCommand(text);
 	if (ref !== undefined) return { kind: "model", ref };
 	return { kind: "prompt" };
