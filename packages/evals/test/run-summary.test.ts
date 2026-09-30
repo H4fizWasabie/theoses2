@@ -27,6 +27,7 @@ describe("suiteOf", () => {
 		expect(suiteOf("task-off-sibling-sort-bug")).toBe("task-off");
 		expect(suiteOf("task-on-sibling-sort-bug")).toBe("task-on");
 		expect(suiteOf("prompt-on-sibling-sort-bug")).toBe("prompt-on");
+		expect(suiteOf("diagnose-sibling-sort-bug")).toBe("diagnose");
 	});
 });
 
