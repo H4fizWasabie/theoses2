@@ -27,6 +27,8 @@ export function codingHarness(
 	taskPlan = false,
 	/** Extra in-memory settings, e.g. `taskTool` for the sub-agent A/B. */
 	settings: Parameters<typeof SettingsManager.inMemory>[0] = {},
+	/** Rewrites the system prompt, for the prompt A/B. */
+	transformSystemPrompt?: (defaultPrompt: string) => string,
 ) {
 	return createTheosesCodingAgentHarness({
 		name,
@@ -34,6 +36,7 @@ export function codingHarness(
 		// Production runs at "max" (settings.json defaultThinkingLevel); baseline the same.
 		thinkingLevel: "max",
 		settings: { taskPlan: { enabled: taskPlan }, ...settings },
+		transformSystemPrompt,
 		output: ({ session }): CodingOutput => gradeWorkspace(session.sessionManager.getCwd(), task),
 	});
 }
