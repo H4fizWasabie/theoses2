@@ -374,12 +374,12 @@ function getEmptyOldTextError(path: string, editIndex: number, totalEdits: numbe
 }
 
 function getNoChangeError(path: string, totalEdits: number): Error {
-	if (totalEdits === 1) {
-		return new Error(
-			`No changes made to ${path}. The replacement produced identical content. This might indicate an issue with special characters or the text not existing as expected.`,
-		);
-	}
-	return new Error(`No changes made to ${path}. The replacements produced identical content.`);
+	// The edit matched, so its oldText and newText are the same (after normalization): the file already reads this way,
+	// usually because the edit was applied a moment ago. Blaming special characters sent a model into five identical retries.
+	const subject = totalEdits === 1 ? "the replacement" : `all ${totalEdits} replacements`;
+	return new Error(
+		`No changes made to ${path}: ${subject} would leave the file exactly as it is. The file already contains the text you asked for, so this edit is done or not needed. Do not repeat it; read the file if you want to confirm, then continue with the next step.`,
+	);
 }
 
 /**
