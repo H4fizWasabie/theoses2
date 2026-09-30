@@ -42,6 +42,8 @@ describe("edit sibling hint", () => {
 		const text = await edit("stats.mjs", "[...nums].sort()", "[...nums].sort((a, b) => a - b)");
 
 		expect(text).toContain("also appears in");
+		// Worded as part of the task: a softer "fix it there too" was read and then declined as unrequested work.
+		expect(text).toContain("part of this bug, not extra work");
 		expect(text).toContain("report.mjs:1");
 		expect(text).toContain("invoice.mjs:1");
 		expect(text).not.toContain("stats.mjs:1");

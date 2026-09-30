@@ -4,7 +4,9 @@
  * A model that is told "this test fails" reads the test, fixes what it names, says "fixed", and stops. The same mistake in
  * the neighbouring files is never opened. Asking it to "look for siblings" in the prompt did not change that (prompt A/B,
  * issue #426), so the tool does the search a careful colleague would do with grep and puts the answer in the result.
- * It only points; the model decides whether the other places are the same mistake.
+ * It points, and says that fixing the other instances is part of the task: with a softer "fix it there too if you like" the
+ * model saw the siblings in all three runs and still left them alone as unrequested work (hint A/B, #426). The model
+ * still decides whether each place is the same mistake.
  */
 import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -113,7 +115,7 @@ export async function siblingHint(
 		const listed = places.slice(0, MAX_LISTED).join(", ");
 		const more = places.length > MAX_LISTED ? ` and ${places.length - MAX_LISTED} more` : "";
 		notes.push(
-			`Note: the text you replaced (${JSON.stringify(fragment)}) also appears in ${listed}${more}. If that is the same mistake, fix it there too; if not, ignore this.`,
+			`Note: the text you replaced (${JSON.stringify(fragment)}) also appears in ${listed}${more}. Other instances of the same mistake are part of this bug, not extra work: open each one, fix it if it is the same mistake, and re-run the checks. Skip a place only if it is not the same mistake.`,
 		);
 	}
 	return notes.length > 0 ? `\n${notes.join("\n")}` : "";
