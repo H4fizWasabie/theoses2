@@ -20,6 +20,16 @@ on:
         default: "1"
         type: choice
         options: ["1", "2", "3"]
+      thinking:
+        description: "Thinking level. Production runs max."
+        default: "max"
+        type: choice
+        options: ["max", "xhigh", "high", "medium", "low"]
+      sibling_hint:
+        description: "default = the setting's default (on); off = run without the edit sibling hint"
+        default: "default"
+        type: choice
+        options: ["default", "off"]
       model:
         description: "OpenRouter model id. Leave the default to measure the production model."
         default: "z-ai/glm-5.3-flash"
@@ -51,6 +61,8 @@ jobs:
       SUITE: ${{ inputs.suite || 'coding' }}
       PASSES: ${{ inputs.passes || '1' }}
       MODEL: ${{ inputs.model || 'z-ai/glm-5.3-flash' }}
+      EVAL_THINKING_LEVEL: ${{ inputs.thinking || 'max' }}
+      EVAL_SIBLING_HINT: ${{ inputs.sibling_hint == 'off' && 'off' || '' }}
     steps:
       # The runner context is not available in job-level env, so the directory is set here.
       - name: Choose the run-record directory
