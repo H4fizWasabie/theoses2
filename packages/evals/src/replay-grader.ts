@@ -53,13 +53,19 @@ export function seedReplayWorkspace(cwd: string, task: ReplayTask): void {
 	linkDependencies(cwd);
 }
 
-function linkDependencies(cwd: string): void {
+/**
+ * Links the repository's installed `node_modules` (root and per package) into `cwd`. A package that exists in `root` but
+ * not in the extracted commit (added after the fix, or a leftover directory with only `node_modules`) has nowhere to be
+ * linked and is skipped.
+ */
+export function linkDependencies(cwd: string, root: string = REPO_ROOT): void {
 	const link = (relative: string) => {
-		const source = join(REPO_ROOT, relative);
-		if (existsSync(source)) symlinkSync(source, join(cwd, relative));
+		const source = join(root, relative);
+		const target = join(cwd, relative);
+		if (existsSync(source) && existsSync(dirname(target))) symlinkSync(source, target);
 	};
 	link("node_modules");
-	for (const name of readdirSync(join(REPO_ROOT, "packages"))) link(join("packages", name, "node_modules"));
+	for (const name of readdirSync(join(root, "packages"))) link(join("packages", name, "node_modules"));
 }
 
 /** Overlays the fix commit's non-test files onto `cwd`; only the fixture test uses it, to prove a task is solvable. */

@@ -1,9 +1,39 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { applyReferenceFix, changedFiles, gradeReplay, hasCommit, seedReplayWorkspace } from "../src/replay-grader.ts";
+import {
+	applyReferenceFix,
+	changedFiles,
+	gradeReplay,
+	hasCommit,
+	linkDependencies,
+	seedReplayWorkspace,
+} from "../src/replay-grader.ts";
 import { replayTasks } from "../src/replay-tasks.ts";
+
+describe("linkDependencies", () => {
+	it("links installed node_modules but skips a package the extracted commit does not have", () => {
+		const root = mkdtempSync(join(tmpdir(), "link-root-"));
+		const cwd = mkdtempSync(join(tmpdir(), "link-cwd-"));
+		try {
+			for (const dir of ["node_modules", "packages/old/node_modules", "packages/newer/node_modules"]) {
+				mkdirSync(join(root, dir), { recursive: true });
+			}
+			// The extracted commit has `old` but predates `newer`.
+			mkdirSync(join(cwd, "packages/old"), { recursive: true });
+
+			linkDependencies(cwd, root);
+
+			expect(existsSync(join(cwd, "node_modules"))).toBe(true);
+			expect(existsSync(join(cwd, "packages/old/node_modules"))).toBe(true);
+			expect(existsSync(join(cwd, "packages/newer"))).toBe(false);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+});
 
 // A bad replay must not be mistaken for a bad agent: at the parent commit the regression test has to fail, and with
 // the fix's source files on top it has to pass. Needs the fix commits, so it skips in a shallow clone.
