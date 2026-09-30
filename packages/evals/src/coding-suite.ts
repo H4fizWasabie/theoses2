@@ -1,3 +1,4 @@
+import type { ThinkingLevel } from "theoses-agent-core";
 import type { SettingsManager } from "theoses-coding-agent";
 import { createJudge, describeEval } from "vitest-evals";
 import { type CodingOutput, type CodingTask, gradeWorkspace } from "./coding-grader.ts";
@@ -33,9 +34,15 @@ export function codingHarness(
 	return createTheosesCodingAgentHarness({
 		name,
 		files: task.files,
-		// Production runs at "max" (settings.json defaultThinkingLevel); baseline the same.
-		thinkingLevel: "max",
-		settings: { taskPlan: { enabled: taskPlan }, ...settings },
+		// Production runs at "max" (settings.json defaultThinkingLevel); baseline the same. EVAL_THINKING_LEVEL overrides it,
+		// to test whether the level changes behavior (workflow input `thinking`).
+		thinkingLevel: (process.env.EVAL_THINKING_LEVEL as ThinkingLevel | undefined) ?? "max",
+		// EVAL_SIBLING_HINT=off runs without the edit sibling hint, for diagnosis runs that must not have it.
+		settings: {
+			taskPlan: { enabled: taskPlan },
+			...(process.env.EVAL_SIBLING_HINT === "off" ? { editSiblingHint: false } : {}),
+			...settings,
+		},
 		transformSystemPrompt,
 		output: ({ session }): CodingOutput => gradeWorkspace(session.sessionManager.getCwd(), task),
 	});
