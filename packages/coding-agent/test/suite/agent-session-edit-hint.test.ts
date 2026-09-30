@@ -34,8 +34,8 @@ describe("AgentSession edit sibling hint", () => {
 		expect(await editResult(true)).toContain("also appears in report.mjs:1");
 	});
 
-	it("does not by default", async () => {
-		expect(await editResult()).not.toContain("also appears");
+	it("is on by default and can be turned off", async () => {
+		expect(await editResult()).toContain("also appears in report.mjs:1");
 		expect(await editResult(false)).not.toContain("also appears");
 	});
 });

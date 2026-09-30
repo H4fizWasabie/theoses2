@@ -119,7 +119,7 @@ export interface Settings {
 	taskPlan?: { enabled?: boolean };
 	// The `task` sub-agent tool (task-agent.ts): a piece of work done in its own context, only a summary returned. Default: off.
 	taskTool?: { enabled?: boolean };
-	// After an edit, say where else the replaced text appears in the project (tools/edit-siblings.ts). Default: off until the eval A/B.
+	// After an edit, say where else the replaced text appears in the project (tools/edit-siblings.ts). Default: on (hint A/B, issue #426).
 	editSiblingHint?: boolean;
 	// Shell commands run at fixed points of an agent run, keyed by event name (see command-hooks.ts). Validated on read.
 	hooks?: Record<string, unknown>;
@@ -1300,7 +1300,7 @@ export class SettingsManager {
 	}
 
 	getEditSiblingHint(): boolean {
-		return this.settings.editSiblingHint ?? false;
+		return this.settings.editSiblingHint ?? true;
 	}
 
 	getTaskToolEnabled(): boolean {
