@@ -7,7 +7,8 @@ import type { CodingOutput } from "./coding-grader.ts";
 // A replay task starts the agent at the parent of a real fix in this repository, describes the bug the way its issue
 // did, and grades with the regression test that fix added. The agent never sees that test: it is written into the
 // workspace after the run. The workspace is a `git archive` of the parent (no history to read the fix from), with the
-// repo's installed node_modules linked in so the test runs without another install.
+// repo's installed node_modules linked in so the test runs without another install. The repo's own agent configuration
+// (`.theoses`, `.agents`, `.codex`) is left out: it loads extensions, and an eval session must start without any.
 export type ReplayTask = {
 	id: string;
 	/** The commit that fixed the bug; the task starts at its parent. */
@@ -43,7 +44,7 @@ export function seedReplayWorkspace(cwd: string, task: ReplayTask): void {
 	mkdirSync(cwd, { recursive: true });
 	const extract = spawnSync("sh", [
 		"-c",
-		'git -C "$0" archive "$1" | tar -x -C "$2"',
+		'git -C "$0" archive "$1" | tar -x --exclude=.theoses --exclude=.agents --exclude=.codex -C "$2"',
 		REPO_ROOT,
 		`${task.fixCommit}~1`,
 		cwd,

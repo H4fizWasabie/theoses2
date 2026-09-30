@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -11,6 +11,18 @@ describe("replay task fixtures", () => {
 	it("has unique task ids", () => {
 		const ids = replayTasks.map((task) => task.id);
 		expect(new Set(ids).size).toBe(ids.length);
+	});
+
+	it("seeds a workspace without the repo's own agent configuration, which would load extensions into the eval session", () => {
+		const task = replayTasks[0];
+		if (!hasCommit(task.fixCommit)) return;
+		const cwd = mkdtempSync(join(tmpdir(), "replay-config-"));
+		try {
+			seedReplayWorkspace(cwd, task);
+			for (const dir of [".theoses", ".agents", ".codex"]) expect(existsSync(join(cwd, dir))).toBe(false);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
 	});
 
 	it.each(replayTasks.map((task) => [task.id, task] as const))(
