@@ -1,3 +1,4 @@
+import type { SettingsManager } from "theoses-coding-agent";
 import { createJudge, describeEval } from "vitest-evals";
 import { type CodingOutput, type CodingTask, gradeWorkspace } from "./coding-grader.ts";
 import { createTheosesCodingAgentHarness, type TheosesCodingAgentInput } from "./theoses-harness.ts";
@@ -20,13 +21,19 @@ const CodingJudge = createJudge<TheosesCodingAgentInput, CodingOutput>("CodingJu
  * task-plan and independent plan-review round trips that pushed a trivial rename past the timeout), so `taskPlan`
  * defaults to false; the plan A/B turns it on for the candidate.
  */
-export function codingHarness(name: string, task: CodingTask, taskPlan = false) {
+export function codingHarness(
+	name: string,
+	task: CodingTask,
+	taskPlan = false,
+	/** Extra in-memory settings, e.g. `taskTool` for the sub-agent A/B. */
+	settings: Parameters<typeof SettingsManager.inMemory>[0] = {},
+) {
 	return createTheosesCodingAgentHarness({
 		name,
 		files: task.files,
 		// Production runs at "max" (settings.json defaultThinkingLevel); baseline the same.
 		thinkingLevel: "max",
-		settings: { taskPlan: { enabled: taskPlan } },
+		settings: { taskPlan: { enabled: taskPlan }, ...settings },
 		output: ({ session }): CodingOutput => gradeWorkspace(session.sessionManager.getCwd(), task),
 	});
 }

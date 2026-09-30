@@ -21,6 +21,8 @@ import type {
 	AgentMessage,
 	AgentState,
 	AgentTool,
+	BeforeToolCallContext,
+	BeforeToolCallResult,
 	PrepareNextTurnContext,
 	ThinkingLevel,
 } from "theoses-agent-core";
@@ -148,6 +150,7 @@ import {
 import { createSessionSystemPrompt, type SessionSystemPrompt } from "./session-system-prompt.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
+import { createTaskToolDefinition } from "./task-agent.ts";
 import { TaskPlanGuard } from "./task-plan-guard.ts";
 import { createToolRegistry, type ToolRegistry } from "./tool-registry.ts";
 import { currentRunMessages, textOf } from "./tool-runs.ts";
@@ -668,41 +671,48 @@ export class AgentSession {
 		];
 	}
 
-	private _installAgentToolHooks(): void {
-		this.agent.beforeToolCall = async ({ toolCall, args }) => {
-			const input = args as Record<string, unknown>;
-			const planGate = this._taskPlanGuard.beforeToolCall(toolCall.name, input);
-			if (planGate) return planGate;
-			// The owner's command hooks run first: one can block the call or rewrite its input, and the extensions
-			// and the checkpoint below see the rewritten input.
-			const hookBlock = await runPreToolUse(this.settingsManager.getCommandHooks(), this._hookContext(), {
-				toolName: toolCall.name,
-				toolCallId: toolCall.id,
-				input,
-			});
-			if (hookBlock) return hookBlock;
+	/**
+	 * The gate every tool call passes before it runs: task plan guard, owner command hooks, extension `tool_call`
+	 * handlers, then the file checkpoint. The main agent uses it, and so does a `task` sub-agent, so delegating
+	 * work does not step around any of them.
+	 */
+	private async _gateToolCall({ toolCall, args }: BeforeToolCallContext): Promise<BeforeToolCallResult | undefined> {
+		const input = args as Record<string, unknown>;
+		const planGate = this._taskPlanGuard.beforeToolCall(toolCall.name, input);
+		if (planGate) return planGate;
+		// The owner's command hooks run first: one can block the call or rewrite its input, and the extensions
+		// and the checkpoint below see the rewritten input.
+		const hookBlock = await runPreToolUse(this.settingsManager.getCommandHooks(), this._hookContext(), {
+			toolName: toolCall.name,
+			toolCallId: toolCall.id,
+			input,
+		});
+		if (hookBlock) return hookBlock;
 
-			const runner = this._extensionRunner;
-			let result: Awaited<ReturnType<typeof runner.emitToolCall>> | undefined;
-			if (runner.hasHandlers("tool_call")) {
-				try {
-					result = await runner.emitToolCall({
-						type: "tool_call",
-						toolName: toolCall.name,
-						toolCallId: toolCall.id,
-						input,
-					});
-				} catch (err) {
-					if (err instanceof Error) {
-						throw err;
-					}
-					throw new Error(`Extension failed, blocking execution: ${String(err)}`);
+		const runner = this._extensionRunner;
+		let result: Awaited<ReturnType<typeof runner.emitToolCall>> | undefined;
+		if (runner.hasHandlers("tool_call")) {
+			try {
+				result = await runner.emitToolCall({
+					type: "tool_call",
+					toolName: toolCall.name,
+					toolCallId: toolCall.id,
+					input,
+				});
+			} catch (err) {
+				if (err instanceof Error) {
+					throw err;
 				}
+				throw new Error(`Extension failed, blocking execution: ${String(err)}`);
 			}
-			// Last, so the checkpoint saves the file the tool will really change and nothing for a blocked call.
-			if (!result?.block) this._fileCheckpoints.beforeToolCall(toolCall.name, input);
-			return result;
-		};
+		}
+		// Last, so the checkpoint saves the file the tool will really change and nothing for a blocked call.
+		if (!result?.block) this._fileCheckpoints.beforeToolCall(toolCall.name, input);
+		return result;
+	}
+
+	private _installAgentToolHooks(): void {
+		this.agent.beforeToolCall = (context) => this._gateToolCall(context);
 
 		this.agent.beforeStop = async () => {
 			const pushed = await this._taskPlanGuard.beforeStop();
@@ -2608,6 +2618,7 @@ export class AgentSession {
 			activeToolNames: options?.activeToolNames,
 			includeAllExtensionTools: options?.includeAllExtensionTools,
 			taskPlanEnabled: this.settingsManager.getTaskPlanEnabled(),
+			taskToolEnabled: this.settingsManager.getTaskToolEnabled(),
 		});
 		this.setActiveToolsByName(nextActiveToolNames);
 	}
@@ -2654,6 +2665,16 @@ export class AgentSession {
 			cwd: this._cwd,
 			modelRuntime: this._modelRuntime,
 			providerHooks,
+		});
+
+		// Same reason as `explore`: kept out of tools/index.ts. Inactive unless `taskTool.enabled` (tool-registry.ts).
+		(baseToolDefinitions as Record<string, ToolDefinition<any>>).task = createTaskToolDefinition({
+			cwd: this._cwd,
+			modelRuntime: this._modelRuntime,
+			getModel: () => this.model,
+			getThinkingLevel: () => this.thinkingLevel,
+			providerHooks,
+			beforeToolCall: (context) => this._gateToolCall(context),
 		});
 
 		// Same reason as `explore` above for living here rather than in tools/index.ts.
@@ -2705,6 +2726,7 @@ export class AgentSession {
 					"generate_image",
 					"explore",
 					"research",
+					"task",
 				];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({

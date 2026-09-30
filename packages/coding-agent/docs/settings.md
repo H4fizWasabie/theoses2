@@ -280,6 +280,7 @@ Windows paths in JSON must use forward slashes or escaped backslashes:
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `defaultTools` | string[] | - | Built-in tools enabled initially. When omitted, Theoses uses its standard defaults |
+| `taskTool.enabled` | boolean | `false` | Offer the `task` tool: the model can hand a self-contained piece of work to a sub-agent with its own context, and only a short summary returns |
 
 `defaultTools` selects the built-in tools enabled at startup. Extension and SDK custom tools remain enabled. Available built-ins are `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls`:
 
@@ -298,6 +299,8 @@ On Windows, select `powershell` instead of `bash`, or include both:
 ```
 
 An empty array starts with no built-in tools while preserving extension and SDK custom tools. `--tools` replaces this behavior with a strict allowlist for all tools, `--no-tools` disables all tools, and `--no-builtin-tools` disables the built-in defaults. `--exclude-tools` filters the resulting list. A project `defaultTools` array replaces the global array.
+
+`task` runs on the session's own model and thinking level with read, grep, find, ls, edit, write and bash. It cannot call `task` or `explore`. Every tool call it makes goes through the same gate as the main agent's (owner command hooks, extension `tool_call` handlers, file checkpoints, the task plan guard), so `/rewind` covers what it changed. It is capped at 30 turns and returns at most 40 lines; a run that hits the cap says the work is incomplete.
 
 ### Sessions
 

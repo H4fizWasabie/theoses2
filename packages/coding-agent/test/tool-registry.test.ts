@@ -41,7 +41,13 @@ function setup(options: Partial<ToolRegistryOptions> = {}) {
 		...options,
 	});
 	const refresh = (input: Partial<ToolRegistryRefresh> & { baseToolDefinitions: Map<string, ToolDefinition> }) =>
-		registry.refresh({ runner: runnerWith(), previousActiveToolNames: [], taskPlanEnabled: true, ...input });
+		registry.refresh({
+			runner: runnerWith(),
+			previousActiveToolNames: [],
+			taskPlanEnabled: true,
+			taskToolEnabled: false,
+			...input,
+		});
 	return { registry, refresh, activated };
 }
 
@@ -145,6 +151,16 @@ describe("ToolRegistry", () => {
 		expect(
 			refresh({ baseToolDefinitions: baseTools, activeToolNames: ["read", "task_plan"], taskPlanEnabled: false }),
 		).toEqual(["read"]);
+	});
+
+	it("hides the task tool unless taskTool is enabled, even from an explicit list", () => {
+		const { refresh } = setup();
+		const baseTools = base("read", "task");
+
+		expect(refresh({ baseToolDefinitions: baseTools, activeToolNames: ["read", "task"] })).toEqual(["read"]);
+		expect(
+			refresh({ baseToolDefinitions: baseTools, activeToolNames: ["read", "task"], taskToolEnabled: true }),
+		).toEqual(["read", "task"]);
 	});
 
 	it("lists tools with source info and normalizes prompt snippets and guidelines", () => {

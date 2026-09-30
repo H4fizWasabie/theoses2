@@ -1,0 +1,172 @@
+/**
+ * The `task` tool: a sub-agent that does one self-contained piece of work in its own context and returns only a
+ * summary. Its reads, searches, failed attempts and command output never enter the parent's context, which is paid for
+ * on every later turn; the parent gets a few lines saying what changed, how it was checked, and what is left.
+ *
+ * Unlike `explore` (read-only, a cheap background model), a task can edit files and run commands, so it runs on the
+ * parent's own model and thinking level, and every tool call goes through the parent's gate (owner hooks, extension
+ * `tool_call` handlers, file checkpoints, the task plan guard). It cannot call `task` or `explore` itself.
+ */
+
+import type { AgentOptions, ThinkingLevel } from "theoses-agent-core";
+import type { Api, Model } from "theoses-ai";
+import { type Static, Type } from "typebox";
+import { createBudgetedAgent, endedOnToolCall, lastAssistantText } from "./background-agent.ts";
+import type { ToolDefinition } from "./extensions/types.ts";
+import type { ModelRuntime } from "./model-runtime.ts";
+import type { ProviderHooks } from "./provider-hooks.ts";
+import { createBashToolDefinition } from "./tools/bash.ts";
+import { createEditToolDefinition } from "./tools/edit.ts";
+import { createFindToolDefinition } from "./tools/find.ts";
+import { createGrepToolDefinition } from "./tools/grep.ts";
+import { createLsToolDefinition } from "./tools/ls.ts";
+import { createReadToolDefinition } from "./tools/read.ts";
+import { wrapToolDefinition } from "./tools/tool-definition-wrapper.ts";
+import { createWriteToolDefinition } from "./tools/write.ts";
+
+export const TASK_CAPS = { lines: 40, maxTurns: 30, maxInputTokens: 1_500_000 } as const;
+
+/** What a task can use. Not `task` or `explore`: one level of delegation. */
+export const TASK_AGENT_TOOLS = ["read", "grep", "find", "ls", "edit", "write", "bash"] as const;
+
+export interface TaskResult {
+	/** The summary the parent sees (line-capped). Never the sub-agent's tool output. */
+	answer: string;
+	/** false when the budget ran out: the work may be partly done, and files may be partly changed. */
+	complete: boolean;
+	turnsUsed: number;
+	inputTokens: number;
+	outputTokens: number;
+}
+
+function buildTaskSystemPrompt(cwd: string): string {
+	return `You are a sub-agent working on one self-contained task for a parent agent. You have your own context; the parent sees only your final message, never your tool calls or their output.
+
+Working directory: ${cwd}
+
+Rules:
+1. The brief is all you know. Do the task completely and on your own; do not ask questions. If something blocks you, stop and say exactly what.
+2. Read a file before you edit it. Keep changes minimal and in the style of the code around them. Change only what the task needs.
+3. Check your work before you finish: run the relevant test or command and look at the result.
+4. Your final message is a summary of at most ${TASK_CAPS.lines} lines: what you changed (file:line), how you checked it (the command and what it printed), and anything left undone or uncertain. Pointers, not pasted code or output.
+5. You have at most ${TASK_CAPS.maxTurns} turns. If you run out, the parent is told the work is incomplete.`;
+}
+
+export interface RunTaskOptions {
+	prompt: string;
+	cwd: string;
+	model: Model<Api>;
+	thinkingLevel: ThinkingLevel;
+	modelRuntime: ModelRuntime;
+	signal?: AbortSignal;
+	onStatus?: (status: string) => void;
+	providerHooks?: ProviderHooks;
+	/** The parent's gate for tool calls; see the module comment. */
+	beforeToolCall?: AgentOptions["beforeToolCall"];
+}
+
+function capSummary(answer: string): string {
+	const lines = answer.split("\n");
+	if (lines.length <= TASK_CAPS.lines) return answer;
+	return `${lines.slice(0, TASK_CAPS.lines).join("\n")}\n[truncated by harness: exceeded ${TASK_CAPS.lines} lines]`;
+}
+
+export async function runTask(options: RunTaskOptions): Promise<TaskResult> {
+	// The tools have different detail types; the wrapper only needs the common ToolDefinition shape.
+	const definitions: ToolDefinition<any, any, any>[] = [
+		createReadToolDefinition(options.cwd),
+		createGrepToolDefinition(options.cwd),
+		createFindToolDefinition(options.cwd),
+		createLsToolDefinition(options.cwd),
+		createEditToolDefinition(options.cwd),
+		createWriteToolDefinition(options.cwd),
+		createBashToolDefinition(options.cwd),
+	];
+	const handle = createBudgetedAgent({
+		systemPrompt: buildTaskSystemPrompt(options.cwd),
+		model: options.model,
+		tools: definitions.map((definition) => wrapToolDefinition(definition)),
+		modelRuntime: options.modelRuntime,
+		maxTurns: TASK_CAPS.maxTurns,
+		maxInputTokens: TASK_CAPS.maxInputTokens,
+		signal: options.signal,
+		providerHooks: options.providerHooks,
+		thinkingLevel: options.thinkingLevel,
+		beforeToolCall: options.beforeToolCall,
+	});
+	const unsubscribe = handle.agent.subscribe((event) => {
+		if (event.type === "tool_execution_start") {
+			options.onStatus?.(`${event.toolName}: ${JSON.stringify(event.args).slice(0, 120)}`);
+		}
+	});
+	let stats: Awaited<ReturnType<typeof handle.prompt>>;
+	try {
+		stats = await handle.prompt(options.prompt);
+	} finally {
+		unsubscribe();
+	}
+
+	const summary = lastAssistantText(handle.agent.state.messages);
+	const complete = !stats.stoppedByBudget && !endedOnToolCall(handle.agent.state.messages) && summary.length > 0;
+	return {
+		answer: complete
+			? capSummary(summary)
+			: "INCOMPLETE: the task ran out of turns before a final summary. Files may be partly changed; check with git status and git diff before relying on it.",
+		complete,
+		turnsUsed: stats.turns,
+		inputTokens: stats.inputTokens,
+		outputTokens: stats.outputTokens,
+	};
+}
+
+const taskSchema = Type.Object({
+	description: Type.String({ description: "Three to six words naming the task, for the status line" }),
+	prompt: Type.String({
+		description:
+			"The full brief. The sub-agent knows nothing else: say what to do, where, what done looks like, and what must not change.",
+	}),
+});
+type TaskInput = Static<typeof taskSchema>;
+
+export interface TaskToolDeps {
+	modelRuntime: ModelRuntime;
+	cwd: string;
+	/** The parent's current model and thinking level, read when the tool runs. */
+	getModel: () => Model<Api> | undefined;
+	getThinkingLevel: () => ThinkingLevel;
+	providerHooks?: ProviderHooks;
+	beforeToolCall?: AgentOptions["beforeToolCall"];
+}
+
+export function createTaskToolDefinition(deps: TaskToolDeps): ToolDefinition<typeof taskSchema> {
+	return {
+		name: "task",
+		label: "task",
+		description:
+			"Hand one self-contained piece of work (a change, a fix, an investigation that needs edits or commands) to a sub-agent with its own context. It reads, edits and runs commands on its own, and returns only a short summary of what it changed and how it checked it; its tool output never enters your context.",
+		promptSnippet: "Delegate a self-contained piece of work to a sub-agent; only its summary returns",
+		promptGuidelines: [
+			"Use `task` for work that is self-contained and would bury your context in reads and command output. Do small or tightly coupled changes yourself.",
+			"A `task` starts with nothing but its `prompt`: give the goal, the files, what done looks like and what must not change. After it returns, verify what matters yourself; the summary is a claim, not proof.",
+		],
+		parameters: taskSchema,
+		// Two tasks editing the same files at once would collide.
+		executionMode: "sequential",
+		execute: async (_toolCallId, { prompt }: TaskInput, signal, onUpdate) => {
+			const model = deps.getModel();
+			if (!model) throw new Error("No model is selected, so a task cannot run.");
+			const result = await runTask({
+				prompt,
+				cwd: deps.cwd,
+				model,
+				thinkingLevel: deps.getThinkingLevel(),
+				modelRuntime: deps.modelRuntime,
+				signal,
+				providerHooks: deps.providerHooks,
+				beforeToolCall: deps.beforeToolCall,
+				onStatus: (status) => onUpdate?.({ content: [{ type: "text", text: status }], details: undefined }),
+			});
+			return { content: [{ type: "text", text: result.answer }], details: result };
+		},
+	};
+}

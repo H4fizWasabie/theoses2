@@ -117,6 +117,8 @@ export interface Settings {
 	backgroundModels?: BackgroundModelConfig;
 	// Task Plan enforcement and its reviewer (issue #382); `enabled: false` is the kill switch. Default: on.
 	taskPlan?: { enabled?: boolean };
+	// The `task` sub-agent tool (task-agent.ts): a piece of work done in its own context, only a summary returned. Default: off.
+	taskTool?: { enabled?: boolean };
 	// Shell commands run at fixed points of an agent run, keyed by event name (see command-hooks.ts). Validated on read.
 	hooks?: Record<string, unknown>;
 	// Patterns for models that cannot be selected at all (see excluded-models.ts), e.g. ["*deepseek*"].
@@ -1293,6 +1295,10 @@ export class SettingsManager {
 
 	getTaskPlanEnabled(): boolean {
 		return this.settings.taskPlan?.enabled ?? true;
+	}
+
+	getTaskToolEnabled(): boolean {
+		return this.settings.taskTool?.enabled ?? false;
 	}
 
 	getImageAutoResize(): boolean {
