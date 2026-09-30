@@ -82,13 +82,14 @@ jobs:
           done
 
       - name: Summarize
-        # Floors from the first baseline on the production model: the easy set 15/15, the hard set 26/33 (79%).
+        # Floors sit under what the production model scored: easy 15/15, 13/15, 15/15, 10/10 (0.85 tolerates one miss in 15); hard 26/33 (79%),
+        # 24/32, 18/22, 16/21; recovery 6/6 and 7/9; replay 7/8 (0.5, only 8 runs and costlier).
         # The A/B suites compare two arms and have no floor.
         run: |
           if [ "$SUITE" = "plan-ab" ] || [ "$SUITE" = "task-ab" ] || [ "$SUITE" = "prompt-ab" ]; then
             node packages/evals/scripts/summarize-runs.ts "$EVAL_DIR"
           else
-            node packages/evals/scripts/summarize-runs.ts "$EVAL_DIR" --floor coding=1 --floor coding-hard=0.7
+            node packages/evals/scripts/summarize-runs.ts "$EVAL_DIR" --floor coding=0.85 --floor coding-hard=0.7 --floor coding-recovery=0.7 --floor coding-replay=0.5
           fi
 
       - name: Upload run records
