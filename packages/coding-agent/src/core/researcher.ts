@@ -24,11 +24,13 @@ import type { ProviderHooks } from "./provider-hooks.ts";
 import { wrapToolDefinition } from "./tools/tool-definition-wrapper.ts";
 import { createWebExtractToolDefinition, createWebSearchToolDefinition } from "./tools/web-search.ts";
 
-// ponytail: guessed caps, tune after real runs.
+// ponytail: guessed caps, tune after real runs. 2026-09-30: a 20-card question hit the old 20 turns / 15 searches
+// at 519K of the old 600K input tokens. Input grows with the square of the turns (each turn resends the context),
+// so turns and input tokens are raised together; the search cap is the Tavily bill and stays the tightest.
 export const RESEARCH_CAPS = {
-	maxTurns: 20,
-	maxInputTokens: 600_000,
-	maxTavilyCalls: 15,
+	maxTurns: 30,
+	maxInputTokens: 1_200_000,
+	maxTavilyCalls: 25,
 	timeoutMs: 10 * 60_000,
 	maxConcurrent: 2,
 	maxPerSession: 5,
@@ -72,11 +74,17 @@ function withCallBudget(tool: ToolDefinition<any, any>, budget: { used: number }
 }
 
 export interface ResearchResult {
+	/** A written report, or "INCOMPLETE: ..." when the job produced none. A job cut short by a cap still writes one, opening with a note. */
 	report: string;
-	/** false when a cap or the timeout cut the job short. */
+	/** false when a cap or the timeout cut the job short before it wrote its report. */
 	complete: boolean;
+	/** Includes the final write-up turn. */
 	turnsUsed: number;
 	inputTokens: number;
+	/** Search and extract calls the job made. */
+	tavilyCalls: number;
+	/** The limits the job reached, e.g. "30-turn cap"; empty when none. */
+	stoppedBy: string[];
 }
 
 export interface RunResearchOptions {
@@ -109,23 +117,46 @@ export async function runResearch(options: RunResearchOptions): Promise<Research
 	});
 
 	let stats = await handle.prompt(options.question);
-	// The model can end a turn with narration and no tool call ("Let me extract a few pages...");
-	// the loop then stops without a report. Give it one turn to write it up from what it has. Turns/
-	// tokens from this second prompt accumulate onto the same budget as the first (see createBudgetedAgent).
-	if (!stats.stoppedByBudget && !signal.aborted && !looksLikeReport(lastAssistantText(handle.agent.state.messages))) {
+	const stoppedBy = [
+		stats.turns >= RESEARCH_CAPS.maxTurns && `${RESEARCH_CAPS.maxTurns}-turn cap`,
+		stats.inputTokens >= RESEARCH_CAPS.maxInputTokens && `${RESEARCH_CAPS.maxInputTokens / 1000}K input-token cap`,
+		signal.aborted && "time limit",
+	].filter((limit): limit is string => typeof limit === "string");
+	// The model can end a turn with narration and no tool call ("Let me extract a few pages..."), or a cap
+	// can cut it off mid-research (2026-09-30: the job stopped on "let me write the report directly" and
+	// returned nothing). Either way give it one last turn, with no tools, to write up what it has. It runs
+	// after a cap on purpose: a cap must never be the reason there is no report. Turns/tokens from this prompt
+	// accumulate onto the same budget as the first (see createBudgetedAgent).
+	let cutShort = false;
+	if (!signal.aborted && !looksLikeReport(lastAssistantText(handle.agent.state.messages))) {
+		cutShort = stats.stoppedByBudget;
+		handle.agent.state.tools = [];
 		stats = await handle.prompt(FINALIZE_PROMPT);
 	}
 
 	const text = lastAssistantText(handle.agent.state.messages);
-	const complete =
-		!stats.stoppedByBudget &&
-		!signal.aborted &&
-		!endedOnToolCall(handle.agent.state.messages) &&
-		looksLikeReport(text);
-	const report = complete
-		? text
-		: `INCOMPLETE: the job hit its budget or timeout before finishing.${text ? `\n\nLast notes:\n${text}` : ""}`;
-	return { report, complete, turnsUsed: stats.turns, inputTokens: stats.inputTokens };
+	const hasReport = !endedOnToolCall(handle.agent.state.messages) && looksLikeReport(text);
+	const complete = hasReport && !signal.aborted && !cutShort;
+	let report: string;
+	if (!hasReport) {
+		report = `INCOMPLETE: the job hit its budget or timeout before finishing.${text ? `\n\nLast notes:\n${text}` : ""}`;
+	} else if (cutShort) {
+		report = `Note: the job stopped early (${stoppedBy.join(", ")}), so this report covers only what it had gathered.\n\n${text}`;
+	} else {
+		report = text;
+	}
+	const result = {
+		report,
+		complete,
+		turnsUsed: stats.turns,
+		inputTokens: stats.inputTokens,
+		tavilyCalls: budget.used,
+		stoppedBy,
+	};
+	console.error(
+		`[research] ${complete ? "complete" : hasReport ? "partial" : "no report"}: ${result.turnsUsed} turns, ${Math.round(result.inputTokens / 1000)}K in, ${result.tavilyCalls} searches${stoppedBy.length > 0 ? `, hit ${stoppedBy.join(", ")}` : ""}`,
+	);
+	return result;
 }
 
 /** Per-session job accounting. One instance lives on the AgentSession so runtime rebuilds don't reset it. */
@@ -156,7 +187,10 @@ function saveReport(id: string, question: string, report: string): string {
 }
 
 export function createResearchToolDefinition(deps: ResearchToolDeps): ToolDefinition<typeof researchSchema> {
-	const reply = (text: string) => ({ content: [{ type: "text" as const, text }], details: undefined });
+	const reply = (text: string, details?: Omit<ResearchResult, "report">) => ({
+		content: [{ type: "text" as const, text }],
+		details,
+	});
 	return {
 		name: "research",
 		label: "research",
@@ -186,8 +220,11 @@ export function createResearchToolDefinition(deps: ResearchToolDeps): ToolDefini
 				const body = result.report.slice(0, DELIVERED_REPORT_CHARS);
 				const cut =
 					result.report.length > body.length ? `\n[truncated, full report: ${path}]` : `\n[saved: ${path}]`;
+				const { report: _report, ...stats } = result;
+				const limits = result.stoppedBy.length > 0 ? `, hit ${result.stoppedBy.join(", ")}` : "";
 				return reply(
-					`Research job ${id} finished (${result.turnsUsed} turns, ${Math.round(result.inputTokens / 1000)}K in). Question: ${question}\n\n${body}${cut}`,
+					`Research job ${id} finished (${result.turnsUsed} turns, ${Math.round(result.inputTokens / 1000)}K in, ${result.tavilyCalls} searches${limits}). Question: ${question}\n\n${body}${cut}`,
+					stats,
 				);
 			} finally {
 				jobs.running--;
