@@ -32,6 +32,8 @@ export function suiteOf(harness: string): string {
 		"plan-on",
 		"task-off",
 		"task-on",
+		"prompt-off",
+		"prompt-on",
 		"coding",
 	]) {
 		if (harness.startsWith(`${prefix}-`)) return prefix;
