@@ -23,6 +23,7 @@ import {
 	type TranscriptEvent,
 	toJsonValue,
 } from "vitest-evals/harness";
+import { measureToolUse } from "./run-metrics.ts";
 import { persistFailedEvalSession, THEOSES_SESSION_SNAPSHOT_ARTIFACT } from "./vitest-evals/artifacts.ts";
 
 export type TheosesCodingAgentInput = string | Array<{ type: "prompt"; content: string } | { type: "reload" }>;
@@ -170,6 +171,10 @@ async function runTheosesCodingAgent<TOutput extends JsonValue>(
 		).session;
 
 		const evalSession = session;
+		let autoRetries = 0;
+		evalSession.subscribe((event) => {
+			if (event.type === "auto_retry_start") autoRetries += 1;
+		});
 		if (options.transformSystemPrompt) {
 			transformedSystemPrompt = options.transformSystemPrompt(evalSession.systemPrompt);
 			if (!transformedSystemPrompt.trim()) throw new Error("Transformed eval system prompt must not be empty.");
@@ -204,6 +209,12 @@ async function runTheosesCodingAgent<TOutput extends JsonValue>(
 			if (response === undefined) throw new Error("Theoses eval input must include at least one prompt step.");
 			const output = "output" in options ? await options.output({ response, session: evalSession }) : response;
 			const stats = evalSession.getSessionStats();
+			// The session entries, not evalSession.messages: the sliding window and compaction shorten that list.
+			const toolUse = measureToolUse(
+				evalSession.sessionManager
+					.getEntries()
+					.flatMap((entry) => (entry.type === "message" ? [entry.message] : [])),
+			);
 			const hasPricing = [model.cost, ...(model.cost.tiers ?? [])].some(
 				({ input, output, cacheRead, cacheWrite }) => input > 0 || output > 0 || cacheRead > 0 || cacheWrite > 0,
 			);
@@ -223,6 +234,13 @@ async function runTheosesCodingAgent<TOutput extends JsonValue>(
 							cacheReadTokens: stats.tokens.cacheRead,
 							cacheWriteTokens: stats.tokens.cacheWrite,
 							...(hasPricing ? { estimatedCostUsd: stats.cost } : {}),
+							thinkingLevel: options.thinkingLevel ?? "off",
+							rounds: toolUse.rounds,
+							toolErrors: toolUse.toolErrors,
+							duplicateCalls: toolUse.duplicateCalls,
+							noNewEvidenceCalls: toolUse.noNewEvidenceCalls,
+							autoRetries,
+							terminationReason: toolUse.terminationReason,
 						},
 					},
 				},

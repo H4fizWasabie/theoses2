@@ -2,11 +2,15 @@ import { describeEval } from "vitest-evals";
 import { CodingJudge, TASK_TIMEOUT_MS } from "./coding-suite.ts";
 import { gradeReplay, hasCommit, seedReplayWorkspace } from "./replay-grader.ts";
 import { replayTasks } from "./replay-tasks.ts";
+import { selectedTasks } from "./selection.ts";
 import { createTheosesCodingAgentHarness } from "./theoses-harness.ts";
 
 // Real fixes from this repo's history, graded by the regression test each fix added (see replay-grader.ts). Skipped
 // where the fix commits are not available (a shallow clone), so a partial checkout cannot report a false failure.
-for (const task of replayTasks.filter((candidate) => hasCommit(candidate.fixCommit))) {
+for (const task of selectedTasks(
+	"coding-replay",
+	replayTasks.filter((candidate) => hasCommit(candidate.fixCommit)),
+)) {
 	const harness = createTheosesCodingAgentHarness({
 		name: `coding-replay-${task.id}`,
 		seed: (cwd) => seedReplayWorkspace(cwd, task),

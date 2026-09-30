@@ -1,7 +1,9 @@
 import type { ThinkingLevel } from "theoses-agent-core";
 import type { SettingsManager } from "theoses-coding-agent";
 import { createJudge, describeEval } from "vitest-evals";
+import type { Suite } from "./case-registry.ts";
 import { type CodingOutput, type CodingTask, gradeWorkspace } from "./coding-grader.ts";
+import { selectedTasks } from "./selection.ts";
 import { createTheosesCodingAgentHarness, type TheosesCodingAgentInput } from "./theoses-harness.ts";
 
 // Above the package-wide 120s so a slow agent run is scored on its result, not killed mid-fix.
@@ -51,8 +53,9 @@ export function codingHarness(
 export { CodingJudge, TASK_TIMEOUT_MS };
 
 /** One eval per task. `suite` prefixes harness names so run reports from different sets stay apart. */
-export function describeCodingTasks(suite: string, tasks: CodingTask[]): void {
-	for (const task of tasks) {
+export function describeCodingTasks(suite: Suite | "diagnose", tasks: CodingTask[]): void {
+	// A tiered run (run-evals.mjs --tier) selects a subset through its manifest; `diagnose` is outside the tiers.
+	for (const task of suite === "diagnose" ? tasks : selectedTasks(suite, tasks)) {
 		const harness = codingHarness(`${suite}-${task.id}`, task);
 
 		// Threshold 1: a wrong answer fails the test. With null a run that broke the tests still counted as passed,

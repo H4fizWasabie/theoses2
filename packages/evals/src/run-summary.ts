@@ -2,13 +2,38 @@
 // answer was correct: the judges' score is 1 when the record has one, otherwise the test status is used (the coding suites
 // use judgeThreshold 1, so their status is correctness). A timeout or crash has neither and counts as a failure.
 
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+
+/** What the harness records per run beyond tokens and cost (theoses-harness.ts, measureToolUse). Absent in older records. */
+export type RunMetadata = {
+	estimatedCostUsd?: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
+	thinkingLevel?: string;
+	rounds?: number;
+	toolErrors?: number;
+	duplicateCalls?: number;
+	noNewEvidenceCalls?: number;
+	autoRetries?: number;
+	terminationReason?: string;
+};
+
 export type RunRecord = {
 	harness: string;
 	test: { status: string };
 	/** Average judge score, 0..1. Absent in records written before the reporter recorded it. */
 	score?: number;
-	usage?: { totalTokens?: number; toolCalls?: number; metadata?: { estimatedCostUsd?: number } };
+	usage?: {
+		model?: string;
+		inputTokens?: number;
+		outputTokens?: number;
+		totalTokens?: number;
+		toolCalls?: number;
+		metadata?: RunMetadata;
+	};
 	timings?: { totalMs?: number };
+	errors?: unknown[];
 };
 
 export type TaskSummary = {
@@ -18,6 +43,7 @@ export type TaskSummary = {
 	medianTokens?: number;
 	medianSeconds?: number;
 	meanCostUsd?: number;
+	medianToolCalls?: number;
 };
 
 export type SuiteSummary = { suite: string; runs: number; passed: number; tasks: TaskSummary[] };
@@ -39,6 +65,7 @@ export function suiteOf(harness: string): string {
 		"snippet-off",
 		"snippet-on",
 		"diagnose",
+		"smoke",
 		"coding",
 	]) {
 		if (harness.startsWith(`${prefix}-`)) return prefix;
@@ -46,11 +73,11 @@ export function suiteOf(harness: string): string {
 	return harness;
 }
 
-function isCorrect(record: RunRecord): boolean {
+export function isCorrect(record: RunRecord): boolean {
 	return record.score !== undefined ? record.score >= 1 : record.test.status === "passed";
 }
 
-function median(values: number[]): number | undefined {
+export function median(values: number[]): number | undefined {
 	if (values.length === 0) return undefined;
 	const sorted = [...values].sort((a, b) => a - b);
 	return sorted[Math.floor(sorted.length / 2)];
@@ -61,6 +88,15 @@ export function parseRuns(jsonl: string): RunRecord[] {
 		.split("\n")
 		.filter((line) => line.trim())
 		.map((line) => JSON.parse(line) as RunRecord);
+}
+
+/** Every `runs.jsonl` under a directory, parsed. An eval run directory has one; CI keeps one per pass. */
+export function readRunRecords(directory: string): RunRecord[] {
+	return readdirSync(directory).flatMap((name) => {
+		const path = join(directory, name);
+		if (statSync(path).isDirectory()) return readRunRecords(path);
+		return name === "runs.jsonl" ? parseRuns(readFileSync(path, "utf8")) : [];
+	});
 }
 
 export function summarizeRuns(records: RunRecord[]): SuiteSummary[] {
@@ -85,6 +121,7 @@ export function summarizeRuns(records: RunRecord[]): SuiteSummary[] {
 					runs.flatMap((r) => (r.usage?.totalTokens === undefined ? [] : [r.usage.totalTokens])),
 				),
 				medianSeconds: median(seconds),
+				medianToolCalls: median(runs.flatMap((r) => (r.usage?.toolCalls === undefined ? [] : [r.usage.toolCalls]))),
 				meanCostUsd: costs.length > 0 ? costs.reduce((a, b) => a + b, 0) / costs.length : undefined,
 			};
 		});
@@ -104,10 +141,13 @@ export function formatSummary(suites: SuiteSummary[]): string {
 			`### ${s.suite}: ${s.passed}/${s.runs} correct (${Math.round((s.passed / Math.max(1, s.runs)) * 100)}%)`,
 			"",
 		);
-		lines.push("| task | correct | median tokens | median s | mean cost |", "|---|---|---|---|---|");
+		lines.push(
+			"| task | correct | median tokens | median s | mean cost | median calls |",
+			"|---|---|---|---|---|---|",
+		);
 		for (const t of s.tasks) {
 			lines.push(
-				`| ${t.task} | ${t.passed}/${t.runs} | ${t.medianTokens ?? "-"} | ${t.medianSeconds?.toFixed(0) ?? "-"} | ${t.meanCostUsd === undefined ? "-" : `$${t.meanCostUsd.toFixed(4)}`} |`,
+				`| ${t.task} | ${t.passed}/${t.runs} | ${t.medianTokens ?? "-"} | ${t.medianSeconds?.toFixed(0) ?? "-"} | ${t.meanCostUsd === undefined ? "-" : `$${t.meanCostUsd.toFixed(4)}`} | ${t.medianToolCalls ?? "-"} |`,
 			);
 		}
 		lines.push("");
