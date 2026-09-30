@@ -61,7 +61,8 @@ export const REGIONS = { ${TAX_REGIONS.join(", ")} };
 export const hardTasks: CodingTask[] = [
 	{
 		id: "sibling-sort-bug",
-		prompt: "The median test in stats.test.mjs fails. Find the bug and fix it. Do not edit the tests.",
+		prompt:
+			"The median test in stats.test.mjs fails. Find the bug and fix it, including anywhere else in the project where the same mistake occurs. Do not edit the tests.",
 		files: {
 			"stats.mjs": `export function median(nums) {
 	const sorted = [...nums].sort();
@@ -807,3 +808,14 @@ test("mixed", () => {
 		},
 	},
 ];
+
+// The same task worded as the first version was: the prompt names only the failing median test, and the hidden tests
+// still require the two sibling files to be fixed. No model tried (GLM 5.3 flash, gpt-6-luna, claude-sonnet-5.5) passes
+// it, so it stays as a tracked signal of stopping at the reported symptom, not as a pass/fail bar for the agent.
+const siblingSortBug = hardTasks.find((task) => task.id === "sibling-sort-bug");
+if (!siblingSortBug) throw new Error("sibling-sort-bug task is missing");
+hardTasks.push({
+	...siblingSortBug,
+	id: "sibling-sort-bug-unstated",
+	prompt: "The median test in stats.test.mjs fails. Find the bug and fix it. Do not edit the tests.",
+});
