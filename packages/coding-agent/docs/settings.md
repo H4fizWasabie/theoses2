@@ -280,7 +280,7 @@ Windows paths in JSON must use forward slashes or escaped backslashes:
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `defaultTools` | string[] | - | Built-in tools enabled initially. When omitted, Theoses uses its standard defaults |
-| `editSnippet` | boolean | `false` | After a successful edit, add the lines around the change (numbered, 2 lines of context, at most 24 lines) to the result, so the model does not read the file back to check |
+| `editSnippet` | boolean | `false` | After a successful edit, add the lines around the change (numbered, 2 lines of context, at most 24 lines) to the result, so the model does not read the file back to check. Off because it did not help in the eval (more tool calls and tokens, no gain in correctness) |
 | `editSiblingHint` | boolean | `true` | After a successful edit, tell the model which other files contain the text it just replaced (up to 5, `path:line`), so a fix that has siblings is not left half done. Skips tests, `node_modules`, build output and files outside the working directory |
 | `taskTool.enabled` | boolean | `false` | Offer the `task` tool: the model can hand a self-contained piece of work to a sub-agent with its own context, and only a short summary returns |
 
