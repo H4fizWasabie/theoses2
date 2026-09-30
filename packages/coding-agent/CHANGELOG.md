@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.108] - 2026-09-30
 
 - fix: an `edit` that would leave the file unchanged now says so plainly: "the file already contains the text you asked for, so this edit is done or not needed. Do not repeat it". It used to say the replacement "might indicate an issue with special characters or the text not existing as expected", which is wrong when the edit already landed, and in a live Telegram session gpt-6-luna repeated the same no-op edit five times in a row before switching to a shell script.
