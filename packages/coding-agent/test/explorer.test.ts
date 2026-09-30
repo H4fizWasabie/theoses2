@@ -71,15 +71,16 @@ function toolCallMessage(id: string, tool: string): AssistantMessage {
 	});
 }
 
-type ScriptStep = (turn: number) => AssistantMessage;
+/** `toolCount` is how many tools the request carried; the harness takes them all away for the final write-up turn. */
+type ScriptStep = (turn: number, toolCount: number) => AssistantMessage;
 
 function createFakeModelRuntime(script: ScriptStep): { runtime: ModelRuntime; turns: () => number } {
 	let turn = 0;
 	const runtime = {
 		getModel: () => getModel("anthropic", "claude-sonnet-4-5")!,
-		streamSimple: () => {
+		streamSimple: (_model: unknown, context: { tools?: unknown[] }) => {
 			turn++;
-			const message = script(turn);
+			const message = script(turn, context.tools?.length ?? 0);
 			const stream = new MockAssistantStream();
 			queueMicrotask(() => {
 				stream.push({ type: "start", partial: message });
@@ -149,10 +150,52 @@ describe("explorer (issue #254)", () => {
 
 		expect(result.complete).toBe(true);
 		expect(result.answer).toContain("The answer is in foo/bar.ts:12.");
-		expect(result.answer).toMatch(/~\d+K in, \d+\/8 turns$/);
+		expect(result.answer).toMatch(/~\d+K in, \d+\/12 turns$/);
 	});
 
-	it("stops at the turn cap and returns the INCOMPLETE contract instead of a guess", async () => {
+	it("writes up what it has read, with no tools, when the turn cap cuts it off", async () => {
+		const toolCounts: number[] = [];
+		const { runtime, turns } = createFakeModelRuntime((turn, toolCount) => {
+			toolCounts.push(toolCount);
+			return toolCount > 0
+				? toolCallMessage(`call_${turn}`, "ls")
+				: createAssistantMessage(
+						"Retry logic is in packages/ai/src/api/retry.ts:42. Could not verify the config knob.",
+					);
+		});
+
+		const result = await runExplorer({
+			question: "map everything",
+			tier: "quick-scan",
+			cwd: tempDir,
+			modelRuntime: runtime,
+		});
+
+		expect(turns()).toBe(13); // 12 turns of exploring, then one write-up turn outside the cap
+		expect(toolCounts.slice(0, -1).every((count) => count > 0)).toBe(true);
+		expect(toolCounts.at(-1)).toBe(0);
+		expect(result.complete).toBe(false);
+		expect(result.stoppedBy).toBe("12-turn cap");
+		expect(result.maxTurns).toBe(12);
+		expect(result.answer).toContain("retry.ts:42");
+		expect(result.answer).toMatch(/~\d+K in, 12\/12 turns$/); // the footer never shows more turns than the cap
+	});
+
+	it("labels a job cut short PARTIAL in the tool result, keeping its findings", async () => {
+		const { runtime } = createFakeModelRuntime((turn, toolCount) =>
+			toolCount > 0 ? toolCallMessage(`call_${turn}`, "ls") : createAssistantMessage("Found it at retry.ts:42."),
+		);
+		const tool = createExploreToolDefinition({ modelRuntime: runtime, cwd: tempDir });
+
+		const result = await tool.execute("id", { question: "q" }, undefined, undefined, undefined as never);
+
+		const text = JSON.stringify(result.content);
+		expect(text).toContain("PARTIAL (explorer stopped at its 12-turn cap");
+		expect(text).toContain("retry.ts:42");
+		expect(text).not.toContain("INCOMPLETE");
+	});
+
+	it("still returns INCOMPLETE when the model writes no answer even on the final turn", async () => {
 		let turn = 0;
 		const { runtime, turns } = createFakeModelRuntime(() => {
 			turn++;
@@ -166,11 +209,22 @@ describe("explorer (issue #254)", () => {
 			modelRuntime: runtime,
 		});
 
-		expect(turns()).toBe(8); // quick-scan turn ceiling reached, loop stopped
+		expect(turns()).toBe(13);
 		expect(result.complete).toBe(false);
-		expect(result.maxTurns).toBe(8);
 		expect(result.answer).toContain("INCOMPLETE:");
-		expect(result.answer).toMatch(/\d+\/8 turns$/);
+		expect(result.answer).toMatch(/\d+\/12 turns$/);
+	});
+
+	it("counts an answer written on the very last allowed turn as complete", async () => {
+		const { runtime, turns } = createFakeModelRuntime((turn) =>
+			turn < 12 ? toolCallMessage(`call_${turn}`, "ls") : createAssistantMessage("Answer at foo.ts:1."),
+		);
+
+		const result = await runExplorer({ question: "q", tier: "quick-scan", cwd: tempDir, modelRuntime: runtime });
+
+		expect(turns()).toBe(12);
+		expect(result.complete).toBe(true);
+		expect(result.answer).toContain("foo.ts:1");
 	});
 
 	it("caps concurrent explorers at 3", async () => {
@@ -247,10 +301,10 @@ describe("explorer (issue #254)", () => {
 			const captured: CapturedOptions[] = [];
 			const runtime = {
 				getModel: () => getModel("anthropic", "claude-sonnet-4-5")!,
-				streamSimple: (_model: unknown, _context: unknown, options: CapturedOptions) => {
+				streamSimple: (_model: unknown, context: { tools?: unknown[] }, options: CapturedOptions) => {
 					turn++;
 					captured.push(options);
-					const message = script(turn);
+					const message = script(turn, context.tools?.length ?? 0);
 					const stream = new MockAssistantStream();
 					queueMicrotask(() => {
 						stream.push({ type: "start", partial: message });
