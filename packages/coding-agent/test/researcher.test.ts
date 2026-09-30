@@ -55,6 +55,39 @@ function fakeRuntime(...texts: string[]): ModelRuntime {
 	} as unknown as ModelRuntime;
 }
 
+/**
+ * A model that never stops researching while it has tools (it calls a tool that does not exist, so nothing
+ * touches the network) and writes its report once the harness takes the tools away. `toolCounts` records how
+ * many tools each request carried.
+ */
+function endlessResearcher(): { runtime: ModelRuntime; toolCounts: number[] } {
+	const toolCounts: number[] = [];
+	const runtime = {
+		getModel: () => getModel("anthropic", "claude-sonnet-4-5")!,
+		streamSimple: (_model: unknown, context: { tools?: unknown[] }) => {
+			const toolCount = context.tools?.length ?? 0;
+			toolCounts.push(toolCount);
+			const message =
+				toolCount > 0
+					? {
+							...assistant(""),
+							content: [
+								{ type: "toolCall" as const, id: `c${toolCounts.length}`, name: "missing_tool", arguments: {} },
+							],
+							stopReason: "toolUse" as const,
+						}
+					: assistant("Summary\nWrote it up from what it had");
+			const stream = new MockStream();
+			queueMicrotask(() => {
+				stream.push({ type: "start", partial: message });
+				stream.push({ type: "done", reason: message.stopReason, message });
+			});
+			return stream;
+		},
+	} as unknown as ModelRuntime;
+	return { runtime, toolCounts };
+}
+
 describe("researcher", () => {
 	let dir: string;
 	const savedAgentDir = process.env.THEOSES_CODING_AGENT_DIR;
@@ -99,6 +132,38 @@ describe("researcher", () => {
 		});
 		expect(result.complete).toBe(false);
 		expect(result.report).toContain("INCOMPLETE");
+	});
+
+	it("writes up what it has, with no tools, when the turn cap cuts the job off", async () => {
+		const { runtime, toolCounts } = endlessResearcher();
+
+		const result = await runResearch({ question: "q", modelRuntime: runtime });
+
+		expect(result.report).toContain("Wrote it up from what it had");
+		expect(result.report).toContain(`stopped early (${RESEARCH_CAPS.maxTurns}-turn cap)`);
+		expect(result.complete).toBe(false);
+		expect(result.stoppedBy).toEqual([`${RESEARCH_CAPS.maxTurns}-turn cap`]);
+		expect(result.turnsUsed).toBe(RESEARCH_CAPS.maxTurns + 1);
+		expect(toolCounts.slice(0, -1).every((count) => count > 0)).toBe(true);
+		expect(toolCounts.at(-1)).toBe(0);
+	});
+
+	it("reports turns, searches and the cap that tripped in the tool result", async () => {
+		const jobs = new ResearchJobs();
+		const tool = createResearchToolDefinition({ modelRuntime: endlessResearcher().runtime, jobs });
+
+		const result = await tool.execute("id", { question: "q" }, undefined, undefined, undefined as never);
+
+		// The mock bills 1000 input tokens per turn, the final write-up turn included.
+		const turns = RESEARCH_CAPS.maxTurns + 1;
+		expect(JSON.stringify(result.content)).toContain(
+			`(${turns} turns, ${turns}K in, 0 searches, hit ${RESEARCH_CAPS.maxTurns}-turn cap)`,
+		);
+		expect(result.details).toMatchObject({
+			complete: false,
+			tavilyCalls: 0,
+			stoppedBy: [`${RESEARCH_CAPS.maxTurns}-turn cap`],
+		});
 	});
 
 	it("blocks until the job finishes and returns the report, also saved to a file", async () => {
