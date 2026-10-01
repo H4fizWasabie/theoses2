@@ -2,7 +2,7 @@ import type { Context } from "theoses-ai";
 import { type AssistantMessage, EventStream } from "theoses-ai/compat";
 import { describe, expect, it } from "vitest";
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
-import { MAX_TURNS, reviewOnce, reviewPlan } from "../src/core/plan-reviewer.ts";
+import { formatFindings, MAX_TURNS, reviewOnce, reviewPlan } from "../src/core/plan-reviewer.ts";
 import { applyPlanAction, type TaskPlan } from "../src/core/task-plan.ts";
 
 // Same scripted-model idiom as background-agent.test.ts / explorer.test.ts.
@@ -56,9 +56,11 @@ function fakeRuntime(script: (call: number) => AssistantMessage): {
 	runtime: ModelRuntime;
 	callCount: () => number;
 	toolsSeen: () => (readonly string[])[];
+	systemPrompts: () => string[];
 } {
 	let call = 0;
 	const toolsSeen: (readonly string[])[] = [];
+	const systemPrompts: string[] = [];
 	const runtime = {
 		getModel: (_provider: string, id: string) => ({
 			id,
@@ -70,6 +72,7 @@ function fakeRuntime(script: (call: number) => AssistantMessage): {
 		streamSimple: (_model: unknown, context: Context) => {
 			call++;
 			toolsSeen.push((context.tools ?? []).map((t) => t.name));
+			systemPrompts.push(context.systemPrompt ?? "");
 			const message = script(call);
 			const stream = new MockAssistantStream();
 			queueMicrotask(() => {
@@ -79,7 +82,7 @@ function fakeRuntime(script: (call: number) => AssistantMessage): {
 			return stream;
 		},
 	} as unknown as ModelRuntime;
-	return { runtime, callCount: () => call, toolsSeen: () => toolsSeen };
+	return { runtime, callCount: () => call, toolsSeen: () => toolsSeen, systemPrompts: () => systemPrompts };
 }
 
 function plan(): TaskPlan {
@@ -91,6 +94,43 @@ function plan(): TaskPlan {
 	if (!result.plan) throw new Error(result.error);
 	return result.plan;
 }
+
+// Issue #481: a finding that is one member of a hard-coded list left the list itself unfixed (PR #480:
+// `node --help` was fixed while the runner allowlist still rejected `make test`, `mvn test`, `rspec`).
+describe("pattern-level findings (issue #481)", () => {
+	it("asks the reviewer to name the pattern, search for missing members and fix the pattern", async () => {
+		const { runtime, systemPrompts } = fakeRuntime(() => assistant(VERDICT_OK));
+		await reviewOnce({
+			plan: plan(),
+			diff: "diff",
+			verifyOutput: "ok",
+			locations: [],
+			cwd: process.cwd(),
+			modelRuntime: runtime,
+		});
+		const prompt = systemPrompts()[0];
+		expect(prompt).toContain("one instance of a pattern");
+		expect(prompt).toContain("hard-coded list or allowlist");
+		expect(prompt).toContain("name the pattern");
+		expect(prompt).toContain("fix the pattern itself");
+	});
+
+	it("tells the worker to fix the pattern and test beyond the reported example", () => {
+		const text = formatFindings({
+			model: "m",
+			verdict: "gaps",
+			mustFix: [{ severity: "must-fix", file: "a.ts", issue: "runner allowlist omits make", evidence: "a.ts:1" }],
+			nits: 0,
+			inputTokens: 0,
+			outputTokens: 0,
+			cost: 0,
+		});
+		expect(text).toContain("1. runner allowlist omits make (a.ts)");
+		expect(text).toContain("fix the pattern, not only the reported case");
+		expect(text).toContain("outside the reported example's language, tool or format");
+		expect(text).toContain("There is no second review.");
+	});
+});
 
 describe("reviewOnce - forced no-tools verdict on budget stop (issue: 2026-09-28 evidence)", () => {
 	it("returns the forced turn's verdict instead of throwing, and the forced call has no tools", async () => {

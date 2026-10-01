@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: Plan Review reports a finding that is one instance of a pattern (a hard-coded list or allowlist, an enumerated special case) as that pattern, searching for the members it misses, and the push-back to the worker asks it to fix the pattern and test with inputs from outside the reported example's language, tool or format. Plan Review still runs once per run and its cost is unchanged. On PR #480 a review caught `node --help` while the runner allowlist that rejected `make test`, `mvn test` and `rspec` went unseen until probed by hand (#481).
+
 - fix: explicit `save_note` persists only its supplied fact and no longer marks the whole turn promoted. Compaction and Turn Settlement can therefore capture the turn's other facts, deduplicating the already-saved note. Removes `recordSaved` and its notification wiring; only successful consolidation or legacy-checkpoint migration records completed ranges. Existing ranges and previously skipped history are not rewritten (#477, #478).
 
 ## [1.0.113] - 2026-10-01

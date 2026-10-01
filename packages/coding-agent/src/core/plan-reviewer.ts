@@ -72,6 +72,7 @@ Look for:
 2. Other places that rely on the same assumption as the changed code and were left unchanged (callers, sibling scripts, config, later pipeline stages). Search for them; the diff alone cannot show what is missing from it.
 3. Verification that did not exercise the changed code (a dry run that exits before it, a syntax check presented as a test).
 4. A fix that patches where the failure showed up instead of why it happened, or a plan of kind "change" that is really a fix.
+5. A finding that is one instance of a pattern: a hard-coded list or allowlist, an enumerated special case, a check keyed on the names the author happened to think of. When you find one instance, name the pattern in the issue, search the code and the situations it must serve (other languages, tools, platforms, input formats) for the members it misses, and say how to fix the pattern itself, so the worker does not patch members one at a time.
 
 Each finding needs concrete evidence: a file and line, or the command output that shows it. "must-fix" means the request is not met or something will break; everything else is "nit". If nothing is missing, say so.
 
@@ -225,7 +226,7 @@ export function formatFindings(outcome: ReviewOutcome): string {
 		const evidence = f.evidence ? `\n   evidence: ${f.evidence}` : "";
 		return `${i + 1}. ${f.issue}${where}${evidence}`;
 	});
-	return `An independent reviewer (${outcome.model}) checked your finished change and found gaps:\n${lines.join("\n")}\nFor each one: fix it (task_plan add an item, make the change, verify, close it), or, if you are sure it is wrong, say why in your final reply. There is no second review.`;
+	return `An independent reviewer (${outcome.model}) checked your finished change and found gaps:\n${lines.join("\n")}\nFor each one: fix it (task_plan add an item, make the change, verify, close it), or, if you are sure it is wrong, say why in your final reply. A finding is often one instance of a wider pattern (a hard-coded list, an enumerated special case): fix the pattern, not only the reported case, and test it with inputs from outside the reported example's language, tool or format. There is no second review.`;
 }
 
 const REVIEW_LOG = join(getAgentDir(), "review-log.jsonl");
