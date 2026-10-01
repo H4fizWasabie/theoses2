@@ -145,7 +145,7 @@ function declaredCommandProblem(command: string | undefined, cwd: string): strin
 	if (!command?.trim()) return "declare `verify_command`: the exact runtime command for this item.";
 	const run: ToolRun = { id: "", name: "bash", command, path: undefined, output: "", isError: false };
 	if (!isCheckCommand(run, cwd))
-		return "`verify_command` must execute runtime behavior, not just syntax/lint, observation or source/unknown writes.";
+		return "`verify_command` must execute runtime behavior (run the tests or the changed code), not just syntax/lint/build, help/list, observation or source/unknown writes. If no existing command qualifies, put the check in a script and declare that (for example `bash scripts/verify.sh`).";
 	return undefined;
 }
 
@@ -160,8 +160,7 @@ function verificationResult(
 	const { lastCheck } = checkAfterLastChange(toolRuns(runMessages), command, cwd, after);
 	if (!lastCheck)
 		return {
-			problem:
-				"no check command matching `verify_command` has run since the last file change. Run the declared runtime command, then close this item.",
+			problem: `no check command matching \`verify_command\` has run since the last file change. Run exactly \`${command}\`, then close this item.`,
 		};
 	if (lastCheck.isError)
 		return {

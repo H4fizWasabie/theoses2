@@ -144,7 +144,142 @@ describe("runtime verification classification", () => {
 	});
 });
 
+// The harness cannot list every ecosystem's runner, so unknown commands are assumed to execute and only
+// recognized non-executing forms are refused. These cases span ecosystems the classifier never names.
+describe("ecosystem-agnostic classification", () => {
+	it.each([
+		"make test",
+		"make check",
+		"just test",
+		"task test",
+		"mvn test",
+		"./mvnw verify",
+		"gradle build",
+		"./gradlew build",
+		"rspec spec/feature_spec.rb",
+		"bundle exec rspec",
+		"mix test",
+		"php artisan test",
+		"php vendor/bin/phpunit",
+		"tox",
+		"./run-tests",
+		"bash ./scripts/test",
+		"dotnet test",
+		"uv run pytest -q",
+		"poetry run pytest",
+		"timeout 60 npm test",
+		"CI=1 ./scripts/test",
+		"python3 app.py --help",
+		"python3 -m unittest",
+		"ruby -rcsv script.rb",
+		"mvn install",
+		"./gradlew check",
+		'mysql -h db.internal -e "select 1"',
+		"curl -fsS http://localhost:8080/health",
+	])("credits an unfamiliar runner: %s", (command) => {
+		expect(isCheckCommand(run(command))).toBe(true);
+	});
+	it.each([
+		"npm run check",
+		"npm run lint:fix",
+		"pnpm -r typecheck",
+		"yarn lint",
+		"make build",
+		"make lint",
+		"just fmt",
+		"cargo build --release",
+		"cargo clippy",
+		"cargo fmt --check",
+		"cargo test --no-run",
+		"go build ./...",
+		"dotnet build",
+		"docker build .",
+		"pip install -e .",
+		"mypy src",
+		"uv run mypy .",
+		"bundle exec rubocop",
+		"shellcheck run.sh",
+		"npx prettier --check .",
+		"php -l app.php",
+		"python3 -V",
+		"python3 -m pip install x",
+		"timeout 60 tsc --noEmit",
+		"dotnet test --list-tests",
+		"go test -list .",
+		"mvn -q compile",
+		"sbt compile",
+		"gradle assemble",
+		"ruby -wc app.rb",
+	])("does not credit a build, lint or listing form: %s", (command) => {
+		expect(isCheckCommand(run(command))).toBe(false);
+	});
+	it("treats -h as a host flag unless it is the only argument", () => {
+		expect(isCheckCommand(run("psql -h localhost -c 'select 1'"))).toBe(true);
+		expect(isCheckCommand(run("psql -h"))).toBe(false);
+	});
+	it("tells the model how to proceed when nothing qualifies", () => {
+		expect(() => create("npm run lint")).toThrow(/script/);
+	});
+});
+
+describe("source rewrites are recognized by verb and flag, not only by tool name", () => {
+	it.each([
+		"cargo fmt",
+		"go fmt ./...",
+		"dotnet format",
+		"npm run format",
+		"make fmt",
+		"ruff format src",
+		"isort src",
+		"rustfmt src/main.rs",
+		"uv run black .",
+		"npx prettier --write .",
+		"sudo rm app.js",
+		"time sed -i s/a/b/ app.js",
+		"timeout 30 touch app.js",
+	])("treats %s as a source change", (command) => {
+		expect(commandEffect(command, "/srv/project").changesFiles).toBe(true);
+	});
+	it.each([
+		"cargo fmt --check",
+		"black --check .",
+		"gofmt -l .",
+		"ruff format --diff",
+		"npm test",
+		"grep -w foo a.txt",
+	])("does not treat %s as a source change", (command) => {
+		expect(commandEffect(command, "/srv/project").changesFiles).toBe(false);
+	});
+});
+
+describe("scratch locations", () => {
+	it.each(["npm test 2>/dev/stderr", "npm test > /dev/stdout", "npm test > /dev/null", "npm test 2>/dev/fd/2"])(
+		"treats %s as an output sink",
+		(command) => {
+			expect(commandEffect(command, "/srv/project").changesFiles).toBe(false);
+		},
+	);
+	it("honours the platform temp directory, not only /tmp", () => {
+		const artifact = join(tmpdir(), "verification-artifact.txt");
+		expect(commandEffect(`npm test > ${artifact}`, "/srv/project").changesFiles).toBe(false);
+		expect(commandEffect(`npm test > ${artifact}`, tmpdir()).changesFiles).toBe(true);
+		expect(commandEffect("npm test > /dev/sda", "/srv/project").changesFiles).toBe(true);
+	});
+});
+
 describe("declared per-item evidence", () => {
+	it("binds on the command, not on its spacing", () => {
+		const declared = "node tests/feature.mjs   --mode  fast";
+		expect(
+			close(create(declared), tool("bash", { command: "node tests/feature.mjs --mode fast" })).error,
+		).toBeUndefined();
+		expect(
+			close(create(declared), tool("bash", { command: "node tests/feature.mjs --mode slow" })).error,
+		).toBeDefined();
+	});
+	it("names the exact command to run when none matched", () => {
+		expect(close(create(), tool("bash", { command: "node tests/unrelated.mjs" })).error).toContain(`\`${CHECK}\``);
+	});
 	it("requires an explicit command, separate from the criterion", () => {
 		expect(
 			applyPlanAction(
