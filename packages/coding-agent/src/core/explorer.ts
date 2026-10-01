@@ -4,7 +4,7 @@
  * Codebase scouting (grep/read dumps) lands on the main agent's context and stays there for
  * turns — driving up cost and context pollution, since explore output is used briefly but paid
  * for on every subsequent turn. This module spawns a cheap, isolated agent (a flash-tier model
- * via OpenRouter) with a strictly read-only toolset (read/grep/find/ls) whose entire job is to
+ * via OpenRouter) with a strictly read-only toolset (read/grep/find/ls plus Graft queries) whose entire job is to
  * answer ONE scouting question and return a *distilled* answer capped by the tier's line/token
  * budget — never raw tool dumps.
  *
@@ -27,6 +27,7 @@ import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { ProviderHooks } from "./provider-hooks.ts";
 import { createFindToolDefinition } from "./tools/find.ts";
+import { createGraftToolDefinition } from "./tools/graft.ts";
 import { createGrepToolDefinition } from "./tools/grep.ts";
 import { createLsToolDefinition } from "./tools/ls.ts";
 import { createReadToolDefinition } from "./tools/read.ts";
@@ -110,7 +111,7 @@ function buildExplorerSystemPrompt(tier: ExplorerTier): string {
 	const caps = TIER_CAPS[tier];
 	const structural =
 		tier === "deep-map"
-			? "\n4. Start with a 5–15 line structural overview: components, entry points, data flow. Then the findings.\n"
+			? "\nStart with a 5–15 line structural overview: components, entry points, data flow. Then the findings.\n"
 			: "";
 	return `You are Theoses's background explorer: a cheap, isolated scouting agent. You answer ONE question about a codebase by reading it yourself, then return a DISTILLED answer. You never return raw tool dumps.
 
@@ -120,9 +121,10 @@ Rules:
 1. Pointers, not pastes: reference \`file:line\` locations instead of quoting code. You may read 200-line files internally; the answer carries findings + paths only.
 2. Answer format: 1–3 sentence direct answer first, then at most 5 short secondary bullets (caveats, related spots).${structural}
 3. End with one budget footer line: \`~<K> in, <turns>/${caps.maxTurns} turns\` (input tokens spent so far, turns used).
-5. You have at most ${caps.maxTurns} turns and ~${caps.maxInputTokens / 1000}K input tokens. Stop early rather than pad. If the budget runs out before you have answered, you get one final turn with no tools: write the answer from what you have read, and say which part of the question you could not verify.
-5. Read-only: read, grep, find, ls only. You cannot edit files or run commands.
-6. Answer from evidence you gathered. If you could not find the answer, say so explicitly instead of guessing specifics.`;
+4. You have at most ${caps.maxTurns} turns and ~${caps.maxInputTokens / 1000}K input tokens. Stop early rather than pad. If the budget runs out before you have answered, you get one final turn with no tools: write the answer from what you have read, and say which part of the question you could not verify.
+5. Read-only: read, grep, find, ls and the structured graft query tool only. You cannot edit files, run arbitrary shell commands, install Graft or build/refresh graphs.
+6. Navigate code with graft first: ask for identifiers/source, skeleton for a repo-relative file, callers for references. Pass path when the target repository is outside cwd. Queries use existing graphs with refresh disabled; verify important locations with read. If Graft or its graph is unavailable, use read/grep/find/ls and say that Graft was unavailable, not that the code is absent. Ask the parent to prepare the graph rather than trying to build it yourself.
+7. Answer from evidence you gathered. If you could not find the answer, say so explicitly instead of guessing specifics.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,17 +186,18 @@ async function runExplorerWithSlot(
 	caps: (typeof TIER_CAPS)[ExplorerTier],
 	model: Model<Api>,
 ): Promise<ExplorerResult> {
-	const readOnlyToolDefinitions = [
-		createReadToolDefinition(options.cwd),
-		createGrepToolDefinition(options.cwd),
-		createFindToolDefinition(options.cwd),
-		createLsToolDefinition(options.cwd),
+	const readOnlyTools = [
+		wrapToolDefinition(createReadToolDefinition(options.cwd)),
+		wrapToolDefinition(createGrepToolDefinition(options.cwd)),
+		wrapToolDefinition(createFindToolDefinition(options.cwd)),
+		wrapToolDefinition(createLsToolDefinition(options.cwd)),
+		wrapToolDefinition(createGraftToolDefinition(options.cwd)),
 	];
 
 	const handle = createBudgetedAgent({
 		systemPrompt: buildExplorerSystemPrompt(tier),
 		model,
-		tools: readOnlyToolDefinitions.map((definition) => wrapToolDefinition(definition)),
+		tools: readOnlyTools,
 		modelRuntime: options.modelRuntime,
 		maxTurns: caps.maxTurns,
 		maxInputTokens: caps.maxInputTokens,
