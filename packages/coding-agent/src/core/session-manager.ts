@@ -1950,7 +1950,7 @@ export class SessionManager {
 		options?: NewSessionOptions,
 		agentDir: string = getDefaultAgentDir(),
 	): SessionManager {
-		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
+		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd, agentDir);
 		return new SessionManager(cwd, dir, undefined, true, options, undefined, getDefaultSessionDirPath(cwd, agentDir));
 	}
 
