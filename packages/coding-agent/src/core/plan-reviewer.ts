@@ -229,12 +229,16 @@ export function formatFindings(outcome: ReviewOutcome): string {
 	return `An independent reviewer (${outcome.model}) checked your finished change and found gaps:\n${lines.join("\n")}\nFor each one: fix it (task_plan add an item, make the change, verify, close it), or, if you are sure it is wrong, say why in your final reply. A finding is often one instance of a wider pattern (a hard-coded list, an enumerated special case): fix the pattern, not only the reported case, and test it with inputs from outside the reported example's language, tool or format. There is no second review.`;
 }
 
-const REVIEW_LOG = join(getAgentDir(), "review-log.jsonl");
+/** Resolved at call time, not import time, so the log follows the active agent dir (and any
+ * test that stubs it) rather than whichever directory happened to be current at module load. */
+function reviewLogPath(): string {
+	return join(getAgentDir(), "review-log.jsonl");
+}
 
 /** One line per review and per outcome, for the two-week hit-rate check. Never throws. */
 export function logReview(entry: Record<string, unknown>): void {
 	try {
-		appendFileSync(REVIEW_LOG, `${JSON.stringify({ timestamp: new Date().toISOString(), ...entry })}\n`);
+		appendFileSync(reviewLogPath(), `${JSON.stringify({ timestamp: new Date().toISOString(), ...entry })}\n`);
 	} catch {
 		// Best-effort logging only.
 	}

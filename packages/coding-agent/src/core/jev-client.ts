@@ -44,13 +44,17 @@ interface JevResponse {
 	usage?: { cost?: number };
 }
 
-const JEV_USAGE_LOG = join(getAgentDir(), "jev-usage.jsonl");
+/** Resolved at call time, not import time, so the log follows the active agent dir (and any
+ * test that stubs it) rather than whichever directory happened to be current at module load. */
+function jevUsageLogPath(): string {
+	return join(getAgentDir(), "jev-usage.jsonl");
+}
 
 /** Appends one line per Jev call so a report can total spend across all call sites without a
  * session to attach it to. Never throws: a logging failure must not affect the caller's answer. */
 function logJevCost(cost: number, label: string | undefined): void {
 	try {
-		appendFileSync(JEV_USAGE_LOG, `${JSON.stringify({ timestamp: Date.now(), cost, label: label ?? null })}\n`);
+		appendFileSync(jevUsageLogPath(), `${JSON.stringify({ timestamp: Date.now(), cost, label: label ?? null })}\n`);
 	} catch {
 		// Best-effort logging only.
 	}
