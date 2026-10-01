@@ -40,10 +40,72 @@ const TAVILY_ENDPOINT = "https://api.tavily.com/search";
 
 const TAVILY_EXTRACT_ENDPOINT = "https://api.tavily.com/extract";
 
-/** Tries each key in order, falling back to the next on failure (rate limit, exhausted credits, outage). */
+/**
+ * Statuses that mean the request itself is wrong, so it fails identically on every key. Everything
+ * else — auth, plan/credit exhaustion, rate limit, outage, and any status Tavily adds later — is
+ * worth trying on the next key, so the retryable set stays the complement of this list rather than a
+ * hard-coded copy of the provider's key-level codes.
+ */
+function isRequestError(status: number): boolean {
+	return status === 400 || status === 422;
+}
+
+/** Error carrying whether another key is worth trying, so the rotation loop can decide. */
+class TavilyError extends Error {
+	readonly status: number;
+	readonly retryable: boolean;
+
+	constructor(message: string, status: number, retryable: boolean) {
+		super(message);
+		this.name = "TavilyError";
+		this.status = status;
+		this.retryable = retryable;
+	}
+}
+
+/**
+ * Pulls Tavily's human-readable reason out of an error response body, whether it is JSON
+ * (`{"detail":{"error":"..."}}`, `{"detail":"..."}`, `{"error":"..."}`, `{"message":"..."}`)
+ * or plain text. The API key is redacted and the result is collapsed to one line and capped.
+ */
+function extractErrorReason(bodyText: string, apiKeys: string[]): string {
+	const trimmed = bodyText.trim();
+	if (!trimmed) return "";
+
+	let reason = trimmed;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(trimmed);
+	} catch {
+		parsed = undefined; // plain-text body; keep it as-is
+	}
+	if (parsed && typeof parsed === "object") {
+		const detail = (parsed as { detail?: unknown }).detail;
+		if (typeof detail === "string") reason = detail;
+		else if (detail && typeof detail === "object" && typeof (detail as { error?: unknown }).error === "string")
+			reason = (detail as { error: string }).error;
+		else if (typeof (parsed as { error?: unknown }).error === "string") reason = (parsed as { error: string }).error;
+		else if (typeof (parsed as { message?: unknown }).message === "string")
+			reason = (parsed as { message: string }).message;
+	}
+
+	reason = reason.replace(/\s+/g, " ").trim();
+	for (const key of apiKeys) {
+		if (key) reason = reason.split(key).join("[redacted]");
+	}
+	return reason.length > 400 ? `${reason.slice(0, 400)}…` : reason;
+}
+
+/**
+ * Tries each key in order, falling back to the next unless the failure is a request error that would
+ * fail the same way on every key (400/422), plus network errors and every key-level status Tavily
+ * returns (auth, plan exhaustion, rate limit, outage). A request error surfaces immediately with
+ * Tavily's reason. Rotation stops once the abort signal fires.
+ */
 async function tavilyPost<T>(apiKeys: string[], endpoint: string, body: object, signal?: AbortSignal): Promise<T> {
 	let lastError: unknown;
 	for (const apiKey of apiKeys) {
+		if (signal?.aborted) break;
 		try {
 			const response = await fetch(endpoint, {
 				method: "POST",
@@ -52,14 +114,25 @@ async function tavilyPost<T>(apiKeys: string[], endpoint: string, body: object, 
 				signal,
 			});
 			if (!response.ok) {
-				throw new Error(`Tavily request failed: ${response.status} ${response.statusText}`);
+				const bodyText = await response.text().catch(() => "");
+				const reason = extractErrorReason(bodyText, apiKeys);
+				const detail = reason ? `: ${reason}` : "";
+				throw new TavilyError(
+					`Tavily request failed: ${response.status} ${response.statusText}${detail}`,
+					response.status,
+					!isRequestError(response.status),
+				);
 			}
 			return (await response.json()) as T;
 		} catch (error) {
 			lastError = error;
+			// A client error is the same for every key: stop and report its reason.
+			if (error instanceof TavilyError && !error.retryable) throw error;
+			if (signal?.aborted) break;
 		}
 	}
-	throw lastError instanceof Error ? lastError : new Error(String(lastError));
+	if (lastError instanceof Error) throw lastError;
+	throw new Error(lastError === undefined ? "Tavily request failed" : String(lastError));
 }
 
 function createTavilyOperations(apiKeys: string[]): WebSearchOperations {
