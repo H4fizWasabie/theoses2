@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.0.113] - 2026-10-01
+
+- feat: background explorers gain structured Graft `ask`, `skeleton` and `callers` queries alongside `read`/`grep`/`find`/`ls. Queries use existing graphs without refresh, bounded options/time/output, and explicit fallback when Graft or its graph is unavailable; explorers cannot build graphs or run arbitrary shell commands (#473, #474).
+- safety: the Graft CLI receives only `PATH`, `HOME` and fixed privacy/color flags, not inherited provider keys, `NODE_OPTIONS` or other parent environment variables. Regression coverage exercises all three commands and real explorer-loop queries (#474).
+
 ## [1.0.112] - 2026-09-30
 
 - fix: a `research` job that reaches a cap now writes a report instead of returning nothing (#469). On 2026-09-30 22:17 KUL a 20-idea question used all 20 turns and 519K of 600K input tokens, its 15 searches were spent, and it ended on "let me write the report directly" with an `INCOMPLETE` result, so the main model redid the work with 16 searches of its own. `runResearch` skipped its "write the report now" turn whenever a cap tripped, which is exactly when it is needed. It now always gives the job one last turn with no tools, outside the caps; a report written after a cap starts with a note naming the cap, and only a job that still writes no report is `INCOMPLETE`.
