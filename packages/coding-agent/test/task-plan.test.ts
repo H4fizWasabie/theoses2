@@ -2,7 +2,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "theoses-agent-core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as planReviewer from "../src/core/plan-reviewer.ts";
 import { buildPrompt, PLAN_REVIEW_CUSTOM_TYPE, parseReview, type ReviewOutcome } from "../src/core/plan-reviewer.ts";
 import {
 	applyPlanAction,
@@ -68,6 +69,7 @@ function created(input: Partial<TaskPlanInput> = {}): TaskPlan {
 		goal: "g",
 		items: ["carousel.py", "run.sh"],
 		verify: "dry run",
+		verify_command: "bash run.sh --dry-run",
 		...input,
 	});
 	if (!result.plan) throw new Error(result.error);
@@ -100,7 +102,6 @@ describe("commandEffect", () => {
 
 	it.each([
 		"npm test > /tmp/out.txt",
-		"f=$(mktemp) && curl -s url > $f",
 		'node -e "const f = (a) => a > 1"',
 		"bash tools/run.sh --dry-run 2>&1 | tail -12",
 	])("%s runs something without changing files", (command) => {
@@ -120,7 +121,11 @@ describe("commandEffect", () => {
 		const untraced = commandEffect("cd /srv/reels && python3 - <<'EOF'\nopen('addvoice.sh','w').write(s)\nEOF");
 		expect(untraced).toMatchObject({ unknownChange: true, paths: [], dirs: ["/srv/reels"] });
 		expect(commandEffect("cd /srv/app && git status")).toMatchObject({ readOnly: true, dirs: [] });
-		expect(commandEffect("cd /tmp/x && echo hi > out.txt")).toMatchObject({ changesFiles: false, dirs: [] });
+		expect(commandEffect("cd /tmp/x && echo hi > out.txt")).toMatchObject({
+			changesFiles: true,
+			paths: ["/tmp/x/out.txt"],
+			dirs: ["/tmp/x"],
+		});
 	});
 });
 
@@ -202,14 +207,22 @@ describe("applyPlanAction", () => {
 
 	it("caps the plan size", () => {
 		const items = Array.from({ length: 12 }, (_, i) => `step ${i}`);
-		expect(act(undefined, { action: "create", goal: "g", items, verify: "v" }).error).toContain("At most 12");
+		expect(
+			act(undefined, { action: "create", goal: "g", items, verify: "v", verify_command: "bash run.sh --dry-run" })
+				.error,
+		).toContain("At most 12");
 	});
 
 	it("add after every verify item is closed needs a `verify`, and appends a new open verify item with it (#387)", () => {
 		const plan = created({ items: [] });
 		const closed: TaskPlan = { ...plan, items: plan.items.map((i) => ({ ...i, status: "done" as const })) };
 		expect(act(closed, { action: "add", items: ["step x"] }).error).toContain("verify");
-		const added = act(closed, { action: "add", items: ["step x"], verify: "check x" }).plan;
+		const added = act(closed, {
+			action: "add",
+			items: ["step x"],
+			verify: "check x",
+			verify_command: "node tests/x.mjs",
+		}).plan;
 		expect(added?.items.map((i) => [i.id, i.kind, i.status])).toEqual([
 			[1, "verify", "done"],
 			[2, "step", "open"],
@@ -235,7 +248,9 @@ describe("applyPlanAction", () => {
 			...plan,
 			items: plan.items.map((i) => (i.kind === "verify" ? { ...i, status: "done" as const } : i)),
 		};
-		expect(act(closed, { action: "add", items: ["one more"], verify: "v2" }).error).toContain("At most 12");
+		expect(
+			act(closed, { action: "add", items: ["one more"], verify: "v2", verify_command: "node tests/x.mjs" }).error,
+		).toContain("At most 12");
 	});
 });
 
@@ -264,6 +279,7 @@ describe("task plan replays", () => {
 			action: "add",
 			items: ["publish to Threads/FB", "append ledger + edit Status line"],
 			verify: "node tools/check-ledger.mjs 02",
+			verify_command: "node tools/check-ledger.mjs 02",
 		}).plan;
 		if (!added) throw new Error("add failed");
 		expect(added.items.map((i) => [i.id, i.kind, i.status])).toEqual([
@@ -387,6 +403,8 @@ describe("TaskPlanGuard", () => {
 	}
 
 	beforeEach(() => {
+		// These are synthetic review outcomes, not production metrics, even with an inherited agent-dir env.
+		vi.spyOn(planReviewer, "logReview").mockImplementation(() => {});
 		dir = mkdtempSync(join(tmpdir(), "task-plan-guard-"));
 		plan = undefined;
 		run = [];
@@ -395,6 +413,7 @@ describe("TaskPlanGuard", () => {
 	});
 
 	afterEach(() => {
+		vi.restoreAllMocks();
 		rmSync(dir, { recursive: true, force: true });
 	});
 
@@ -464,6 +483,7 @@ describe("TaskPlanGuard", () => {
 			...tool("bash", { command: "bash run.sh --dry-run" }, "gates passed"),
 			reply("Done."),
 		];
+		plan = act(plan, { action: "update", id: 3, status: "done" }, run).plan;
 		reviewResult = {
 			model: "luna",
 			verdict: "gaps",
@@ -479,6 +499,7 @@ describe("TaskPlanGuard", () => {
 		expect(reviews[0].diff).toContain("-gate 2-10");
 		expect(reviews[0].diff).toContain("+gate 1");
 		expect(reviews[0].verifyOutput).toContain("gates passed");
+		expect(planReviewer.logReview).toHaveBeenCalledWith(expect.objectContaining({ phase: "review", model: "luna" }));
 		expect(plan?.review).toEqual({ model: "luna", verdict: "gaps", mustFix: 1 });
 
 		run = [...run, pushed, reply("Fixed the publish call too.")];
@@ -494,7 +515,7 @@ describe("TaskPlanGuard", () => {
 			const script = join(workspace, "build.sh");
 			writeFileSync(script, "drawtext\n");
 			const g = guard();
-			plan = created();
+			plan = created({ verify_command: `bash ${script}` });
 			g.startOperation();
 			g.beforeToolCall("edit", { path: script });
 			writeFileSync(script, "zoompan\n");
@@ -509,6 +530,7 @@ describe("TaskPlanGuard", () => {
 				reply("Done."),
 			];
 
+			plan = act(plan, { action: "update", id: 3, status: "done" }, run).plan;
 			await g.beforeStop();
 			expect(reviews[0].locations).toEqual([workspace]);
 			expect(reviews[0].diff).toContain(script);
@@ -516,6 +538,48 @@ describe("TaskPlanGuard", () => {
 		} finally {
 			rmSync(workspace, { recursive: true, force: true });
 		}
+	});
+
+	it("reopens only the final gate when a later source edit makes its captured result stale", async () => {
+		plan = created();
+		const g = guard();
+		g.startOperation();
+		run = [
+			...tool("task_plan", {}, "plan"),
+			...tool("edit", { path: "run.sh" }, "ok"),
+			...tool("bash", { command: "bash run.sh --dry-run" }, "gates passed"),
+		];
+		plan = act(plan, { action: "update", id: 3, status: "done" }, run).plan;
+		run.push(
+			...tool("edit", { path: "run.sh" }, "later edit"),
+			...tool("bash", { command: "node unrelated.mjs" }, "unrelated pass"),
+			reply("Done and verified."),
+		);
+		expect((await g.beforeStop())[0]).toMatchObject({ customType: "claim-check" });
+		expect(plan?.items[2]).toMatchObject({ status: "open", evidence: undefined });
+		expect(reviews).toHaveLength(0);
+	});
+
+	it("does not resurrect an old plan for a new unplanned change", async () => {
+		const old = created();
+		plan = {
+			...old,
+			items: old.items.map((item) => ({ ...item, status: "done" })),
+			review: { model: "luna", verdict: "ok", mustFix: 0 },
+		};
+		const before = JSON.stringify(plan);
+		const g = guard();
+		g.startOperation();
+		run = [
+			user("fix a new one-line bug without a plan"),
+			...tool("edit", { path: "new-file.js" }, "ok"),
+			...tool("bash", { command: "node tests/new-file.mjs" }, "new fix PASS"),
+			reply("Fixed and tested."),
+		];
+		expect(await g.beforeStop()).toEqual([]);
+		expect(JSON.stringify(plan)).toBe(before);
+		expect(reviews).toHaveLength(0);
+		expect(g.planStatus()).toBeUndefined();
 	});
 
 	it("records a skipped review in the plan status", async () => {

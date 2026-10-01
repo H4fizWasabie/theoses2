@@ -9,7 +9,7 @@ import { applyPlanAction, formatPlan, MAX_PLAN_ITEMS, type TaskPlan } from "../t
 const taskPlanSchema = Type.Object({
 	action: StringEnum(["create", "add", "update", "abandon", "show"] as const, {
 		description:
-			"create: start a plan (needs goal and verify). add: append steps (needs `verify` if every verify item is already closed, so new steps don't ship unverified). update: set one item's status/note. abandon: drop the plan with a reason. show: print it.",
+			"create: start a plan (needs goal, verify and verify_command). add: append steps (needs `verify` and `verify_command` if every verify item is already closed, so new steps don't ship unverified). update: set one item's status/note. abandon: drop the plan with a reason. show: print it.",
 	}),
 	kind: Type.Optional(
 		StringEnum(["change", "fix"] as const, {
@@ -26,14 +26,20 @@ const taskPlanSchema = Type.Object({
 	verify: Type.Optional(
 		Type.String({
 			description:
-				"create: the command or check that will prove the change works end to end (it must run the changed code, not just parse it). add: required only when every verify item is already closed — the check that will prove the newly added steps; ignored if a verify item is still open (the open one already covers them).",
+				"create: human-readable criterion the runtime check must prove. add: required only when every verify item is already closed; ignored if a verify item is still open. Declare its exact executable command separately in verify_command.",
+		}),
+	),
+	verify_command: Type.Optional(
+		Type.String({
+			description:
+				"create/add: exact runtime command for the new verify item; required alongside verify. Execute the same command after declaration and the last source change. update: set or replace it only while reopening/keeping that verify item open, then rerun. Syntax/lint-only checks, runner help/version/collection-only modes, observation and source/unknown writes do not qualify; recognized isolated artifacts are allowed.",
 		}),
 	),
 	id: Type.Optional(Type.Number({ description: "update only. Item id." })),
 	status: Type.Optional(
 		StringEnum(["done", "deferred", "open"] as const, {
 			description:
-				"update only. deferred = cannot be done now; needs a note with the reason. A verify item only closes after a check command passed since the last file change.",
+				"update only. deferred = cannot be done now; needs a note with the reason. A verify item closes only after its declared runtime command passed since declaration and the last source change; its recorded result is attached to that item.",
 		}),
 	),
 	note: Type.Optional(
@@ -62,7 +68,10 @@ function requestText(messages: AgentMessage[]): string {
 		: user.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
 }
 
-export function createTaskPlanToolDefinition(deps: TaskPlanToolDeps): ToolDefinition<typeof taskPlanSchema> {
+export function createTaskPlanToolDefinition(
+	deps: TaskPlanToolDeps,
+	cwd: string,
+): ToolDefinition<typeof taskPlanSchema> {
 	return {
 		name: "task_plan",
 		label: "task_plan",
@@ -70,14 +79,14 @@ export function createTaskPlanToolDefinition(deps: TaskPlanToolDeps): ToolDefini
 			"An optional plan for the current task: every piece of the change plus the check that proves it. Use it when it helps you keep track; nothing requires it.",
 		promptSnippet: "Optionally plan a multi-part change and prove each part before calling it done",
 		promptGuidelines: [
-			"Use task_plan when a task touches several files, stages or configs, or when a fix might have siblings that share its cause. Skip it for small single-step changes and for questions. If you use it, list every piece of the change plus a verify check that runs the changed code, and add items as you discover more work.",
+			"Use task_plan when a task touches several files, stages or configs, or when a fix might have siblings that share its cause. Skip it for small single-step changes and for questions. If you use it, list every piece of the change plus a verify criterion and exact verify_command that runs the changed code, and add items as you discover more work. Execute that command literally after declaration and the last source change; syntax/lint checks alone are not runtime evidence.",
 			'For anything broken (a bug, an error, a failed run) where you do plan, use kind "fix": find the root cause rather than patching where it failed, search for every other place that relies on the same assumption, and fix or rule out each one.',
 			"If you plan, close each item with task_plan update as you finish it. Say plainly what you deferred or could not verify; never report a task done while part of it is open.",
 		],
 		parameters: taskPlanSchema,
 		execute: async (_toolCallId, input: TaskPlanToolInput) => {
 			const runMessages = deps.runMessages();
-			const result = applyPlanAction(deps.get(), input, { runMessages, request: requestText(runMessages) });
+			const result = applyPlanAction(deps.get(), input, { runMessages, request: requestText(runMessages), cwd });
 			if (result.error || !result.plan) throw new Error(result.error ?? "No task plan.");
 			if (input.action !== "show") deps.set(result.plan);
 			return { content: [{ type: "text", text: formatPlan(result.plan) }], details: undefined };

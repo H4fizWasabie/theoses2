@@ -14,7 +14,7 @@ import { claimCheck, FINAL_REPLY_NOTE } from "./claim-check.ts";
 import { createCustomMessage } from "./messages.ts";
 import { formatFindings, logReview, PLAN_REVIEW_CUSTOM_TYPE, type ReviewOutcome } from "./plan-reviewer.ts";
 import { formatPlanStatus, isPlanOpen, needsReview, runTouchedPlan, type TaskPlan, verifyOutput } from "./task-plan.ts";
-import { fileChangesOf, firstLine, textOf } from "./tool-runs.ts";
+import { checkAfterLastChange, fileChangesOf, firstLine, textOf, toolRuns } from "./tool-runs.ts";
 import { resolveToCwd } from "./tools/path-utils.ts";
 
 /** Files bigger than this are listed in the diff by name only. */
@@ -63,7 +63,7 @@ export class TaskPlanGuard {
 	/** While a plan is open, snapshots the files a tool call is about to change. Never blocks. */
 	beforeToolCall(toolName: string, args: Record<string, unknown>): BeforeToolCallResult | undefined {
 		if (!this.deps.enabled()) return undefined;
-		const changes = fileChangesOf(toolName, args);
+		const changes = fileChangesOf(toolName, args, this.deps.cwd, [...this.snapshots.keys()]);
 		if (!changes) return undefined;
 		const { paths, dirs, untraced } = changes;
 
@@ -134,23 +134,52 @@ export class TaskPlanGuard {
 	async beforeStop(): Promise<AgentMessage[]> {
 		const run = this.deps.runMessages();
 		const enabled = this.deps.enabled();
-		const plan = enabled ? this.deps.getPlan() : undefined;
+		let plan = enabled ? this.deps.getPlan() : undefined;
+		const planUsed =
+			toolRuns(run).some((tool) => tool.name === "task_plan") ||
+			JSON.stringify(plan ?? null) !== this.planAtOperationStart;
+		let latestVerify =
+			planUsed && !plan?.abandoned ? plan?.items.filter((item) => item.kind === "verify").at(-1) : undefined;
+		const checks = checkAfterLastChange(
+			toolRuns(run),
+			latestVerify?.verifyCommand,
+			this.deps.cwd,
+			latestVerify?.verifyAfter,
+		);
+		// Earlier stages keep their historical evidence. The final gate must be fresh when more source changes land.
+		if (
+			plan &&
+			!plan.abandoned &&
+			latestVerify &&
+			latestVerify.status !== "open" &&
+			checks.changed &&
+			(!latestVerify.evidence || checks.lastCheck?.id !== latestVerify.evidence.toolCallId)
+		) {
+			plan = {
+				...plan,
+				items: plan.items.map((item) =>
+					item.id === latestVerify?.id ? { ...item, status: "open", evidence: undefined } : item,
+				),
+			};
+			this.deps.setPlan(plan);
+			latestVerify = plan.items.find((item) => item.id === latestVerify?.id);
+		}
 		const verifyCovered =
 			plan !== undefined &&
 			!plan.abandoned &&
-			runTouchedPlan(run) &&
-			plan.items.some((item) => item.kind === "verify");
+			latestVerify?.status !== "open" &&
+			latestVerify?.evidence !== undefined;
 
-		const claim = claimCheck(run, { verifyCovered });
+		const claim = claimCheck(run, { verifyCovered, verifyCommand: latestVerify?.verifyCommand, cwd: this.deps.cwd });
 		if (claim) return [claim];
 		if (!enabled) return [];
 
 		const reviewedThisRun = run.some((m) => m.role === "custom" && m.customType === PLAN_REVIEW_CUSTOM_TYPE);
-		if (!reviewedThisRun && runTouchedPlan(run) && needsReview(plan)) {
+		if (!reviewedThisRun && planUsed && runTouchedPlan(run) && needsReview(plan)) {
 			const outcome = await this.deps.review({
 				plan,
 				diff: this.diff(),
-				verifyOutput: verifyOutput(run),
+				verifyOutput: verifyOutput(plan),
 				locations: this.locations(),
 			});
 			if ("skipped" in outcome) {

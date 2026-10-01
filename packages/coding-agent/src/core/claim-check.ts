@@ -33,6 +33,9 @@ const DONE_CLAIM = /\b(done|fixed|updated|changed|added|removed|deleted|renamed|
 export interface ClaimCheckOptions {
 	/** A task plan's verify item covers this run, so rule B's evidence check is already enforced there. */
 	verifyCovered?: boolean;
+	/** When a plan is present, unrelated runtime commands cannot mask its check. */
+	verifyCommand?: string;
+	cwd?: string;
 }
 
 function lastReply(messages: AgentMessage[]): AssistantMessage | undefined {
@@ -69,11 +72,11 @@ export function findClaimProblem(runMessages: AgentMessage[], options: ClaimChec
 
 	// B: verification claimed without a passing check command after the last file change.
 	if (!options.verifyCovered && VERIFICATION_CLAIM.test(replyText)) {
-		const { changed, lastCheck, lastChange } = checkAfterLastChange(runs);
+		const { changed, lastCheck, lastChange } = checkAfterLastChange(runs, options.verifyCommand, options.cwd);
 		if (changed) {
 			const what = lastChange?.path ?? firstLine(lastChange?.command ?? "a file", 80);
 			if (!lastCheck) {
-				return `Your reply claims the change was tested or verified, but no check command ran after your last change (${what}); reading or grepping does not count. Run the check now, or remove the claim.`;
+				return `Your reply claims the change was tested or verified, but no check command ran after your last change (${what}); reading, grepping or syntax/lint-only checks do not count as runtime evidence. Run the check now, or remove the claim.`;
 			}
 			if (lastCheck.isError) {
 				return `Your reply claims the change was tested or verified, but the last check after your changes failed: ${firstLine(lastCheck.output)}. Fix it, or report the failure instead.`;

@@ -65,12 +65,12 @@ export interface ReviewInput {
 
 const SYSTEM_PROMPT = `You review a finished change for completeness. Another agent (the worker) made it and says it is done. Your job is to find what is missing, not to restyle what is there.
 
-You get the user's request, the worker's task plan (with its notes), the diff of every file it changed, and the output of its verification command. You can read the codebase with read, grep, find and ls.
+You get the user's request, the worker's task plan (with its notes), the diff of every file it changed, and each verification item's recorded runtime command, execution ID and bounded output. You can read the codebase with read, grep, find and ls.
 
 Look for:
 1. Parts of the request the diff does not cover.
 2. Other places that rely on the same assumption as the changed code and were left unchanged (callers, sibling scripts, config, later pipeline stages). Search for them; the diff alone cannot show what is missing from it.
-3. Verification that did not exercise the changed code (a dry run that exits before it, a syntax check presented as a test).
+3. Verification that did not exercise the changed code (a dry run that exits before it, a syntax check presented as a test). Compare each item's declared command and captured output with that item's own criterion. A matching command and successful exit establish execution, not that the assertions covered the requested behavior.
 4. A fix that patches where the failure showed up instead of why it happened, or a plan of kind "change" that is really a fix.
 5. A finding that is one instance of a pattern: a hard-coded list or allowlist, an enumerated special case, a check keyed on the names the author happened to think of. When you find one instance, name the pattern in the issue, search the code and the situations it must serve (other languages, tools, platforms, input formats) for the members it misses, and say how to fix the pattern itself, so the worker does not patch members one at a time.
 
@@ -117,7 +117,7 @@ export function buildPrompt(
 				]
 			: []),
 		`<diff>\n${cappedDiff || "(no diff captured)"}\n</diff>`,
-		`<verify_output>\n${verifyOutput ?? "(no passing check output captured)"}\n</verify_output>`,
+		`<verify_output>\n${verifyOutput ?? "(no per-item runtime evidence captured)"}\n</verify_output>`,
 	].join("\n\n");
 }
 

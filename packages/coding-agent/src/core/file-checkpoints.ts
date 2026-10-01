@@ -69,11 +69,11 @@ export class FileCheckpoints {
 	/** Saves the original of every file the call is about to change, once per user turn. Never blocks or throws. */
 	beforeToolCall(toolName: string, args: Record<string, unknown>): void {
 		if (!this.session.isPersisted()) return;
-		const changes = fileChangesOf(toolName, args);
-		if (!changes) return;
 		try {
 			const turn = this.currentTurn();
 			if (!turn) return;
+			const changes = fileChangesOf(toolName, args, this.cwd, [...turn.seen]);
+			if (!changes) return;
 			for (const path of changes.paths) {
 				const absolute = resolveToCwd(path, this.cwd);
 				if (turn.seen.has(absolute)) continue;
