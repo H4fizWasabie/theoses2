@@ -31,7 +31,10 @@ describe("explorer's query-only Graft tool", () => {
 		graph(repo);
 		run.mockReset().mockResolvedValue({ stdout: "src/retry.ts:42", stderr: "" });
 	});
-	afterEach(() => rmSync(repo, { recursive: true, force: true }));
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		rmSync(repo, { recursive: true, force: true });
+	});
 
 	async function query(input: GraftToolInput, signal?: AbortSignal, cwd = repo) {
 		return createGraftToolDefinition(cwd).execute("graft-test", input, signal, undefined, {} as never);
@@ -61,6 +64,28 @@ describe("explorer's query-only Graft tool", () => {
 		expect(text(result)).toContain("refresh disabled");
 		expect(result.details.available).toBe(true);
 	});
+
+	it.each(["ask", "skeleton", "callers"] as const)(
+		"forwards only PATH, HOME and fixed flags to %s, never parent secrets or Node options",
+		async (command) => {
+			vi.stubEnv("PATH", "/test/bin");
+			vi.stubEnv("HOME", "/test/home");
+			vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-secret");
+			vi.stubEnv("ANTHROPIC_API_KEY", "test-anthropic-secret");
+			vi.stubEnv("NODE_OPTIONS", "--require=/test/injected.js");
+			vi.stubEnv("HTTP_PROXY", "http://test-proxy");
+			vi.stubEnv("GRAFT_EXTRA_SECRET", "test-unrecognized-secret");
+			vi.stubEnv("DO_NOT_TRACK", "0");
+			vi.stubEnv("NO_COLOR", "0");
+			await query({ command, target: command === "skeleton" ? "src/retry.ts" : "retry" });
+			expect(run.mock.calls[0][2].env).toEqual({
+				PATH: "/test/bin",
+				HOME: "/test/home",
+				DO_NOT_TRACK: "1",
+				NO_COLOR: "1",
+			});
+		},
+	);
 
 	it("passes shell metacharacters as literal query data, never as a shell command", async () => {
 		const target = "retry; touch /tmp/not-a-command $(id)";

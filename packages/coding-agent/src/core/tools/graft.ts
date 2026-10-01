@@ -132,7 +132,8 @@ export function createGraftToolDefinition(cwd: string): ToolDefinition<typeof gr
 					maxBuffer: GRAFT_MAX_BUFFER,
 					encoding: "utf8",
 					signal,
-					env: { ...process.env, DO_NOT_TRACK: "1", NO_COLOR: "1" },
+					// The third-party CLI must not inherit provider keys or Node injection options.
+					env: { PATH: process.env.PATH, HOME: process.env.HOME, DO_NOT_TRACK: "1", NO_COLOR: "1" },
 				}));
 			} catch (error) {
 				if (signal?.aborted) throw new Error("Operation aborted");
