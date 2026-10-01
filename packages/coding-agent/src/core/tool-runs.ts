@@ -421,7 +421,57 @@ export function runChangesFiles(run: ToolRun, cwd = process.cwd(), protectedPath
 	return false;
 }
 
-/** Recognized execution, not merely a compiler/linter or a shell control word. No claim about test quality. */
+/** Node's own help/version flags exit before the entrypoint; flags after a script belong to that application. */
+function nodeInformationOnly(args: string[]): boolean {
+	if (args.length === 0) return true;
+	const info = new Set(["--help", "-h", "--version", "-v", "--v8-options"]);
+	if (!args.some((arg) => info.has(arg))) return false;
+	const values = new Set([
+		"-e",
+		"--eval",
+		"-p",
+		"--print",
+		"-r",
+		"--require",
+		"--import",
+		"--loader",
+		"--experimental-loader",
+		"--input-type",
+		"--conditions",
+		"-C",
+	]);
+	const switches = new Set([
+		"--test",
+		"--test-only",
+		"--no-warnings",
+		"--trace-warnings",
+		"--enable-source-maps",
+		"--experimental-strip-types",
+		"--inspect",
+		"--inspect-brk",
+		"--watch",
+	]);
+	let uncertain = false;
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (info.has(arg)) return true;
+		if (arg === "--" || arg === "-") return false;
+		if (values.has(arg)) {
+			i++;
+			continue;
+		}
+		if (!arg.startsWith("-")) return uncertain && args.slice(i + 1).some((rest) => info.has(rest));
+		// Unknown option arity cannot establish that a following positional token is the application.
+		if (!arg.includes("=") && !switches.has(arg)) uncertain = true;
+	}
+	return false;
+}
+
+function informationOnly(args: string[]): boolean {
+	return args.some((arg) => ["--help", "--version", "-h", "-V"].includes(arg));
+}
+
+/** Recognized execution, not merely information, a compiler/linter or a shell control word. No claim about test quality. */
 function executesRuntime(segment: string, depth = 0): boolean {
 	let tokens = tokenize(segment);
 	while (tokens.length && (tokens[0] === "sudo" || /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])))
@@ -430,16 +480,40 @@ function executesRuntime(segment: string, depth = 0): boolean {
 		(tokens.shift() ?? "")
 			.split(/[\\/]/)
 			.pop()
-			?.replace(/\.exe$/i, "") ?? "";
+			?.replace(/\.exe$/i, "")
+			.toLowerCase() ?? "";
 	if (
 		["pnpm", "yarn"].includes(name) &&
 		(tokens[0] === "test" || (tokens[0] === "run" && /^(test|verify|integration)(?:$|[:.-])/.test(tokens[1] ?? "")))
 	)
-		return true;
+		return !informationOnly(tokens);
 	if (["npx", "pnpm", "yarn", "uv", "poetry"].includes(name)) {
+		const executable = tokens.findIndex((arg) => !arg.startsWith("-"));
+		if (informationOnly(tokens.slice(0, executable < 0 ? tokens.length : executable))) return false;
 		while (tokens[0]?.startsWith("-") || tokens[0] === "exec" || tokens[0] === "run") tokens.shift();
-		name = tokens.shift() ?? "";
+		name =
+			(tokens.shift() ?? "")
+				.split(/[\\/]/)
+				.pop()
+				?.replace(/\.exe$/i, "")
+				.toLowerCase() ?? "";
 	}
+	if (name === "node" ? nodeInformationOnly(tokens) : informationOnly(tokens)) return false;
+	if (name === "perl" && tokens.includes("-v")) return false;
+	const runner = /^python[0-9.]*$/.test(name) && tokens.includes("-m") ? tokens[tokens.indexOf("-m") + 1] : name;
+	if (
+		["pytest", "vitest", "jest", "mocha", "ava", "go", "cargo", "dotnet"].includes(runner) &&
+		tokens.some(
+			(arg) =>
+				["--collect-only", "--co", "--listTests", "--showConfig", "--list-tests", "--list", "-list"].includes(
+					arg,
+				) || arg.startsWith("-list="),
+		)
+	)
+		return false;
+	if (name === "vitest" && tokens[0] === "list") return false;
+	if (name === "deno" && ["info", "types", "help", "completions"].includes(tokens[0])) return false;
+	if (name === "bun" && ["build", "pm", "help"].includes(tokens[0])) return false;
 	if (
 		READ_ONLY_COMMANDS.has(name) ||
 		["tsc", "tsgo", "eslint", "biome", "ruff", "black", "prettier", "gofmt"].includes(name)

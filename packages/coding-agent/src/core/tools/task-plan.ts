@@ -32,7 +32,7 @@ const taskPlanSchema = Type.Object({
 	verify_command: Type.Optional(
 		Type.String({
 			description:
-				"create/add: exact runtime command for the new verify item; required alongside verify. Execute the same command after declaration and the last source change. update: set or replace it only while reopening/keeping that verify item open, then rerun. Syntax/lint-only checks, observation and source/unknown writes do not qualify; recognized isolated artifacts are allowed.",
+				"create/add: exact runtime command for the new verify item; required alongside verify. Execute the same command after declaration and the last source change. update: set or replace it only while reopening/keeping that verify item open, then rerun. Syntax/lint-only checks, runner help/version/collection-only modes, observation and source/unknown writes do not qualify; recognized isolated artifacts are allowed.",
 		}),
 	),
 	id: Type.Optional(Type.Number({ description: "update only. Item id." })),

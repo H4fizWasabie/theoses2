@@ -59,6 +59,47 @@ describe("runtime verification classification", () => {
 		expect(isCheckCommand(run("node --check unrelated.mjs", name))).toBe(false);
 	});
 	it.each([
+		"node --help",
+		"node -h",
+		"node --version",
+		"node -v",
+		"NODE.EXE --help",
+		"node",
+		"node --require setup.js --help",
+		"node -e 'process.exit(7)' --version",
+		"npx node --help",
+		"python3 --help",
+		"python3 --version",
+		"ruby --version",
+		"perl -v",
+		"deno --help",
+		"bun --version",
+		"pytest --help",
+		"python3 -m pytest --help",
+		"pytest --collect-only",
+		"npx vitest --help",
+		"jest --listTests",
+		"go test --help",
+		"cargo test --help",
+		"dotnet test --help",
+		"npm test --help",
+		"pnpm test --help",
+		"yarn test --help",
+		"bash -lc 'node --help'",
+		"node --help && node --version",
+		"python3 -m pytest --collect-only",
+		"vitest list",
+		"deno info",
+		"deno types",
+		"deno help",
+		"deno completions",
+		"bun build app.js",
+		"bun pm",
+	])("rejects information-only %s", (command) => {
+		expect(isCheckCommand(run(command))).toBe(false);
+		expect(() => create(command)).toThrow(/runtime/);
+	});
+	it.each([
 		"node -c unrelated.js",
 		"python3 -m py_compile app.py",
 		"python -m compileall .",
@@ -282,6 +323,27 @@ describe("actual runtime and claim-check regression", () => {
 	});
 	afterEach(() => {
 		rmSync(dir, { recursive: true, force: true });
+	});
+	it.each(["--help", "-h", "--version", "-v"])(
+		"rejects a real successful Node %s process as runtime evidence",
+		(flag) => {
+			const executed = spawnSync(process.execPath, [flag], { encoding: "utf8" });
+			expect(executed.status).toBe(0);
+			expect(executed.stdout.length).toBeGreaterThan(0);
+			for (const name of ["bash", "powershell"]) {
+				expect(isCheckCommand({ ...run(`node ${flag}`, name), output: executed.stdout })).toBe(false);
+			}
+			expect(() => create(`node ${flag}`)).toThrow(/runtime/);
+		},
+	);
+	it("keeps help passed to an actual application script eligible because that script really executes", () => {
+		const script = join(dir, "app.mjs");
+		writeFileSync(script, 'console.log("application executed", process.argv.at(-1));\n');
+		const executed = spawnSync(process.execPath, [script, "--help"], { encoding: "utf8" });
+		expect(executed.status).toBe(0);
+		expect(executed.stdout).toContain("application executed --help");
+		expect(isCheckCommand(run(`node ${script} --help`))).toBe(true);
+		expect(isCheckCommand(run("node --help && node tests/feature.mjs"))).toBe(true);
 	});
 	it("runs the changed module, writes an isolated artifact and captures real evidence", () => {
 		const source = join(dir, "feature.mjs");
