@@ -30,7 +30,6 @@ export interface SaveNoteGateOptions {
 
 export function createMemoryToolDefinitions(
 	store: MemoryStore,
-	onMemorySaved?: () => void,
 	relevance?: RememberRelevanceOptions,
 	saveGate?: SaveNoteGateOptions,
 ): ToolDefinition[] {
@@ -92,7 +91,6 @@ export function createMemoryToolDefinitions(
 					saveGate.supersede(record.id, verdict.existing.id);
 					text = `Durable note saved. It replaces a less detailed note: ${verdict.existing.subject}`;
 				}
-				onMemorySaved?.();
 				return { content: [{ type: "text", text }], details: undefined };
 			},
 			renderCall: (_args, theme: Theme) => new Text(theme.fg("toolTitle", theme.bold("save_note")), 0, 0),

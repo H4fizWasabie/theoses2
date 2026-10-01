@@ -15,7 +15,7 @@ describe("AgentSession edit result snippet", () => {
 		harnesses.push(harness);
 		writeFileSync(
 			join(harness.tempDir, "a.txt"),
-			Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n") + "\n",
+			`${Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n")}\n`,
 		);
 		harness.setResponses([
 			fauxAssistantMessage(fauxToolCall("edit", { path: "a.txt", edits: [{ oldText: "line 6", newText: "SIX" }] }), {

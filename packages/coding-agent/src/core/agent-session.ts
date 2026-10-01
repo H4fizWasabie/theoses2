@@ -2653,7 +2653,6 @@ export class AgentSession {
 						runMessages: () => currentRunMessages(this.agent.state.messages),
 					},
 					memory: this._memoryStore,
-					onMemorySaved: () => this._memoryPromotion.recordSaved(),
 				});
 
 		// Explorer/research sub-agent tools (issues #254, #260, #263) route their provider traffic

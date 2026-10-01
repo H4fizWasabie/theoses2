@@ -10,15 +10,15 @@ import {
 import { FileMemoryStore } from "./memory-store.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { SessionEntry, SessionManager, SessionMessageEntry } from "./session-manager.ts";
-import { findLastUserMessageEntryId } from "./task-boundary-detector.ts";
 
 /**
  * Memory Promotion: the ONLY way a turn reaches Durable Memory. Two triggers hand it entries: compaction
  * (`promoteDropped`, ADR-0001 — the trigger is compaction's own cut point, not a turn counter) and Turn
  * Settlement (`settle`, Jev-gated). Both run the same consolidation pipeline (background model, chunked at
  * CONSOLIDATION_TURN_CEILING, one promoted_range recorded per successful chunk) against whichever of their
- * entries no earlier pass already covered, so nothing is distilled twice. A model-invoked save (`recordSaved`)
- * marks its own turn promoted directly, without a model call.
+ * entries no earlier pass already covered, so nothing is distilled twice. An explicit `save_note` writes
+ * only its supplied fact: the turn stays eligible so consolidation can capture other facts and deduplicate
+ * the saved one. Only successful consolidation (or a migrated legacy checkpoint) records a promoted range.
  *
  * Single-flight and a failure cooldown are shared across both triggers for one Channel Session (ADR-0006: this
  * belongs to promotion, not to Turn Settlement, since compaction and settlement can otherwise overlap): a
@@ -32,9 +32,6 @@ export interface MemoryPromotion {
 	/** Fire-and-forget. The Jev-gated Turn Settlement path: runs over every entry no promoted range covers yet,
 	 * if the trigger fires. Never throws. */
 	settle(userMessageText: string): void;
-	/** Call after the model saved a note: marks the current turn (last user message up to now) as promoted,
-	 * no model call needed. */
-	recordSaved(): void;
 }
 
 export interface CreateMemoryPromotionOptions {
@@ -98,8 +95,9 @@ function migrateLegacyCheckpoint(key: string, sessionManager: SessionManager): v
 
 /**
  * Picks the messages Durable Memory has not seen yet: every message no promoted range covers, in one pass over
- * the branch. That skips what an earlier consolidation pass covered and turns the model already saved a note
- * from (save_note marks its turn promoted). A session nothing has promoted is read in full.
+ * the branch. That skips what an earlier consolidation pass covered, not messages containing an explicitly
+ * saved fact: a saved fact is not proof that the whole message was consolidated. Existing ranges retain
+ * their meaning; a session nothing has promoted is read in full.
  */
 export function selectConsolidationWindow(branch: SessionEntry[]): SessionMessageEntry[] {
 	const positions = new Map(branch.map((entry, index) => [entry.id, index]));
@@ -198,14 +196,6 @@ export function createMemoryPromotion(options: CreateMemoryPromotionOptions): Me
 					error instanceof Error ? error.message : error,
 				);
 			});
-		},
-		recordSaved() {
-			const entries = sessionManager.getBranch();
-			// The fact came from this turn's work, which the model saw but cannot attribute more precisely.
-			// ponytail: a fact taken from an earlier turn is distilled again at the next promotion (a harmless duplicate).
-			const first = findLastUserMessageEntryId(entries);
-			const last = entries[entries.length - 1];
-			if (first && last) sessionManager.appendPromotedRange(first, last.id);
 		},
 	};
 }

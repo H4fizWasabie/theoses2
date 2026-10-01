@@ -6,7 +6,7 @@ import type { ExtensionContext } from "../src/core/extensions/types.ts";
 import { createEditToolDefinition } from "../src/core/tools/edit.ts";
 import { changedSnippet } from "../src/core/tools/edit-snippet.ts";
 
-const numbered = (count: number) => Array.from({ length: count }, (_, i) => `line ${i + 1}`).join("\n") + "\n";
+const numbered = (count: number) => `${Array.from({ length: count }, (_, i) => `line ${i + 1}`).join("\n")}\n`;
 
 describe("changedSnippet", () => {
 	it("shows a changed line with two lines of context and the real line numbers", () => {

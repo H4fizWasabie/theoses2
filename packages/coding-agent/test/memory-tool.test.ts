@@ -47,13 +47,11 @@ describe("save_note tool gate", () => {
 
 	it("does not write a fact that is already remembered, and says what is stored", async () => {
 		const store = storeReturning([]);
-		const onSaved = vi.fn();
 		const gate = { check: vi.fn(async () => ({ action: "reuse" as const, existing })), supersede: vi.fn() };
 
-		const text = await runSave(createMemoryToolDefinitions(store, onSaved, undefined, gate), "Hafiz created Theoses");
+		const text = await runSave(createMemoryToolDefinitions(store, undefined, gate), "Hafiz created Theoses");
 
 		expect(store.saveNote).not.toHaveBeenCalled();
-		expect(onSaved).not.toHaveBeenCalled();
 		expect(text).toBe("Already remembered, so nothing was saved: Hafiz is the creator of Theoses");
 	});
 
@@ -62,7 +60,7 @@ describe("save_note tool gate", () => {
 		store.saveNote.mockReturnValue({ id: "new", createdAt: "2026-09-20T00:00:00Z", text: "richer" });
 		const gate = { check: vi.fn(async () => ({ action: "supersede" as const, existing })), supersede: vi.fn() };
 
-		const text = await runSave(createMemoryToolDefinitions(store, undefined, undefined, gate), "richer");
+		const text = await runSave(createMemoryToolDefinitions(store, undefined, gate), "richer");
 
 		expect(gate.supersede).toHaveBeenCalledWith("new", "old");
 		expect(text).toBe("Durable note saved. It replaces a less detailed note: Hafiz is the creator of Theoses");
@@ -72,7 +70,7 @@ describe("save_note tool gate", () => {
 		const store = storeReturning([]);
 		const gate = { check: vi.fn(async () => ({ action: "store" as const })), supersede: vi.fn() };
 
-		expect(await runSave(createMemoryToolDefinitions(store, undefined, undefined, gate), "brand new")).toBe(
+		expect(await runSave(createMemoryToolDefinitions(store, undefined, gate), "brand new")).toBe(
 			"Durable note saved.",
 		);
 		expect(store.saveNote).toHaveBeenCalledWith("brand new");
@@ -92,7 +90,7 @@ describe("remember tool", () => {
 	it("says so when nothing matches", async () => {
 		const rank = vi.fn();
 		const text = await runRemember(
-			createMemoryToolDefinitions(storeReturning([]), undefined, { candidates: 20, rank }),
+			createMemoryToolDefinitions(storeReturning([]), { candidates: 20, rank }),
 			"anything",
 		);
 
@@ -104,10 +102,7 @@ describe("remember tool", () => {
 		const store = storeReturning(records(5));
 		const rank = vi.fn(async (_query: string, found: MemoryRecord[]) => [found[3], found[1]]);
 
-		const text = await runRemember(
-			createMemoryToolDefinitions(store, undefined, { candidates: 20, rank }),
-			"the query",
-		);
+		const text = await runRemember(createMemoryToolDefinitions(store, { candidates: 20, rank }), "the query");
 
 		expect(store.remember).toHaveBeenCalledWith("the query", 20);
 		expect(rank).toHaveBeenCalledWith("the query", records(5));
@@ -118,7 +113,7 @@ describe("remember tool", () => {
 		const store = storeReturning(records(20));
 		const rank = vi.fn(async () => undefined);
 
-		const text = await runRemember(createMemoryToolDefinitions(store, undefined, { candidates: 20, rank }), "q");
+		const text = await runRemember(createMemoryToolDefinitions(store, { candidates: 20, rank }), "q");
 
 		expect(text.split("\n")).toHaveLength(REMEMBER_RESULT_LIMIT);
 		expect(text.startsWith("- fact 0\n- fact 1")).toBe(true);
