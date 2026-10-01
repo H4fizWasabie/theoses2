@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.0.116] - 2026-10-01
+
+- fix: `web_search` and `web_extract` now report why Tavily rejected a request, and rotate API keys only when a different key could help (#490, #491). A query made only of `site:` operators got a bare `Tavily request failed: 400 Bad Request` (118 of 118 `site:` queries with search terms succeeded, 3 of 3 operator-only queries failed, from three different models), so the model could not tell what to fix. The error now carries Tavily's reason, for example `Query cannot consist only of site: operators. Please provide search terms.`, from JSON or plain-text bodies, collapsed to one line, capped at 400 characters, with every configured API key redacted. The second key was also tried after any failure, including a 400 that fails the same way on every key; only request errors (400, 422) now stop rotation, so an exhausted plan (Tavily's 432), a rate limit, an outage, an auth error or a network error still fall back to the next key, and rotation stops once the call is aborted. The background researcher shares the same helper and gets the same behavior.
+
 ## [1.0.115] - 2026-10-01
 
 - fix: test runs no longer write into the developer's real agent directory (#486, #487). `SessionManager.create` ignored its `agentDir` argument when `sessionDir` was omitted, so direct callers landed in `~/.theoses/agent/sessions`; it now forwards `agentDir`. The coding-agent vitest config points `THEOSES_CODING_AGENT_DIR` and `THEOSES_MEMORY_DIR` at one per-run temp root that a global teardown removes, so a test that forgets to isolate cannot touch the real directory, and the review and Jev usage logs resolve their path at call time instead of import time. Before the fix, each run of the session tests added about three session directories, and 1,987 had accumulated on one machine. No production caller passes `agentDir` without a `sessionDir`, so runtime behavior is unchanged.
