@@ -81,6 +81,25 @@ describe("tavilyPost error handling", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});
 
+	// 432 is Tavily's documented exhausted-plan status; 433 and 403 are other key/plan-level codes.
+	// None is in a hard-coded allow-list, which is the point: only request errors are not retried.
+	it.each([432, 433, 403])("falls back to the second key on key-level status %i", async (status) => {
+		const fetchMock = stubFetch(() => json({ detail: { error: "plan usage limit reached" } }, status), OK);
+		const tool = createWebSearchToolDefinition({ apiKeys: ["key-1", "key-2"] });
+
+		const result = await run(tool, { query: "x" });
+		expect(textOf(result)).toContain("ok");
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it.each([400, 422])("does not rotate on request error %i and surfaces the reason", async (status) => {
+		const fetchMock = stubFetch(() => json({ detail: { error: `bad query ${status}` } }, status));
+		const tool = createWebSearchToolDefinition({ apiKeys: ["key-1", "key-2"] });
+
+		await expect(run(tool, { query: "x" })).rejects.toThrow(new RegExp(`bad query ${status}`));
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
 	it("reports the last status and reason when every key fails", async () => {
 		const fetchMock = stubFetch(
 			() => json({ detail: { error: "boom-1" } }, 500, "Internal Server Error"),
@@ -92,6 +111,19 @@ describe("tavilyPost error handling", () => {
 		expect(error).toBeInstanceOf(Error);
 		expect((error as Error).message).toMatch(/502/);
 		expect((error as Error).message).toMatch(/boom-2/);
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("reports the last status and reason when every key is plan-exhausted", async () => {
+		const fetchMock = stubFetch(
+			() => json({ detail: { error: "limit-1" } }, 432, "unavailable"),
+			() => json({ detail: { error: "limit-2" } }, 432, "unavailable"),
+		);
+		const tool = createWebSearchToolDefinition({ apiKeys: ["key-1", "key-2"] });
+
+		const error = await run(tool, { query: "x" }).catch((e: Error) => e);
+		expect((error as Error).message).toMatch(/432/);
+		expect((error as Error).message).toMatch(/limit-2/);
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});
 

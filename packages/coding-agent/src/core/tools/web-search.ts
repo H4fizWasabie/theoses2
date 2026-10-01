@@ -41,12 +41,13 @@ const TAVILY_ENDPOINT = "https://api.tavily.com/search";
 const TAVILY_EXTRACT_ENDPOINT = "https://api.tavily.com/extract";
 
 /**
- * Statuses a different key could plausibly fix: bad/disabled key, exhausted credits, rate limit,
- * server-side outage. A client error (400, 422, ...) fails identically on every key, so rotating
- * only wastes a request and doubles the latency without changing the outcome.
+ * Statuses that mean the request itself is wrong, so it fails identically on every key. Everything
+ * else — auth, plan/credit exhaustion, rate limit, outage, and any status Tavily adds later — is
+ * worth trying on the next key, so the retryable set stays the complement of this list rather than a
+ * hard-coded copy of the provider's key-level codes.
  */
-function isRetryableStatus(status: number): boolean {
-	return status === 401 || status === 402 || status === 429 || status >= 500;
+function isRequestError(status: number): boolean {
+	return status === 400 || status === 422;
 }
 
 /** Error carrying whether another key is worth trying, so the rotation loop can decide. */
@@ -96,9 +97,10 @@ function extractErrorReason(bodyText: string, apiKeys: string[]): string {
 }
 
 /**
- * Tries each key in order, falling back to the next only on failures a different key can fix
- * (auth/credits/rate limit/outage and network errors). A client error fails the same on every key,
- * so it surfaces immediately with Tavily's reason. Rotation stops once the abort signal fires.
+ * Tries each key in order, falling back to the next unless the failure is a request error that would
+ * fail the same way on every key (400/422), plus network errors and every key-level status Tavily
+ * returns (auth, plan exhaustion, rate limit, outage). A request error surfaces immediately with
+ * Tavily's reason. Rotation stops once the abort signal fires.
  */
 async function tavilyPost<T>(apiKeys: string[], endpoint: string, body: object, signal?: AbortSignal): Promise<T> {
 	let lastError: unknown;
@@ -118,7 +120,7 @@ async function tavilyPost<T>(apiKeys: string[], endpoint: string, body: object, 
 				throw new TavilyError(
 					`Tavily request failed: ${response.status} ${response.statusText}${detail}`,
 					response.status,
-					isRetryableStatus(response.status),
+					!isRequestError(response.status),
 				);
 			}
 			return (await response.json()) as T;
