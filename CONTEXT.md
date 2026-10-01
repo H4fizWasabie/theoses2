@@ -45,8 +45,12 @@ Applying a chosen model to a session, whichever way it was chosen (`setModel`, c
 _Avoid_: model change (that is the session-log entry), model selection
 
 **Task Plan**:
-The list of every piece of a change plus the check that proves it, kept by the model through the `task_plan` tool, which the model chooses to use or not: the harness never blocks a file change for lack of a plan and never holds a run open for open items. A plan the model does keep is held to its own rules: a verify item closes only after a check command passed since the last file change, and open or deferred items show in the status line under the final reply. A `fix` plan starts with root cause, siblings and fix scope. Persisted as `task_plan` custom entries in the session log (latest wins), so it survives restarts. Distinct from the Working Note, which records facts; the Task Plan records obligations.
+An optional record of a change's obligations, including root cause, siblings and fix scope for a fix, plus verification criteria with declared runtime checks and their Verification Evidence. Distinct from the Working Note's facts; keeping a Task Plan means accounting for its open or deferred obligations, not making planning mandatory.
 _Avoid_: todo list, checklist
+
+**Verification Evidence**:
+The recorded successful execution of a Task Plan criterion's declared runtime check, after declaration and the latest source change, retained with that criterion for review. It establishes what actually ran and returned, not that arbitrary assertions adequately cover the criterion.
+_Avoid_: green command, verification note
 
 **Plan Review**:
 One independent review of a finished Task Plan (fixes and multi-item changes), by a sub-agent with fresh context and a different model family (`backgroundModels.reviewer`), which can read the codebase. Must-fix findings go back to the worker once; the result shows in the plan status line.

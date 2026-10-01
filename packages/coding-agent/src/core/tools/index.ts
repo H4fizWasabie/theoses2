@@ -214,6 +214,7 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		),
 		task_plan: createTaskPlanToolDefinition(
 			options?.taskPlan ?? { get: () => undefined, set: () => {}, runMessages: () => [] },
+			cwd,
 		),
 		note_operations: createOperationalNotesToolDefinition(options?.operationalNotes),
 		remember: rememberTool!,

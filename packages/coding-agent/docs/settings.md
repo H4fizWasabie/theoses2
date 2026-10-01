@@ -304,6 +304,30 @@ An empty array starts with no built-in tools while preserving extension and SDK 
 
 `task` runs on the session's own model and thinking level with read, grep, find, ls, edit, write and bash. It cannot call `task` or `explore`. Every tool call it makes goes through the same gate as the main agent's (owner command hooks, extension `tool_call` handlers, file checkpoints, the task plan guard), so `/rewind` covers what it changed. It is capped at 30 turns and returns at most 40 lines; a run that hits the cap says the work is incomplete.
 
+#### Task Plan verification
+
+`task_plan` is optional. When creating a plan, supply both a human-readable `verify` criterion and its exact `verify_command`:
+
+```json
+{
+  "action": "create",
+  "goal": "Fix the feature",
+  "items": ["source", "regressions"],
+  "verify": "Feature assertions pass",
+  "verify_command": "node tests/feature.mjs"
+}
+```
+
+Execute that same command after declaration and the last source change, then close the verify item. Only outer whitespace is ignored when matching. An unrelated passing command cannot substitute; a later failure of the matching command wins. `add` requires both fields when no verify item remains open. Rebind a command only with the verify item open, then rerun; reopening clears its evidence and also requires a new run. Historical open items without a command must declare one before closure.
+
+Each closed or deferred verify item stores its successful tool-call ID, actual command and bounded output for the independent reviewer, including evidence from earlier turns. Large output keeps a head and tail with a truncation marker. A deferred live operation still requires the declared local runtime check plus a reason. A later source change reopens only the final gate of a plan used in that operation; earlier stages retain their evidence. An old plan is not revived for a new unplanned task.
+
+Recognized runtime runners (Node/Python scripts, test runners, shell scripts, HTTP checks) can qualify. Syntax/lint/build-only commands such as `node --check`, `tsc --noEmit` and `npm run lint` cannot. Keep shell checks simple: use `&&`, or start multi-command checks with `set -e`; pipelines also need `set -o pipefail`. Short-circuit fallback, background and unparsed control-flow shapes do not establish runtime evidence.
+
+Recognized literal, non-destructive writes to `/tmp/...` outside the session cwd, directories selected by `cd`, and known source paths may produce isolated test artifacts. Quoted output redirects are traced. Variable targets, traversal, unknown writers and source/live writes still invalidate verification, including source worktrees under `/tmp`. Use an isolated artifact path outside those source locations, not a broad variable-based exemption.
+
+This is conservative command classification, not an execution sandbox or filesystem attestation: opaque scripts and symbolic links are not inspected. Command provenance does not prove test quality; the reviewer still checks whether the assertions exercised the criterion. With `taskPlan.enabled: false`, the tool/plan review is disabled, but the plain verification-claim check still rejects recognized syntax-only evidence.
+
 ### Sessions
 
 | Setting | Type | Default | Description |

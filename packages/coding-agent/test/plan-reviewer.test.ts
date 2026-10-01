@@ -85,7 +85,7 @@ function fakeRuntime(script: (call: number) => AssistantMessage): {
 function plan(): TaskPlan {
 	const result = applyPlanAction(
 		undefined,
-		{ action: "create", goal: "g", items: ["a.ts"], verify: "npm test" },
+		{ action: "create", goal: "g", items: ["a.ts"], verify: "npm test", verify_command: "npm test" },
 		{ runMessages: [], request: "do the thing", now: new Date(0) },
 	);
 	if (!result.plan) throw new Error(result.error);

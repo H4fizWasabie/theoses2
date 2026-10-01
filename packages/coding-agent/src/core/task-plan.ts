@@ -7,7 +7,7 @@
  * edit silently dropped the second, and "done" was judged from memory instead of a list. A plan the
  * harness can read turns "half done" into a state it can see:
  *   - a `fix` plan starts with root cause / siblings / fix scope, so a fix looks past the symptom;
- *   - a verify item is only accepted once a check command passed after the last file change;
+ *   - each verify item declares a runtime command and captures its passing, post-change result;
  *   - open or deferred items show in the status line under the final reply.
  * A finished multi-item plan or fix gets one independent review (plan-reviewer.ts).
  *
@@ -18,7 +18,14 @@
  * "continue". Pure functions only; the session wiring is in agent-session.ts.
  */
 import type { AgentMessage } from "theoses-agent-core";
-import { checkAfterLastChange, firstLine, runChangesFiles, toolRuns } from "./tool-runs.ts";
+import {
+	checkAfterLastChange,
+	firstLine,
+	isCheckCommand,
+	runChangesFiles,
+	type ToolRun,
+	toolRuns,
+} from "./tool-runs.ts";
 
 export const TASK_PLAN_ENTRY_TYPE = "task_plan";
 export const MAX_PLAN_ITEMS = 12;
@@ -35,6 +42,18 @@ export interface PlanItem {
 	text: string;
 	status: PlanItemStatus;
 	note?: string;
+	/** Exact command declared before verification; absent on historical session entries. */
+	verifyCommand?: string;
+	/** Last tool result at declaration: an earlier check cannot satisfy a new/rebound obligation. */
+	verifyAfter?: string;
+	/** Recorded successful execution, never supplied by the model. */
+	evidence?: VerificationEvidence;
+}
+
+export interface VerificationEvidence {
+	toolCallId: string;
+	command: string;
+	output: string;
 }
 
 export type PlanReview = { model: string; verdict: "ok" | "gaps"; mustFix: number } | { skipped: string };
@@ -56,6 +75,7 @@ export interface TaskPlanInput {
 	goal?: string;
 	items?: string[];
 	verify?: string;
+	verify_command?: string;
 	id?: number;
 	status?: "done" | "deferred" | "open";
 	note?: string;
@@ -94,7 +114,10 @@ export function formatPlan(plan: TaskPlan): string {
 	const head = `Task plan (${plan.kind}): ${plan.goal}${plan.abandoned ? ` — ABANDONED: ${plan.abandoned}` : ""}`;
 	const lines = plan.items.map((item) => {
 		const note = item.note ? ` — ${item.note}` : "";
-		return `  [${item.id}] ${STATUS_MARK[item.status]} ${item.kind === "step" ? "" : `${item.kind}: `}${item.text}${note}`;
+		const command = item.verifyCommand
+			? `\n    $ ${item.verifyCommand}${item.evidence ? ` [evidence: ${item.evidence.toolCallId}]` : ""}`
+			: "";
+		return `  [${item.id}] ${STATUS_MARK[item.status]} ${item.kind === "step" ? "" : `${item.kind}: `}${item.text}${note}${command}`;
 	});
 	return [head, ...lines].join("\n");
 }
@@ -118,27 +141,60 @@ export function formatPlanStatus(plan: TaskPlan): string {
 	return [...items, ...(review ? [review] : [])].join(" · ");
 }
 
-/**
- * Evidence for closing a verify item: a check command (not a read/grep) passed after the last file
- * change in `runMessages`. Returns the problem, or undefined when the evidence is there.
- */
-export function verifyEvidenceProblem(runMessages: AgentMessage[]): string | undefined {
-	const runs = toolRuns(runMessages);
-	const { lastCheck } = checkAfterLastChange(runs);
-	if (!lastCheck) {
-		return "no check command has run since the last file change (reading, grepping or listing does not count). Run the command that proves the change works, then close this item.";
-	}
-	if (lastCheck.isError) {
-		return `the last check since the last file change failed: ${firstLine(lastCheck.output)}. Fix it and rerun before closing this item.`;
-	}
+function declaredCommandProblem(command: string | undefined, cwd: string): string | undefined {
+	if (!command?.trim()) return "declare `verify_command`: the exact runtime command for this item.";
+	const run: ToolRun = { id: "", name: "bash", command, path: undefined, output: "", isError: false };
+	if (!isCheckCommand(run, cwd))
+		return "`verify_command` must execute runtime behavior, not just syntax/lint, observation or source/unknown writes.";
 	return undefined;
 }
 
-/** Output of the passing check after the last change, for the reviewer. */
-export function verifyOutput(runMessages: AgentMessage[], maxChars = 4000): string | undefined {
-	const { lastCheck } = checkAfterLastChange(toolRuns(runMessages));
-	if (!lastCheck || lastCheck.isError) return undefined;
-	return `$ ${lastCheck.command}\n${lastCheck.output.slice(-maxChars)}`;
+function verificationResult(
+	runMessages: AgentMessage[],
+	command: string | undefined,
+	cwd: string,
+	after?: string,
+): { run?: ToolRun; problem?: string } {
+	const declaration = declaredCommandProblem(command, cwd);
+	if (declaration) return { problem: declaration };
+	const { lastCheck } = checkAfterLastChange(toolRuns(runMessages), command, cwd, after);
+	if (!lastCheck)
+		return {
+			problem:
+				"no check command matching `verify_command` has run since the last file change. Run the declared runtime command, then close this item.",
+		};
+	if (lastCheck.isError)
+		return {
+			problem: `the matching runtime check failed: ${firstLine(lastCheck.output)}. Fix it and rerun before closing this item.`,
+		};
+	return { run: lastCheck };
+}
+
+/** Only this item's declared runtime command, after the last source/unknown change, can close it. */
+export function verifyEvidenceProblem(
+	runMessages: AgentMessage[],
+	command: string | undefined,
+	cwd = process.cwd(),
+): string | undefined {
+	return verificationResult(runMessages, command, cwd).problem;
+}
+
+function boundedOutput(output: string, maxChars = 4000): string {
+	if (output.length <= maxChars) return output;
+	const marker = "\n[verification output truncated; inspect the full tool result/artifact]\n";
+	const half = Math.floor((maxChars - marker.length) / 2);
+	return `${output.slice(0, half)}${marker}${output.slice(-half)}`;
+}
+
+/** Each closed item's captured result, including evidence from earlier turns, for the reviewer. */
+export function verifyOutput(plan: TaskPlan, maxChars = 4000): string | undefined {
+	const parts = plan.items
+		.filter((item) => item.kind === "verify" && item.status !== "open" && item.evidence)
+		.map(
+			(item) =>
+				`[${item.id}] ${item.text}\nTool call: ${item.evidence!.toolCallId}\n$ ${item.evidence!.command}\n${boundedOutput(item.evidence!.output, maxChars)}`,
+		);
+	return parts.length ? parts.join("\n\n") : undefined;
 }
 
 export interface PlanActionResult {
@@ -153,7 +209,7 @@ export interface PlanActionResult {
 export function applyPlanAction(
 	current: TaskPlan | undefined,
 	input: TaskPlanInput,
-	context: { runMessages: AgentMessage[]; request: string; now?: Date },
+	context: { runMessages: AgentMessage[]; request: string; now?: Date; cwd?: string },
 ): PlanActionResult {
 	switch (input.action) {
 		case "show":
@@ -169,12 +225,20 @@ export function applyPlanAction(
 			const verify = input.verify?.trim();
 			if (!goal) return { error: "create needs `goal`." };
 			if (!verify) return { error: "create needs `verify`: the check that will prove the change works." };
+			const verifyCommand = input.verify_command?.trim();
+			const declaration = declaredCommandProblem(verifyCommand, context.cwd ?? process.cwd());
+			if (declaration) return { error: `create needs valid verification: ${declaration}` };
 			const kind = input.kind ?? "change";
 			const steps = (input.items ?? []).map((text) => text.trim()).filter(Boolean);
 			const drafts = [
 				...(kind === "fix" ? FIX_ITEMS : []),
 				...steps.map((text) => ({ kind: "step" as const, text })),
-				{ kind: "verify" as const, text: verify },
+				{
+					kind: "verify" as const,
+					text: verify,
+					verifyCommand,
+					verifyAfter: toolRuns(context.runMessages).at(-1)?.id,
+				},
 			];
 			if (drafts.length > MAX_PLAN_ITEMS) {
 				return { error: `At most ${MAX_PLAN_ITEMS} items; group smaller steps together.` };
@@ -184,7 +248,7 @@ export function applyPlanAction(
 					kind,
 					goal,
 					request: context.request,
-					items: drafts.map((d, i) => ({ id: i + 1, kind: d.kind, text: d.text, status: "open" })),
+					items: drafts.map((d, i) => ({ id: i + 1, ...d, status: "open" })),
 					createdAt: (context.now ?? new Date()).toISOString(),
 				},
 			};
@@ -204,6 +268,11 @@ export function applyPlanAction(
 					error: "These steps come after verification closed; pass `verify`: the check that will prove them.",
 				};
 			}
+			const verifyCommand = input.verify_command?.trim();
+			if (!hasOpenVerify) {
+				const declaration = declaredCommandProblem(verifyCommand, context.cwd ?? process.cwd());
+				if (declaration) return { error: `add needs valid verification: ${declaration}` };
+			}
 			const extra = hasOpenVerify ? 0 : 1;
 			if (current.items.length + steps.length + extra > MAX_PLAN_ITEMS) {
 				return { error: `At most ${MAX_PLAN_ITEMS} items; group smaller steps together.` };
@@ -216,7 +285,14 @@ export function applyPlanAction(
 				status: "open" as const,
 			}));
 			if (!hasOpenVerify) {
-				added.push({ id: nextId + steps.length, kind: "verify", text: verify as string, status: "open" });
+				added.push({
+					id: nextId + steps.length,
+					kind: "verify",
+					text: verify as string,
+					verifyCommand,
+					verifyAfter: toolRuns(context.runMessages).at(-1)?.id,
+					status: "open",
+				});
 			}
 			return { plan: { ...current, items: [...current.items, ...added] } };
 		}
@@ -226,6 +302,19 @@ export function applyPlanAction(
 			const item = current.items.find((i) => i.id === input.id);
 			if (!item) return { error: `No item ${input.id}.\n${formatPlan(current)}` };
 			const status = input.status ?? item.status;
+			let verifyCommand = item.verifyCommand;
+			let verifyAfter =
+				item.kind === "verify" && status === "open" && item.status !== "open"
+					? toolRuns(context.runMessages).at(-1)?.id
+					: item.verifyAfter;
+			if (input.verify_command !== undefined) {
+				if (item.kind !== "verify" || status !== "open")
+					return { error: "Change `verify_command` only while the verify item is open; rerun before closing." };
+				verifyCommand = input.verify_command.trim();
+				verifyAfter = toolRuns(context.runMessages).at(-1)?.id;
+				const declaration = declaredCommandProblem(verifyCommand, context.cwd ?? process.cwd());
+				if (declaration) return { error: declaration };
+			}
 			// Issue #388: a note written for a closed status (a deferral reason) is stale once the status
 			// changes; a note written while open (e.g. fix analysis) carries into the close.
 			const carried = status === item.status || item.status === "open" ? item.note : undefined;
@@ -239,12 +328,29 @@ export function applyPlanAction(
 					return { error: `Item ${item.id} (${item.kind}) closes with its content in \`note\`, not a tick.` };
 				}
 			}
+			let evidence: VerificationEvidence | undefined;
 			if (closing && item.kind === "verify") {
-				// Deferral still needs the closest local check to have passed (e.g. a dry run before a real publish).
-				const problem = verifyEvidenceProblem(context.runMessages);
-				if (problem) return { error: `Cannot close verify item ${item.id}: ${problem}` };
+				// A deferral captures the declared local runtime check, not an unapproved live publish.
+				const result = verificationResult(
+					context.runMessages,
+					verifyCommand,
+					context.cwd ?? process.cwd(),
+					verifyAfter,
+				);
+				if (result.problem || !result.run)
+					return { error: `Cannot close verify item ${item.id}: ${result.problem}` };
+				evidence = {
+					toolCallId: result.run.id,
+					command: result.run.command as string,
+					output: boundedOutput(result.run.output),
+				};
 			}
-			const items = current.items.map((i) => (i.id === item.id ? { ...i, status, note } : i));
+			const items = current.items.map((i) => {
+				if (i.id !== item.id) return i;
+				return item.kind === "verify"
+					? { ...i, status, note, verifyCommand, verifyAfter, evidence }
+					: { ...i, status, note };
+			});
 			return { plan: { ...current, items } };
 		}
 
