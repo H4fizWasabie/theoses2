@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AssistantMessage, EventStream, getModel, type ProviderHeaders } from "theoses-ai/compat";
+import { type AssistantMessage, type Context, EventStream, getModel, type ProviderHeaders } from "theoses-ai/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createExploreToolDefinition, resetExplorerConcurrencyForTests, runExplorer } from "../src/core/explorer.ts";
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
@@ -72,15 +73,15 @@ function toolCallMessage(id: string, tool: string): AssistantMessage {
 }
 
 /** `toolCount` is how many tools the request carried; the harness takes them all away for the final write-up turn. */
-type ScriptStep = (turn: number, toolCount: number) => AssistantMessage;
+type ScriptStep = (turn: number, toolCount: number, context: Context) => AssistantMessage;
 
 function createFakeModelRuntime(script: ScriptStep): { runtime: ModelRuntime; turns: () => number } {
 	let turn = 0;
 	const runtime = {
 		getModel: () => getModel("anthropic", "claude-sonnet-4-5")!,
-		streamSimple: (_model: unknown, context: { tools?: unknown[] }) => {
+		streamSimple: (_model: unknown, context: Context) => {
 			turn++;
-			const message = script(turn, context.tools?.length ?? 0);
+			const message = script(turn, context.tools?.length ?? 0, context);
 			const stream = new MockAssistantStream();
 			queueMicrotask(() => {
 				stream.push({ type: "start", partial: message });
@@ -129,6 +130,76 @@ describe("explorer (issue #254)", () => {
 		expect(result.answer.match(/~\d+K in, \d+\/\d+ turns/g)).toHaveLength(1);
 		// Status updates streamed for the tool activity.
 		expect(statuses.some((status) => status.includes("ls"))).toBe(true);
+	});
+
+	it("offers Graft-first navigation without exposing shell or write tools, and handles a missing graph", async () => {
+		const { runtime } = createFakeModelRuntime((turn, _count, context) => {
+			expect(context.tools?.map((tool) => tool.name).sort()).toEqual(["find", "graft", "grep", "ls", "read"]);
+			expect(context.systemPrompt).toContain("Navigate code with graft first");
+			if (turn === 1) {
+				return createAssistantMessage("", {
+					stopReason: "toolUse",
+					content: [
+						{
+							type: "toolCall",
+							id: "graft_missing",
+							name: "graft",
+							arguments: { command: "ask", target: "retry", path: tempDir },
+						},
+					],
+				});
+			}
+			const result = context.messages.findLast((message) => message.role === "toolResult");
+			expect(result?.role).toBe("toolResult");
+			expect(JSON.stringify(result)).toContain("No existing Graft wiring graph");
+			return createAssistantMessage(
+				"Graft unavailable: graph missing. Parent must prepare it; raw read-only tools remain available.",
+			);
+		});
+		const statuses: string[] = [];
+		const result = await runExplorer({
+			question: "find retry",
+			cwd: tempDir,
+			modelRuntime: runtime,
+			onStatus: (s) => statuses.push(s),
+		});
+		expect(result.complete).toBe(true);
+		expect(result.turnsUsed).toBe(2);
+		expect(statuses.some((status) => status.startsWith("graft:"))).toBe(true);
+	});
+
+	// Opt-in local smoke: CI does not need a global Graft installation or a prebuilt graph.
+	it.skipIf(!process.env.THEOSES_TEST_GRAFT_REPO).each([
+		{ command: "ask", target: "runExplorer" },
+		{ command: "skeleton", target: "packages/coding-agent/src/core/explorer.ts" },
+		{ command: "callers", target: "runExplorer" },
+	])("uses real Graft %j through the explorer's tool loop", async (query) => {
+		const repository = process.env.THEOSES_TEST_GRAFT_REPO!;
+		const graphPath = join(repository, "graft", ".graph", "wiring.json");
+		const sourcePath = join(repository, "packages/coding-agent/src/core/explorer.ts");
+		const hash = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
+		const graphBefore = hash(graphPath);
+		const sourceBefore = hash(sourcePath);
+		const { runtime } = createFakeModelRuntime((turn, _count, context) => {
+			if (turn === 1) {
+				return createAssistantMessage("", {
+					stopReason: "toolUse",
+					content: [
+						{ type: "toolCall", id: "graft_real", name: "graft", arguments: { ...query, path: repository } },
+					],
+				});
+			}
+			const result = context.messages.findLast((message) => message.role === "toolResult");
+			expect(result?.role === "toolResult" && result.isError).toBe(false);
+			expect(JSON.stringify(result)).toContain("packages/coding-agent/src/core/explorer.ts");
+			expect(JSON.stringify(result)).toContain("refresh disabled");
+			return createAssistantMessage("Graft returned evidence in packages/coding-agent/src/core/explorer.ts.");
+		});
+		const result = await runExplorer({ question: "locate explorer", cwd: tempDir, modelRuntime: runtime });
+		expect(result.complete).toBe(true);
+		expect(result.turnsUsed).toBe(2);
+		expect(hash(graphPath)).toBe(graphBefore);
+		expect(hash(sourcePath)).toBe(sourceBefore);
 	});
 
 	it("truncates an oversized answer at the tier's line cap", async () => {
@@ -301,10 +372,10 @@ describe("explorer (issue #254)", () => {
 			const captured: CapturedOptions[] = [];
 			const runtime = {
 				getModel: () => getModel("anthropic", "claude-sonnet-4-5")!,
-				streamSimple: (_model: unknown, context: { tools?: unknown[] }, options: CapturedOptions) => {
+				streamSimple: (_model: unknown, context: Context, options: CapturedOptions) => {
 					turn++;
 					captured.push(options);
-					const message = script(turn, context.tools?.length ?? 0);
+					const message = script(turn, context.tools?.length ?? 0, context);
 					const stream = new MockAssistantStream();
 					queueMicrotask(() => {
 						stream.push({ type: "start", partial: message });

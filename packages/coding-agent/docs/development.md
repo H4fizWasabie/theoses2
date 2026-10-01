@@ -60,6 +60,25 @@ npm test                          # Run all tests
 npm test -- test/specific.test.ts # Run specific test
 ```
 
+## Explorer code navigation
+
+Background explorers have a structured `graft` tool alongside `read`, `grep`,
+`find`, and `ls`. Use Graft first for code navigation:
+
+- `{command: "ask", target: "retry"}` — ranked pointers with source excerpts (1–8 results).
+- `{command: "skeleton", target: "src/retry.ts"}` — repository-relative file signatures.
+- `{command: "callers", target: "retry", depth: 2}` — references, with depth capped at 3.
+
+An optional `path` selects a repository outside the explorer's working directory.
+Otherwise the nearest ancestor graph is used, without crossing an unindexed nested
+Git repository. The parent must install Graft and prepare the repository graph
+with `graft build`; explorers cannot install, build, refresh, or run arbitrary shell
+commands. Queries use `--no-refresh`, so graphs may be stale: verify important
+locations with `read`. Missing graph/binary returns a fallback notice, not evidence
+that the code is absent. Process time and buffered output are bounded; results are
+capped at 250 lines/6KB and honor cancellation. Graft's own CLI may maintain its
+user-level update cache; automatic graph rebuilds and telemetry are disabled.
+
 ## Project Structure
 
 ```
