@@ -19,7 +19,7 @@ function fakeSession(branch: { id: string }[]) {
 				getCwd: () => "/work",
 				getBranch: () => branch,
 			},
-			memoryPromotion: { settle, promoteDropped: vi.fn(), recordSaved: vi.fn() },
+			memoryPromotion: { settle, promoteDropped: vi.fn() },
 		} as never,
 		settle,
 	};

@@ -179,7 +179,6 @@ export interface ToolsOptions {
 	taskPlan?: TaskPlanToolDeps;
 	operationalNotes?: { path?: string };
 	memory?: MemoryStore;
-	onMemorySaved?: () => void;
 	convertDoc?: { operations?: ConvertDocOperations };
 	webSearch?: { operations?: WebSearchOperations; apiKeys?: string[] };
 	generateImage?: { operations?: GenerateImageOperations };
@@ -197,7 +196,6 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 			: undefined;
 	const [rememberTool, saveNoteTool] = createMemoryToolDefinitions(
 		memory,
-		options?.onMemorySaved,
 		isRememberRelevanceEnabled() ? { candidates: RELEVANCE_CANDIDATES, rank: rankByRelevance } : undefined,
 		saveGate,
 	);

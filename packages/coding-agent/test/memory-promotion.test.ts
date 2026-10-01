@@ -122,7 +122,7 @@ describe("memory-promotion", () => {
 			expect(selectConsolidationWindow(branchOf(500))).toHaveLength(500);
 		});
 
-		it("skips every message a promoted range covers, from consolidation or save_note alike", () => {
+		it("preserves completed ranges, including historical ranges, regardless of their origin", () => {
 			const branch = [...branchOf(4), range("r1", "e0", "e1"), ...branchOf(3, "f"), range("r2", "f1", "f1")];
 			expect(selectConsolidationWindow(branch).map((entry) => entry.id)).toEqual(["e2", "e3", "f0", "f2"]);
 		});
@@ -216,21 +216,19 @@ describe("memory-promotion", () => {
 			expect(backgroundCall).toHaveBeenCalledTimes(1); // still in cooldown, settlement did not retry
 		});
 
-		it("skips entries recordSaved already covered, for both compaction and settlement", async () => {
+		it("skips entries settlement already consolidated when compaction follows", async () => {
 			appendUserTurn("please remember this");
-			const promotion = makePromotion();
-			promotion.recordSaved();
-
 			vi.mocked(backgroundCall).mockResolvedValue(fauxConsolidationResponse());
-			const entryIds = sessionManager.getBranch().map((entry) => entry.id);
-			promotion.promoteDropped(entryIds);
-			await flush(5);
-			expect(backgroundCall).not.toHaveBeenCalled();
-
 			vi.mocked(askJevNoul).mockResolvedValue(0.95);
+			const promotion = makePromotion();
 			promotion.settle("thanks, that's all");
+			await vi.waitFor(() =>
+				expect(sessionManager.getBranch().filter((entry) => entry.type === "promoted_range")).toHaveLength(1),
+			);
+
+			promotion.promoteDropped(sessionManager.getBranch().map((entry) => entry.id));
 			await flush(5);
-			expect(backgroundCall).not.toHaveBeenCalled();
+			expect(backgroundCall).toHaveBeenCalledTimes(1);
 		});
 	});
 
