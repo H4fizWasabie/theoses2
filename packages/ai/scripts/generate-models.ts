@@ -2670,6 +2670,20 @@ async function generateModels() {
 		},
 		{
 			// Served by the Codex backend (Codex CLI picker, 2026-09-30) but not in models.dev. Cost is copied from
+			// openai gpt-6-luna and only feeds cost estimates; subscription requests are not billed per token.
+			id: "gpt-6-luna",
+			name: "GPT-6 Luna",
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			baseUrl: CODEX_BASE_URL,
+			reasoning: true,
+			input: ["text", "image"],
+			cost: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+			contextWindow: CODEX_CONTEXT,
+			maxTokens: CODEX_MAX_TOKENS,
+		},
+		{
+			// Served by the Codex backend (Codex CLI picker, 2026-09-30) but not in models.dev. Cost is copied from
 			// openai gpt-6-sol and only feeds cost estimates; subscription requests are not billed per token.
 			id: "gpt-6.1-sol",
 			name: "GPT-6.1 Sol",

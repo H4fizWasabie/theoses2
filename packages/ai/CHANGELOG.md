@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat: add `gpt-6-luna` to the `openai-codex` (ChatGPT Plus/Pro subscription) catalog. The Codex backend serves it (Codex CLI picker) but models.dev does not list it. Cost is copied from `openai/gpt-6-luna` and only feeds estimates. Thinking levels come from the existing `gpt-6` match.
+
 ## [1.0.112] - 2026-09-30
 
 ## [1.0.111] - 2026-09-30
