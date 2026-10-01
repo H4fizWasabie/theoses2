@@ -119,6 +119,34 @@ describe("file checkpoints", () => {
 		expect(read("a.txt")).toBe("before");
 	});
 
+	it("checkpoints a source redirect inside a /tmp workspace rather than discarding it as an artifact", () => {
+		writeFileSync(file("a.txt"), "before");
+		const id = turn("go");
+		checkpoints.beforeToolCall("bash", { command: `echo after > "${file("a.txt")}"` });
+		writeFileSync(file("a.txt"), "after");
+		expect(checkpointEntries()).toHaveLength(1);
+		expect(rewindTo(id).restored).toEqual([file("a.txt")]);
+		expect(read("a.txt")).toBe("before");
+	});
+
+	it("excludes an isolated literal artifact but keeps a known external /tmp source write untraced", () => {
+		const artifact = join(root, "result.txt");
+		turn("go");
+		checkpoints.beforeToolCall("bash", {
+			command: `node -e 'require("node:fs").writeFileSync("${artifact}", "ok")'`,
+		});
+		expect(checkpointEntries()).toHaveLength(0);
+		// An explicit source edit establishes the file's role even outside the configured cwd.
+		checkpoints.beforeToolCall("write", { path: artifact });
+		checkpoints.beforeToolCall("bash", {
+			command: `node -e 'require("node:fs").writeFileSync("${artifact}", "bad")'`,
+		});
+		expect(checkpointEntries()).toHaveLength(2);
+		expect(checkpointEntries().at(-1)).toMatchObject({
+			data: { untraced: expect.stringContaining("writeFileSync") },
+		});
+	});
+
 	it("does not restore a file it never saved, and says why", () => {
 		writeFileSync(file("big.bin"), Buffer.alloc(MAX_CHECKPOINT_BYTES + 1));
 		const id = turn("go", [["big.bin", "small now"]]);
