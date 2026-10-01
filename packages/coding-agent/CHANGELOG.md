@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.0.115] - 2026-10-01
+
+- fix: test runs no longer write into the developer's real agent directory (#486, #487). `SessionManager.create` ignored its `agentDir` argument when `sessionDir` was omitted, so direct callers landed in `~/.theoses/agent/sessions`; it now forwards `agentDir`. The coding-agent vitest config points `THEOSES_CODING_AGENT_DIR` and `THEOSES_MEMORY_DIR` at one per-run temp root that a global teardown removes, so a test that forgets to isolate cannot touch the real directory, and the review and Jev usage logs resolve their path at call time instead of import time. Before the fix, each run of the session tests added about three session directories, and 1,987 had accumulated on one machine. No production caller passes `agentDir` without a `sessionDir`, so runtime behavior is unchanged.
+
 ## [1.0.114] - 2026-10-01
 
 - fix: Plan Review reports a finding that is one instance of a pattern (a hard-coded list or allowlist, an enumerated special case) as that pattern, searching for the members it misses, and the push-back to the worker asks it to fix the pattern and test with inputs from outside the reported example's language, tool or format. Plan Review still runs once per run and its cost is unchanged. On PR #480 a review caught `node --help` while the runner allowlist that rejected `make test`, `mvn test` and `rspec` went unseen until probed by hand (#481).
