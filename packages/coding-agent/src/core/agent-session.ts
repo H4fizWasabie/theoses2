@@ -42,7 +42,6 @@ import {
 	createRetryBudget,
 	getSupportedThinkingLevels,
 	isContextOverflow,
-	isRecoverableLength,
 	isRetryableAssistantError,
 	modelsAreEqual,
 	type RetryCallbacks,
@@ -76,16 +75,11 @@ import {
 	calculateContextTokens,
 	collectEntriesForBranchSummary,
 	compact,
-	countUserTurnsSince,
 	estimateContextTokens,
 	generateBranchSummary,
-	historyTurnHardCap,
-	lastCompactionBoundary,
-	shouldCompact,
-	shouldCompactByTurns,
-	shouldDeferCompactionForCache,
 } from "./compaction/index.ts";
 import { type CompactionRun, createCompactionRun, type Summarizer } from "./compaction/run.ts";
+import { decideCompaction } from "./compaction/trigger.ts";
 import { pruneFinishedTurnOutputs } from "./context-pruning.ts";
 import { THINKING_LEVEL_OPTIONS } from "./defaults.ts";
 import { createExploreToolDefinition } from "./explorer.ts";
@@ -2203,19 +2197,12 @@ export class AgentSession {
 	 * Dispatch automatic compaction after `agent_end` or before prompt submission.
 	 * Manual compaction does not call this method; it enters through `compact()`.
 	 *
-	 * Automatic cases:
-	 * 1. Overflow with retry: a context-overflow error or recoverable length stop;
-	 *    remove the failed assistant message, compact, and retry the turn once.
-	 * 2. Overflow without retry: a successful response exceeded the configured
-	 *    context window; compact but preserve the completed response.
-	 * 3. Threshold without retry: valid or estimated context usage crossed the
-	 *    configured threshold; compact without retrying the completed response.
-	 *
-	 * Each case calls `_runAutoCompaction()`, which executes a Compaction Run.
+	 * The Compaction Trigger (`decideCompaction`) decides whether and why; this applies its answer and
+	 * calls `_runAutoCompaction()`, which executes a Compaction Run.
 	 *
 	 * @param assistantMessage The assistant message to check
 	 * @param skipAbortedCheck If false, include aborted messages (for pre-prompt check). Default: true
-	 * @param beforeCompaction Called just before a compaction that does not continue the turn (cases 2 and 3)
+	 * @param beforeCompaction Called just before a compaction that does not continue the turn
 	 * @returns Whether the post-run loop should call `agent.continue()` for overflow recovery or queued messages
 	 */
 	private async _checkCompaction(
@@ -2223,114 +2210,34 @@ export class AgentSession {
 		skipAbortedCheck = true,
 		beforeCompaction?: () => void,
 	): Promise<boolean> {
-		const settings = this.settingsManager.getCompactionSettings();
-		if (!settings.enabled) return false;
-
-		// Skip if message was aborted (user cancelled) - unless skipAbortedCheck is false
-		if (skipAbortedCheck && assistantMessage.stopReason === "aborted") return false;
-
-		const contextWindow = this.model?.contextWindow ?? 0;
-
-		// Skip overflow check if the message came from a different model.
-		// This handles the case where user switched from a smaller-context model (e.g. opus)
-		// to a larger-context model (e.g. codex) - the overflow error from the old model
-		// shouldn't trigger compaction for the new model.
-		const sameModel =
-			this.model && assistantMessage.provider === this.model.provider && assistantMessage.model === this.model.id;
-
-		// Skip compaction checks if this assistant message is older than the latest
-		// compaction boundary. This prevents a stale pre-compaction usage/error
-		// from retriggering compaction on the first prompt after compaction.
-		const compactionEntry = getLatestCompactionEntry(this.sessionManager.getBranch());
-		const assistantIsFromBeforeCompaction =
-			compactionEntry !== null && assistantMessage.timestamp <= new Date(compactionEntry.timestamp).getTime();
-		if (assistantIsFromBeforeCompaction) {
+		const decision = decideCompaction({
+			settings: this.settingsManager.getCompactionSettings(),
+			assistantMessage,
+			skipAbortedCheck,
+			model: this.model,
+			branch: this.sessionManager.getBranch(),
+			messages: this.agent.state.messages,
+			overflowRecoveryAttempted: this._overflowRecoveryAttempted,
+			nowMs: Date.now(),
+		});
+		if (decision.kind === "none") return false;
+		if (decision.kind === "recovery-failed") {
+			await this._compactionRun.reportFailure("overflow", decision.errorMessage);
 			return false;
 		}
 
-		// Automatic cases 1 and 2: context overflow.
-		// A length stop is recoverable when output ended below the model's original desired limit,
-		// independent of the configured context size or any context-clamped provider request limit.
-		const contextOverflow = sameModel && isContextOverflow(assistantMessage, contextWindow);
-		const recoverableLength = sameModel && isRecoverableLength(assistantMessage, this.model?.maxTokens ?? 0);
-		if (contextOverflow || recoverableLength) {
-			const willRetry = assistantMessage.stopReason !== "stop";
-
-			// Case 2: the response completed successfully. Compact, but do not retry because
-			// agent.continue() cannot continue from a completed assistant response.
-			if (!willRetry) {
-				beforeCompaction?.();
-				return await this._runAutoCompaction("overflow", false);
-			}
-
-			if (this._overflowRecoveryAttempted) {
-				const errorMessage = contextOverflow
-					? "Context overflow recovery failed after one compact-and-retry attempt. Try reducing context or switching to a larger-context model."
-					: "Truncated response recovery failed after one compact-and-retry attempt.";
-				await this._compactionRun.reportFailure("overflow", errorMessage);
-				return false;
-			}
-
-			// Case 1: remove the failed or truncated message from agent state, compact, and
-			// retry once. The message remains in session history but is excluded from retry context.
+		if (decision.willRetry) {
+			// Remove the failed or truncated message from agent state, compact, and retry once. The message
+			// remains in session history but is excluded from retry context.
 			this._overflowRecoveryAttempted = true;
 			const messages = this.agent.state.messages;
 			if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
 				this.agent.state.messages = messages.slice(0, -1);
 			}
-			return await this._runAutoCompaction("overflow", willRetry);
-		}
-
-		// Case 3: threshold compaction without retry.
-		// For error messages or all-zero usage messages, estimate from the last valid response.
-		// This ensures sessions that hit persistent API errors (e.g. 529) or malformed zero-usage
-		// responses can still compact and do not reset context accounting.
-		let contextTokens: number;
-		const directContextTokens = assistantMessage.usage ? calculateContextTokens(assistantMessage.usage) : 0;
-		if (assistantMessage.stopReason === "error" || directContextTokens === 0) {
-			const messages = this.agent.state.messages;
-			const estimate = estimateContextTokens(messages);
-			// Without provider usage, estimate.tokens is the pure message-size estimate.
-			// Only usage-backed estimates need the stale pre-compaction check.
-			if (estimate.lastUsageIndex !== null) {
-				// Verify the usage source is post-compaction. Kept pre-compaction messages
-				// have stale usage reflecting the old (larger) context and would falsely
-				// trigger compaction right after one just finished.
-				const usageMsg = messages[estimate.lastUsageIndex];
-				if (
-					compactionEntry &&
-					usageMsg.role === "assistant" &&
-					(usageMsg as AssistantMessage).timestamp <= new Date(compactionEntry.timestamp).getTime()
-				) {
-					return false;
-				}
-			}
-			contextTokens = estimate.tokens;
 		} else {
-			contextTokens = directContextTokens;
-		}
-		if (shouldCompact(contextTokens, contextWindow, settings)) {
 			beforeCompaction?.();
-			return await this._runAutoCompaction("threshold", false);
 		}
-		const branch = this.sessionManager.getBranch();
-		if (shouldCompactByTurns(branch, settings)) {
-			// Compaction rewrites the prompt prefix, so hold it until the provider cache has gone cold.
-			// The post-run check always sees a warm cache; the pre-prompt check of a later turn sees the
-			// real idle gap since the last response.
-			const idleMs = Date.now() - assistantMessage.timestamp;
-			const deferred = shouldDeferCompactionForCache(branch, settings, idleMs);
-			if (process.env.THEOSES_DEBUG_CACHE_PREFIX) {
-				const turns = countUserTurnsSince(branch, lastCompactionBoundary(branch));
-				console.error(
-					`[cache-prefix] turn compaction wanted: turns=${turns} cap=${historyTurnHardCap(settings)} idleMs=${idleMs} -> ${deferred ? "deferred" : "running"}`,
-				);
-			}
-			if (deferred) return false;
-			beforeCompaction?.();
-			return await this._runAutoCompaction("turns", false);
-		}
-		return false;
+		return await this._runAutoCompaction(decision.reason, decision.willRetry);
 	}
 
 	/**
