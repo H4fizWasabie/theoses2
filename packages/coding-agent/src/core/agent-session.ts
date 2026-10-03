@@ -87,7 +87,7 @@ import {
 } from "./compaction/index.ts";
 import { type CompactionRun, createCompactionRun, type Summarizer } from "./compaction/run.ts";
 import { pruneFinishedTurnOutputs } from "./context-pruning.ts";
-import { DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS } from "./defaults.ts";
+import { THINKING_LEVEL_OPTIONS } from "./defaults.ts";
 import { createExploreToolDefinition } from "./explorer.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
@@ -152,6 +152,7 @@ import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createTaskToolDefinition } from "./task-agent.ts";
 import { TaskPlanGuard } from "./task-plan-guard.ts";
+import { resolveThinkingLevel } from "./thinking-level.ts";
 import { createToolRegistry, initialActiveToolNames, type ToolRegistry } from "./tool-registry.ts";
 import { currentRunMessages, textOf } from "./tool-runs.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
@@ -1917,7 +1918,13 @@ export class AgentSession {
 		scopedThinkingLevel?: ThinkingLevel,
 	): Promise<void> {
 		const previousModel = this.model;
-		const thinkingLevel = this._getThinkingLevelForModelSwitch(model, scopedThinkingLevel);
+		const thinkingLevel = resolveThinkingLevel({
+			model,
+			explicit: scopedThinkingLevel,
+			perModel: this.settingsManager.getModelThinkingLevel(model.provider, model.id),
+			globalDefault: this.settingsManager.getDefaultThinkingLevel(),
+			current: this.thinkingLevel,
+		});
 		this.agent.state.model = model;
 		this.sessionManager.appendModelChange(model.provider, model.id);
 		if (options.persist) {
@@ -2053,20 +2060,6 @@ export class AgentSession {
 	 */
 	supportsThinking(): boolean {
 		return !!this.model?.reasoning;
-	}
-
-	private _getThinkingLevelForModelSwitch(targetModel?: Model<any>, explicitLevel?: ThinkingLevel): ThinkingLevel {
-		if (explicitLevel !== undefined) {
-			return explicitLevel;
-		}
-		// Per-model default takes priority when switching to a model that has one
-		if (targetModel) {
-			const perModel = this.settingsManager.getModelThinkingLevel(targetModel.provider, targetModel.id);
-			if (perModel !== undefined) {
-				return perModel;
-			}
-		}
-		return this.settingsManager.getDefaultThinkingLevel() ?? this.thinkingLevel ?? DEFAULT_THINKING_LEVEL;
 	}
 
 	private _clampThinkingLevel(level: ThinkingLevel): ThinkingLevel {
