@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: Together's catalog renamed `deepseek-ai/DeepSeek-V4-Pro` to `deepseek-ai/DeepSeek-V4-Pro-0813`. The generator's reasoning-effort set still named the old id, so the renamed model lost `reasoning_effort` support (`high`/`max`), and `together-models.test.ts` stopped type-checking against the regenerated catalog, failing CI's Check step. The set and the test now use the new id.
+
 ## [1.0.114] - 2026-10-01
 
 - feat: add `gpt-6-luna` to the `openai-codex` (ChatGPT Plus/Pro subscription) catalog. The Codex backend serves it (Codex CLI picker) but models.dev does not list it. Cost is copied from `openai/gpt-6-luna` and only feeds estimates. Thinking levels come from the existing `gpt-6` match.
