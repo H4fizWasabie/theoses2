@@ -152,7 +152,7 @@ import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createTaskToolDefinition } from "./task-agent.ts";
 import { TaskPlanGuard } from "./task-plan-guard.ts";
-import { createToolRegistry, type ToolRegistry } from "./tool-registry.ts";
+import { createToolRegistry, initialActiveToolNames, type ToolRegistry } from "./tool-registry.ts";
 import { currentRunMessages, textOf } from "./tool-runs.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { generateUnifiedPatch } from "./tools/edit-diff.ts";
@@ -2711,27 +2711,12 @@ export class AgentSession {
 		this._bindExtensionCore(this._extensionRunner);
 		this._applyExtensionBindings(this._extensionRunner);
 
-		const defaultActiveToolNames = this._baseToolsOverride
-			? Object.keys(this._baseToolsOverride)
-			: [
-					"read",
-					"bash",
-					"edit",
-					"write",
-					"working_note",
-					"task_plan",
-					"note_operations",
-					"remember",
-					"save_note",
-					"recall_turns",
-					"convert_doc",
-					"web_search",
-					"generate_image",
-					"explore",
-					"research",
-					"task",
-				];
-		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
+		const baseActiveToolNames =
+			options.activeToolNames ??
+			initialActiveToolNames({
+				configuredDefaultTools: this.settingsManager.getDefaultTools(),
+				baseToolsOverride: this._baseToolsOverride,
+			});
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,
 			includeAllExtensionTools: options.includeAllExtensionTools,

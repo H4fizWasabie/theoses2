@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: the baseline active tool set is decided in one place, `initialActiveToolNames` in `tool-registry.ts`, instead of two copy-pasted lists in `sdk.ts` and `agent-session.ts` that had drifted apart. SDK-created sessions (Telegram, dashboard, CLI) now start with the `task` tool active when `taskTool.enabled` is on; the old SDK list omitted it, so the setting had no effect on the initial set. A session built without `initialActiveToolNames` now honors the `defaultTools` setting too. `task` stays hidden unless `taskTool.enabled`, as before.
+
 ## [1.0.116] - 2026-10-01
 
 - fix: `web_search` and `web_extract` now report why Tavily rejected a request, and rotate API keys only when a different key could help (#490, #491). A query made only of `site:` operators got a bare `Tavily request failed: 400 Bad Request` (118 of 118 `site:` queries with search terms succeeded, 3 of 3 operator-only queries failed, from three different models), so the model could not tell what to fix. The error now carries Tavily's reason, for example `Query cannot consist only of site: operators. Please provide search terms.`, from JSON or plain-text bodies, collapsed to one line, capped at 400 characters, with every configured API key redacted. The second key was also tried after any failure, including a 400 that fails the same way on every key; only request errors (400, 422) now stop rotation, so an exhausted plan (Tavily's 432), a rate limit, an outage, an auth error or a network error still fall back to the next key, and rotation stops once the call is aborted. The background researcher shares the same helper and gets the same behavior.

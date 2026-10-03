@@ -93,6 +93,23 @@ describe("defaultTools setting", () => {
 		session.dispose();
 	});
 
+	it("starts SDK sessions with the task tool when taskTool is enabled", async () => {
+		const settingsManager = SettingsManager.inMemory({ taskTool: { enabled: true } });
+		const resourceLoader = new DefaultResourceLoader({ cwd: tempDir, agentDir, settingsManager });
+		await resourceLoader.reload();
+		const { session } = await createAgentSession({
+			cwd: tempDir,
+			agentDir,
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			settingsManager,
+			sessionManager: SessionManager.inMemory(tempDir),
+			resourceLoader,
+		});
+
+		expect(session.getActiveToolNames()).toContain("task");
+		session.dispose();
+	});
+
 	it("can select powershell instead of bash", async () => {
 		const session = await createSession(["read", "powershell", "edit", "write"]);
 
