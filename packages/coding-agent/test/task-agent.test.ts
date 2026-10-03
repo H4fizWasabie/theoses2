@@ -163,7 +163,7 @@ describe("task sub-agent", () => {
 		expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("old\n");
 	});
 
-	it("reports INCOMPLETE when it runs out of turns", async () => {
+	it("reports INCOMPLETE when it runs out of turns and writes nothing on its last turn", async () => {
 		writeFileSync(join(cwd, "a.txt"), "x\n");
 		const { runtime } = scripted((turn) => assistant("", { id: `c${turn}`, name: "read", args: { path: "a.txt" } }));
 
@@ -171,6 +171,42 @@ describe("task sub-agent", () => {
 
 		expect(result.complete).toBe(false);
 		expect(result.answer).toMatch(/^INCOMPLETE:/);
+		expect(result.answer).toContain(`hit its ${TASK_CAPS.maxTurns}-turn cap and wrote no summary`);
+		expect(result.stoppedBy).toEqual([`${TASK_CAPS.maxTurns}-turn cap`]);
+		expect(result.turnsUsed).toBe(TASK_CAPS.maxTurns + 1);
+	});
+
+	it("gives a task cut off by its cap one last turn to say what is done, and returns that", async () => {
+		writeFileSync(join(cwd, "a.txt"), "x\n");
+		const { runtime } = scripted((turn) =>
+			turn <= TASK_CAPS.maxTurns
+				? assistant("", { id: `c${turn}`, name: "read", args: { path: "a.txt" } })
+				: assistant("Edited a.txt. Tests not run."),
+		);
+
+		const result = await run(runtime);
+
+		expect(result.complete).toBe(false);
+		expect(result.answer).toMatch(/^INCOMPLETE:/);
+		expect(result.answer).toContain(`${TASK_CAPS.maxTurns}-turn cap`);
+		expect(result.answer).toContain("git diff");
+		expect(result.answer).toContain("Edited a.txt. Tests not run.");
+		expect(result.stoppedBy).toEqual([`${TASK_CAPS.maxTurns}-turn cap`]);
+		expect(result.turnsUsed).toBe(TASK_CAPS.maxTurns + 1);
+	});
+
+	it("keeps a summary written on the last allowed turn as complete", async () => {
+		writeFileSync(join(cwd, "a.txt"), "x\n");
+		const { runtime } = scripted((turn) =>
+			turn < TASK_CAPS.maxTurns
+				? assistant("", { id: `c${turn}`, name: "read", args: { path: "a.txt" } })
+				: assistant("Done: nothing to change."),
+		);
+
+		const result = await run(runtime);
+
+		expect(result.complete).toBe(true);
+		expect(result.answer).toBe("Done: nothing to change.");
 		expect(result.turnsUsed).toBe(TASK_CAPS.maxTurns);
 	});
 
