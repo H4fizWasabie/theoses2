@@ -7,6 +7,7 @@ import { describeRewindPlan, FILE_CHECKPOINT_ENTRY_TYPE, type RewindResult } fro
 import { findExactModelReferenceMatch } from "./model-resolver.ts";
 import { createAgentSession } from "./sdk.ts";
 import { SessionManager } from "./session-manager.ts";
+import { SettingsManager } from "./settings-manager.ts";
 
 /**
  * Channel Session: the persistent conversation one channel (Telegram, dashboard) keeps for the owner.
@@ -99,14 +100,20 @@ export function createChannelSessions(options: ChannelSessionsOptions) {
 		if (sessionManager.getChannelSessionKey().channel !== channel) {
 			throw new Error(`Session is not a ${channel} session`);
 		}
+		// settings.json's defaultThinkingLevel wins even over a resumed session's saved level, so a long-lived
+		// Channel Session can be retuned with a settings edit and restart. High when unset (#60).
+		const settingsManager = SettingsManager.create(cwd);
+		const thinkingLevel = settingsManager.getDefaultThinkingLevel() ?? "high";
 		const { session } = await createAgentSession({
 			sessionManager,
+			settingsManager,
+			thinkingLevel,
 			appendSystemPrompt: options.appendSystemPrompt,
 			customTools: options.customTools,
 		});
-		// settings.json's defaultThinkingLevel wins even over a resumed session's saved level, so a long-lived
-		// Channel Session can be retuned with a settings edit and restart. High when unset (#60).
-		session.setThinkingLevel(session.settingsManager.getDefaultThinkingLevel() ?? "high");
+		// With no model the SDK pins the level to "off"; a model that becomes available later (an extension
+		// registering a provider) would then inherit it. Without a model setThinkingLevel keeps any level.
+		if (!session.model) session.setThinkingLevel(thinkingLevel);
 
 		let runningTool: string | undefined;
 		session.subscribe((event) => {

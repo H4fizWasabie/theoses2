@@ -41,7 +41,7 @@ The session's set of available tools, built from built-in, SDK, external (sideca
 _Avoid_: tool manager, tool catalog
 
 **Model Switch**:
-Applying a chosen model to a session, whichever way it was chosen (`setModel`, cycling scoped models, cycling all available models). One private path in `AgentSession` (`_applyModel`) does it: picks the thinking level for the new model (a scoped model's own level, else the per-model default, else the global default), sets the model and records a `model_change`, saves it as the default only when asked to persist, applies the thinking level clamped to what the model supports, then emits `model_select`. The three entry points differ only in how they choose the model; the auth check belongs to `setModel`, since cycling only picks models whose provider already has credentials.
+Applying a chosen model to a session, whichever way it was chosen (`setModel`, cycling scoped models, cycling all available models). One private path in `AgentSession` (`_applyModel`) does it: picks the thinking level for the new model through `resolveThinkingLevel`, the one ladder session startup shares (a scoped model's own level, else the per-model default, else the global default, else the level it is running at), sets the model and records a `model_change`, saves it as the default only when asked to persist, applies the thinking level clamped to what the model supports, then emits `model_select`. The three entry points differ only in how they choose the model; the auth check belongs to `setModel`, since cycling only picks models whose provider already has credentials.
 _Avoid_: model change (that is the session-log entry), model selection
 
 **Task Plan**:

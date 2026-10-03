@@ -1,12 +1,11 @@
 import { join } from "node:path";
 import { Agent, type AgentMessage, setDefaultStreamFn, type ThinkingLevel } from "theoses-agent-core";
-import { clampThinkingLevel, type Message, type Model, streamSimple } from "theoses-ai/compat";
+import { type Message, type Model, streamSimple } from "theoses-ai/compat";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { activeContextWindowTurns } from "./compaction/index.ts";
-import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type {
 	ExtensionRunner,
 	LoadExtensionsResult,
@@ -22,6 +21,7 @@ import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
 import { getDefaultSessionDir, limitActiveContextMessages, SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
+import { resolveThinkingLevel } from "./thinking-level.ts";
 import { time } from "./timings.ts";
 import { initialActiveToolNames as initialActiveToolNamesFor } from "./tool-registry.ts";
 import { HttpSidecarToolSource, McpHttpToolSource, McpStdioToolSource, type ToolSource } from "./tool-sources.ts";
@@ -293,8 +293,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			isContinuing: hasExistingSession,
 			defaultProvider: settingsManager.getDefaultProvider(),
 			defaultModelId: settingsManager.getDefaultModel(),
-			defaultThinkingLevel: settingsManager.getDefaultThinkingLevel(),
-			modelThinkingLevels: settingsManager.getAllModelThinkingLevels(),
 			modelRuntime,
 		});
 		model = result.model;
@@ -305,32 +303,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		}
 	}
 
-	let thinkingLevel = options.thinkingLevel;
-
-	// If session has data, restore thinking level from it
-	if (thinkingLevel === undefined && hasExistingSession) {
-		thinkingLevel = hasThinkingEntry
-			? (existingSession.thinkingLevel as ThinkingLevel)
-			: (settingsManager.getDefaultThinkingLevel() ?? DEFAULT_THINKING_LEVEL);
-	}
-
-	// Fall back to per-model override, then global default
-	if (thinkingLevel === undefined && model) {
-		const perModel = settingsManager.getModelThinkingLevel(model.provider, model.id);
-		if (perModel) {
-			thinkingLevel = perModel;
-		}
-	}
-	if (thinkingLevel === undefined) {
-		thinkingLevel = settingsManager.getDefaultThinkingLevel() ?? DEFAULT_THINKING_LEVEL;
-	}
-
-	// Clamp to model capabilities
-	if (!model) {
-		thinkingLevel = "off";
-	} else {
-		thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
-	}
+	const thinkingLevel = resolveThinkingLevel({
+		model,
+		explicit: options.thinkingLevel,
+		saved: hasExistingSession && hasThinkingEntry ? (existingSession.thinkingLevel as ThinkingLevel) : undefined,
+		perModel: model ? settingsManager.getModelThinkingLevel(model.provider, model.id) : undefined,
+		globalDefault: settingsManager.getDefaultThinkingLevel(),
+	});
 
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const excludedToolNames = options.excludeTools;
