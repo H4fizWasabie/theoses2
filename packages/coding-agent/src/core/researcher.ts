@@ -116,23 +116,19 @@ export async function runResearch(options: RunResearchOptions): Promise<Research
 		providerHooks: options.providerHooks,
 	});
 
-	let stats = await handle.prompt(options.question);
-	const stoppedBy = [
-		stats.turns >= RESEARCH_CAPS.maxTurns && `${RESEARCH_CAPS.maxTurns}-turn cap`,
-		stats.inputTokens >= RESEARCH_CAPS.maxInputTokens && `${RESEARCH_CAPS.maxInputTokens / 1000}K input-token cap`,
-		signal.aborted && "time limit",
-	].filter((limit): limit is string => typeof limit === "string");
 	// The model can end a turn with narration and no tool call ("Let me extract a few pages..."), or a cap
 	// can cut it off mid-research (2026-09-30: the job stopped on "let me write the report directly" and
-	// returned nothing). Either way give it one last turn, with no tools, to write up what it has. It runs
-	// after a cap on purpose: a cap must never be the reason there is no report. Turns/tokens from this prompt
-	// accumulate onto the same budget as the first (see createBudgetedAgent).
-	let cutShort = false;
-	if (!signal.aborted && !looksLikeReport(lastAssistantText(handle.agent.state.messages))) {
-		cutShort = stats.stoppedByBudget;
-		handle.agent.state.tools = [];
-		stats = await handle.prompt(FINALIZE_PROMPT);
-	}
+	// returned nothing). Either way the handle gives it one last turn, with no tools, to write up what it has.
+	const {
+		stats,
+		finalized,
+		stoppedBy: budgetLimits,
+	} = await handle.promptToAnswer(options.question, {
+		finalizePrompt: FINALIZE_PROMPT,
+		isAnswer: looksLikeReport,
+	});
+	const stoppedBy = signal.aborted ? [...budgetLimits, "time limit"] : budgetLimits;
+	const cutShort = finalized && budgetLimits.length > 0;
 
 	const text = lastAssistantText(handle.agent.state.messages);
 	const hasReport = !endedOnToolCall(handle.agent.state.messages) && looksLikeReport(text);

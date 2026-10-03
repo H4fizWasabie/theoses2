@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- refactor: the budgeted sub-agent handle owns the "finalize when there is no answer" lifecycle. `promptToAnswer` in `background-agent.ts` runs the prompt, asks the caller's `isAnswer` whether the reply counts, and if not runs one tool-free finalize turn on the same budget (skipped once the signal has aborted). It also reports which budget limits the first prompt hit. The explorer, researcher and plan reviewer each had their own copy of this sequence and now pass only their finalize prompt and their `isAnswer`. No behavior change, except that the researcher's "time limit" label now also reflects an abort during the finalize turn, and the plan reviewer no longer sends its force-verdict turn to an already-aborted agent. The `task` tool still has no finalize turn.
+
 - fix: the baseline active tool set is decided in one place, `initialActiveToolNames` in `tool-registry.ts`, instead of two copy-pasted lists in `sdk.ts` and `agent-session.ts` that had drifted apart. SDK-created sessions (Telegram, dashboard, CLI) now start with the `task` tool active when `taskTool.enabled` is on; the old SDK list omitted it, so the setting had no effect on the initial set. A session built without `initialActiveToolNames` now honors the `defaultTools` setting too. `task` stays hidden unless `taskTool.enabled`, as before.
 
 ## [1.0.116] - 2026-10-01

@@ -21,7 +21,7 @@
 import type { AgentEvent } from "theoses-agent-core";
 import type { Api, Model } from "theoses-ai";
 import { type Static, Type } from "typebox";
-import { createBudgetedAgent, endedOnToolCall, lastAssistantText } from "./background-agent.ts";
+import { createBudgetedAgent, endedOnToolCall } from "./background-agent.ts";
 import { resolveBackgroundModel } from "./background-models.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -211,35 +211,25 @@ async function runExplorerWithSlot(
 		}
 	});
 
-	let stats: { turns: number; inputTokens: number; outputTokens: number; stoppedByBudget: boolean };
-	let cutShort = false;
-	let stoppedBy: string | undefined;
+	let result: Awaited<ReturnType<typeof handle.promptToAnswer>>;
 	try {
-		stats = await handle.prompt(options.question);
-		if (stats.stoppedByBudget) {
-			stoppedBy =
-				stats.turns >= caps.maxTurns
-					? `${caps.maxTurns}-turn cap`
-					: `${caps.maxInputTokens / 1000}K input-token cap`;
-		}
-		// A cap can cut the job off mid-research and the model can end without an answer. Either way give it one
-		// last turn, with no tools and outside the caps, to write up what it has read: a cap must never be the
-		// reason the caller gets nothing (it used to return only INCOMPLETE, and did so for 22 of 34 jobs).
-		const messages = handle.agent.state.messages;
-		const answeredOnItsOwn =
-			!endedOnToolCall(messages) &&
-			messages[messages.length - 1]?.role === "assistant" &&
-			lastAssistantText(messages).length > 0;
-		if (!answeredOnItsOwn && !options.signal?.aborted) {
-			cutShort = true;
-			handle.agent.state.tools = [];
-			stats = await handle.prompt(FINALIZE_PROMPT);
-		}
+		// A cap can cut the job off mid-research and the model can end without an answer; the handle then gives it
+		// one last turn with no tools to write up what it has read (it used to return only INCOMPLETE, and did so
+		// for 22 of 34 jobs).
+		result = await handle.promptToAnswer(options.question, {
+			finalizePrompt: FINALIZE_PROMPT,
+			isAnswer: (text) => {
+				const messages = handle.agent.state.messages;
+				return !endedOnToolCall(messages) && messages[messages.length - 1]?.role === "assistant" && text.length > 0;
+			},
+		});
 	} finally {
 		unsubscribe();
 	}
+	const { stats, finalized: cutShort } = result;
+	const stoppedBy = result.stoppedBy[0];
 
-	const rawAnswer = lastAssistantText(handle.agent.state.messages);
+	const rawAnswer = result.text;
 	const hasAnswer = !endedOnToolCall(handle.agent.state.messages) && rawAnswer.length > 0;
 	const complete = hasAnswer && !cutShort;
 
