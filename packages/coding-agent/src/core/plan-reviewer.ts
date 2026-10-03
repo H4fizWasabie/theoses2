@@ -15,7 +15,7 @@ import { join } from "node:path";
 import type { AgentMessage } from "theoses-agent-core";
 import type { AssistantMessage } from "theoses-ai";
 import { getAgentDir } from "../config.ts";
-import { createBudgetedAgent, lastAssistantText } from "./background-agent.ts";
+import { createBudgetedAgent } from "./background-agent.ts";
 import { resolveBackgroundModel } from "./background-models.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { ProviderHooks } from "./provider-hooks.ts";
@@ -177,18 +177,19 @@ export async function reviewOnce(input: ReviewInput): Promise<ReviewOutcome> {
 		signal: input.signal,
 		providerHooks: input.providerHooks,
 	});
-	let stats = await handle.prompt(buildPrompt(input.plan, input.diff, input.verifyOutput, input.locations));
-	let messages = handle.agent.state.messages;
-	let parsed = parseReview(lastAssistantText(messages));
-	if (!parsed && stats.stoppedByBudget) {
-		// The budget ran out while the model was still investigating, so its last message carries no
-		// verdict. One forced turn with tools removed - the same conversation, no new investigation -
-		// asks it to commit to a verdict on what it already read instead of throwing that work away.
-		handle.agent.state.tools = [];
-		stats = await handle.prompt(FORCE_VERDICT_PROMPT);
-		messages = handle.agent.state.messages;
-		parsed = parseReview(lastAssistantText(messages));
-	}
+	// When the budget ran out while the model was still investigating, its last message carries no verdict.
+	// The handle then forces one turn with tools removed - the same conversation, no new investigation - asking
+	// it to commit to a verdict on what it already read instead of throwing that work away. A reply that fails
+	// to parse without a budget stop is not retried here: it throws and `reviewPlan` runs the review again.
+	const { text, stats } = await handle.promptToAnswer(
+		buildPrompt(input.plan, input.diff, input.verifyOutput, input.locations),
+		{
+			finalizePrompt: FORCE_VERDICT_PROMPT,
+			isAnswer: (reply, runStats) => parseReview(reply) !== undefined || !runStats.stoppedByBudget,
+		},
+	);
+	const messages = handle.agent.state.messages;
+	const parsed = parseReview(text);
 	if (!parsed) {
 		throw new Error(stats.stoppedByBudget ? "budget ran out before a verdict" : "no parseable verdict");
 	}

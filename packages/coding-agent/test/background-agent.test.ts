@@ -157,6 +157,91 @@ describe("createBudgetedAgent", () => {
 		expect(lastAssistantText(handle.agent.state.messages)).toBe("second");
 	});
 
+	describe("promptToAnswer", () => {
+		const isReport = (text: string) => text.startsWith("Summary");
+		function handleFor(
+			runtime: ModelRuntime,
+			extra: {
+				maxTurns?: number;
+				signal?: AbortSignal;
+				tools?: Parameters<typeof createBudgetedAgent>[0]["tools"];
+			} = {},
+		) {
+			return createBudgetedAgent({
+				systemPrompt: "test",
+				model,
+				tools: extra.tools ?? [],
+				modelRuntime: runtime,
+				maxTurns: extra.maxTurns ?? 5,
+				maxInputTokens: 100_000,
+				signal: extra.signal,
+			});
+		}
+
+		it("does not finalize when the first prompt already answered", async () => {
+			const { runtime, callCount } = fakeRuntime(assistant("Summary: done"));
+			const handle = handleFor(runtime);
+
+			const result = await handle.promptToAnswer("q", { finalizePrompt: "write it up", isAnswer: isReport });
+
+			expect(result.finalized).toBe(false);
+			expect(result.text).toBe("Summary: done");
+			expect(result.stoppedBy).toEqual([]);
+			expect(callCount()).toBe(1);
+		});
+
+		it("runs one tool-free finalize turn on the same budget when the first prompt did not answer", async () => {
+			const { runtime, callCount } = fakeRuntime(assistant("let me look further"), assistant("Summary: final"));
+			const handle = handleFor(runtime);
+			const tool = { name: "noop" } as Parameters<typeof createBudgetedAgent>[0]["tools"][number];
+			handle.agent.state.tools = [tool];
+
+			const result = await handle.promptToAnswer("q", { finalizePrompt: "write it up", isAnswer: isReport });
+
+			expect(result.finalized).toBe(true);
+			expect(result.text).toBe("Summary: final");
+			expect(result.stats).toEqual({ turns: 2, inputTokens: 2000, outputTokens: 100, stoppedByBudget: false });
+			expect(handle.agent.state.tools).toEqual([]);
+			expect(callCount()).toBe(2);
+		});
+
+		it("finalizes after a cap and reports which limit the first prompt hit", async () => {
+			const { runtime } = fakeRuntime(assistant("still working"), assistant("Summary: partial"));
+			const handle = handleFor(runtime, { maxTurns: 1 });
+
+			const result = await handle.promptToAnswer("q", { finalizePrompt: "write it up", isAnswer: isReport });
+
+			expect(result.finalized).toBe(true);
+			expect(result.stoppedBy).toEqual(["1-turn cap"]);
+			expect(result.text).toBe("Summary: partial");
+		});
+
+		it("passes the stats so far to isAnswer", async () => {
+			const { runtime, callCount } = fakeRuntime(assistant("still working"));
+			const handle = handleFor(runtime, { maxTurns: 1 });
+
+			const result = await handle.promptToAnswer("q", {
+				finalizePrompt: "write it up",
+				isAnswer: (_text, stats) => !stats.stoppedByBudget,
+			});
+
+			expect(result.finalized).toBe(true);
+			expect(callCount()).toBe(2);
+		});
+
+		it("skips the finalize turn once the signal has aborted", async () => {
+			const controller = new AbortController();
+			const { runtime, callCount } = fakeRuntime(assistant("working"), assistant("Summary: never"));
+			const handle = handleFor(runtime, { signal: controller.signal });
+			controller.abort();
+
+			const result = await handle.promptToAnswer("q", { finalizePrompt: "write it up", isAnswer: isReport });
+
+			expect(result.finalized).toBe(false);
+			expect(callCount()).toBeLessThanOrEqual(1);
+		});
+	});
+
 	it("aborts the agent when the caller's signal aborts", async () => {
 		const { runtime } = fakeRuntime(assistant("done"));
 		const controller = new AbortController();

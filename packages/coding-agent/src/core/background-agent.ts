@@ -7,10 +7,11 @@
  *
  * Each caller keeps what's actually different about it on top of the returned handle: explorer
  * subscribes to `agent` itself for its live status line and enforces its own line cap on the
- * answer; researcher composes its own abort signal (caller signal + a timeout) and issues a
- * second "finalize" prompt through the same handle when the first one ends without a report -
+ * answer; researcher composes its own abort signal (caller signal + a timeout). Each decides
+ * what counts as an answer (`isAnswer`) and passes its own finalize prompt to `promptToAnswer()`,
+ * which owns the rest: the tool-free finalize turn when the first prompt ends without one.
  * `prompt()` accumulates turns/tokens across repeat calls rather than resetting them, so that
- * second call still counts against the same budget as the first.
+ * finalize turn still counts against the same budget as the first prompt.
  */
 
 import {
@@ -69,14 +70,38 @@ export interface BudgetedAgentTurnStats {
 	stoppedByBudget: boolean;
 }
 
+export interface PromptToAnswerOptions {
+	/** Sent as one extra turn with no tools when the first prompt did not end in an answer. */
+	finalizePrompt: string;
+	/** The caller's judgment of what counts as an answer, given the last assistant text and the stats so far. */
+	isAnswer: (text: string, stats: BudgetedAgentTurnStats) => boolean;
+}
+
+export interface PromptedAnswer {
+	/** The last assistant text after the run, including the finalize turn if there was one. */
+	text: string;
+	/** Accumulated over the first prompt and the finalize turn. */
+	stats: BudgetedAgentTurnStats;
+	/** True when the first prompt did not end in an answer and the finalize turn ran. */
+	finalized: boolean;
+	/** The budget limits the first prompt reached, e.g. "30-turn cap"; empty when none. */
+	stoppedBy: string[];
+}
+
 export interface BudgetedAgentHandle {
 	/** The underlying Agent, for a caller that needs its own subscription (e.g. explorer's onStatus). */
 	agent: Agent;
 	/**
 	 * Run one prompt to completion. Turns/tokens accumulate across repeat calls on the same
-	 * handle (researcher's finalize prompt counts against the same budget as its first prompt).
+	 * handle (a finalize prompt counts against the same budget as the first prompt).
 	 */
 	prompt(text: string): Promise<BudgetedAgentTurnStats>;
+	/**
+	 * Run one prompt; if it does not end in an answer (the caller decides what that is), give the agent one
+	 * last turn with no tools to write one up from what it has read. It runs after a cap on purpose: a cap
+	 * must never be the reason the caller gets nothing. Skipped once the signal has aborted.
+	 */
+	promptToAnswer(text: string, options: PromptToAnswerOptions): Promise<PromptedAnswer>;
 }
 
 export function createBudgetedAgent(options: CreateBudgetedAgentOptions): BudgetedAgentHandle {
@@ -132,11 +157,29 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 		options.signal.addEventListener("abort", () => agent.abort(), { once: true });
 	}
 
+	const prompt = async (text: string): Promise<BudgetedAgentTurnStats> => {
+		await agent.prompt(text);
+		return { turns, inputTokens, outputTokens, stoppedByBudget };
+	};
+
 	return {
 		agent,
-		async prompt(text: string): Promise<BudgetedAgentTurnStats> {
-			await agent.prompt(text);
-			return { turns, inputTokens, outputTokens, stoppedByBudget };
+		prompt,
+		async promptToAnswer(text, { finalizePrompt, isAnswer }) {
+			let stats = await prompt(text);
+			const stoppedBy = stats.stoppedByBudget
+				? [
+						turns >= options.maxTurns && `${options.maxTurns}-turn cap`,
+						inputTokens >= options.maxInputTokens && `${options.maxInputTokens / 1000}K input-token cap`,
+					].filter((limit): limit is string => typeof limit === "string")
+				: [];
+			let finalized = false;
+			if (!options.signal?.aborted && !isAnswer(lastAssistantText(agent.state.messages), stats)) {
+				finalized = true;
+				agent.state.tools = [];
+				stats = await prompt(finalizePrompt);
+			}
+			return { text: lastAssistantText(agent.state.messages), stats, finalized, stoppedBy };
 		},
 	};
 }
