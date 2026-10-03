@@ -23,6 +23,7 @@ import { DefaultResourceLoader } from "./resource-loader.ts";
 import { getDefaultSessionDir, limitActiveContextMessages, SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { time } from "./timings.ts";
+import { initialActiveToolNames as initialActiveToolNamesFor } from "./tool-registry.ts";
 import { HttpSidecarToolSource, McpHttpToolSource, McpStdioToolSource, type ToolSource } from "./tool-sources.ts";
 import {
 	createBashTool,
@@ -331,38 +332,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
 	}
 
-	// string[], not ToolName[]: `explore` is created in agent-session.ts (it needs ModelRuntime
-	// and would drag tools/index.ts into the extensions/types.ts import cycle), so it can't be
-	// in createAllToolDefinitions / the ToolName union — but it IS part of the default active
-	// set (#259). Before #259 this list omitted it, so every SDK-created session (Telegram
-	// channel, CLI one-shot/print mode, SDK consumers) started without the explorer.
-	const defaultActiveToolNames: string[] = [
-		"read",
-		"bash",
-		"edit",
-		"write",
-		"working_note",
-		"task_plan",
-		"note_operations",
-		"remember",
-		"save_note",
-		"recall_turns",
-		"convert_doc",
-		"web_search",
-		"generate_image",
-		// #259: matches agent-session.ts's internal default list. Without it, every SDK-created
-		// session (Telegram channel, CLI one-shot/print mode, SDK consumers) starts without the
-		// explorer sub-agent even though it is registered — the model sees no `explore` tool.
-		"explore",
-		"research",
-	];
-	const configuredDefaultToolNames = settingsManager.getDefaultTools();
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const excludedToolNames = options.excludeTools;
-	const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
-	const initialActiveToolNames = (
-		options.tools ?? (options.noTools ? [] : (configuredDefaultToolNames ?? defaultActiveToolNames))
-	).filter((name) => !excludedToolNameSet?.has(name));
+	const initialActiveToolNames = initialActiveToolNamesFor({
+		tools: options.tools,
+		noTools: options.noTools,
+		excludeTools: excludedToolNames,
+		configuredDefaultTools: settingsManager.getDefaultTools(),
+	});
 
 	let agent: Agent;
 

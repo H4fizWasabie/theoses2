@@ -2,7 +2,41 @@ import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import type { ExtensionRunner, RegisteredTool, ToolDefinition } from "../src/core/extensions/index.ts";
 import { createSyntheticSourceInfo } from "../src/core/source-info.ts";
-import { createToolRegistry, type ToolRegistryOptions, type ToolRegistryRefresh } from "../src/core/tool-registry.ts";
+import {
+	createToolRegistry,
+	initialActiveToolNames,
+	type ToolRegistryOptions,
+	type ToolRegistryRefresh,
+} from "../src/core/tool-registry.ts";
+
+describe("initialActiveToolNames", () => {
+	const baseline = initialActiveToolNames({});
+
+	it("baseline includes the sub-agent tools", () => {
+		expect(baseline).toEqual(expect.arrayContaining(["read", "bash", "explore", "research", "task"]));
+	});
+
+	it.each([
+		["noTools", { noTools: true }, []],
+		["noTools all", { noTools: "all" }, []],
+		["tools list", { tools: ["read"] }, ["read"]],
+		["tools list minus excludes", { tools: ["read", "bash"], excludeTools: ["bash"] }, ["read"]],
+		["configured default", { configuredDefaultTools: ["grep", "find"] }, ["grep", "find"]],
+		[
+			"configured default minus excludes",
+			{ configuredDefaultTools: ["grep", "find"], excludeTools: ["find"] },
+			["grep"],
+		],
+		["base tools override", { baseToolsOverride: { dummy: 1 } }, ["dummy"]],
+		["tools list beats configured default", { tools: ["read"], configuredDefaultTools: ["grep"] }, ["read"]],
+	])("%s", (_name, input, expected) => {
+		expect(initialActiveToolNames(input)).toEqual(expected);
+	});
+
+	it("excludes apply to the baseline", () => {
+		expect(initialActiveToolNames({ excludeTools: ["bash"] })).toEqual(baseline.filter((name) => name !== "bash"));
+	});
+});
 
 function definition(name: string, extra: Partial<ToolDefinition> = {}): ToolDefinition {
 	return {

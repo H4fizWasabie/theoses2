@@ -60,6 +60,50 @@ export interface ToolRegistry {
 	readonly promptGuidelines: ReadonlyMap<string, string[]>;
 }
 
+// string[], not ToolName[]: `explore`, `research` and `task` are created in agent-session.ts (they need ModelRuntime
+// and would drag tools/index.ts into the extensions/types.ts import cycle), so they can't be in
+// createAllToolDefinitions / the ToolName union. `task` stays inactive unless `taskTool.enabled` (see refresh).
+const DEFAULT_ACTIVE_TOOL_NAMES: readonly string[] = [
+	"read",
+	"bash",
+	"edit",
+	"write",
+	"working_note",
+	"task_plan",
+	"note_operations",
+	"remember",
+	"save_note",
+	"recall_turns",
+	"convert_doc",
+	"web_search",
+	"generate_image",
+	"explore",
+	"research",
+	"task",
+];
+
+export interface InitialActiveToolsInput {
+	/** Explicit list (`--tools`); wins over everything but the exclude list. */
+	tools?: string[];
+	/** Start with nothing active. */
+	noTools?: boolean | string;
+	excludeTools?: string[];
+	/** The `defaultTools` setting, replacing the built-in baseline when set. */
+	configuredDefaultTools?: string[];
+	/** Test-only: the baseline becomes exactly these tools. */
+	baseToolsOverride?: Record<string, unknown>;
+}
+
+/** The active tool names a session starts with: the one place the baseline set is decided. */
+export function initialActiveToolNames(input: InitialActiveToolsInput): string[] {
+	const baseline = input.baseToolsOverride
+		? Object.keys(input.baseToolsOverride)
+		: (input.configuredDefaultTools ?? [...DEFAULT_ACTIVE_TOOL_NAMES]);
+	const names = input.tools ?? (input.noTools ? [] : baseline);
+	const excluded = input.excludeTools ? new Set(input.excludeTools) : undefined;
+	return names.filter((name) => !excluded?.has(name));
+}
+
 function normalizePromptSnippet(text: string | undefined): string | undefined {
 	if (!text) return undefined;
 	const oneLine = text

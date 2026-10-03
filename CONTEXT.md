@@ -37,7 +37,7 @@ One execution of context compaction, from preparation to `compaction_end`, wheth
 _Avoid_: compaction pass, compact job
 
 **Tool Registry**:
-The session's set of available tools, built from built-in, SDK, external (sidecar, MCP) and extension sources, plus the rule that decides which of them are active: allow/exclude lists, external tools deferred behind `tool_search`, `taskPlan.enabled` hiding `task_plan`. Implemented by `core/tool-registry.ts`. It does not own the active set (the engine's Agent does) and does not execute tools beyond routing `tool_call`: a refresh returns the names that should be active and the session applies them.
+The session's set of available tools, built from built-in, SDK, external (sidecar, MCP) and extension sources, plus the rule that decides which of them are active, starting with the baseline active set a session begins with (built-in default, `defaultTools` setting, `--tools`, `noTools`, excludes; one function, `initialActiveToolNames`, used by SDK session creation and the engine alike): allow/exclude lists, external tools deferred behind `tool_search`, `taskPlan.enabled` hiding `task_plan`. Implemented by `core/tool-registry.ts`. It does not own the active set (the engine's Agent does) and does not execute tools beyond routing `tool_call`: a refresh returns the names that should be active and the session applies them.
 _Avoid_: tool manager, tool catalog
 
 **Model Switch**:
