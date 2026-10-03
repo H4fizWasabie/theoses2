@@ -171,6 +171,7 @@ describe("task sub-agent", () => {
 
 		expect(result.complete).toBe(false);
 		expect(result.answer).toMatch(/^INCOMPLETE:/);
+		expect(result.answer).toContain(`hit its ${TASK_CAPS.maxTurns}-turn cap and wrote no summary`);
 		expect(result.stoppedBy).toEqual([`${TASK_CAPS.maxTurns}-turn cap`]);
 		expect(result.turnsUsed).toBe(TASK_CAPS.maxTurns + 1);
 	});

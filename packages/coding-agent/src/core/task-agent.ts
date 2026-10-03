@@ -125,14 +125,14 @@ export async function runTask(options: RunTaskOptions): Promise<TaskResult> {
 	const { stats, stoppedBy } = result;
 	const hasSummary = result.text.length > 0 && !endedOnToolCall(handle.agent.state.messages);
 	const complete = hasSummary && !result.finalized;
+	const why = stoppedBy.length > 0 ? `hit its ${stoppedBy.join(" and ")}` : "ended without a final summary";
 	let answer: string;
 	if (complete) {
 		answer = capSummary(result.text);
 	} else if (hasSummary) {
-		const why = stoppedBy.length > 0 ? `hit its ${stoppedBy.join(" and ")}` : "ended without a final summary";
-		answer = `INCOMPLETE: the task ${why} before it finished. ${PARTLY_CHANGED}\nWhat it reported:\n${capSummary(result.text)}`;
+		answer = `INCOMPLETE: the task ${why}. ${PARTLY_CHANGED}\nWhat it reported:\n${capSummary(result.text)}`;
 	} else {
-		answer = `INCOMPLETE: the task ran out of turns before a final summary. ${PARTLY_CHANGED}`;
+		answer = `INCOMPLETE: the task ${why} and wrote no summary. ${PARTLY_CHANGED}`;
 	}
 	return {
 		answer,
