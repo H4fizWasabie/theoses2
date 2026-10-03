@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.117] - 2026-10-03
+
 - refactor: the decision of whether and why to compact after an assistant message is its own module, `decideCompaction` in `compaction/trigger.ts`: a snapshot of the settings, message, model, branch and agent messages in, an action out (nothing, compact for overflow, threshold or turns with or without a retry, or overflow recovery failed). `AgentSession._checkCompaction` now only builds the snapshot and applies the action, and its comment lists all four cases (it listed three). Compaction behavior is unchanged; the overflow, threshold, stale-usage and cache-deferral cases now have a direct table test.
 
 - fix: a `task` sub-agent that hits its turn or input-token cap now gets one last turn with no tools to say what is finished, what is not and what it did not verify, and the parent receives that instead of a fixed "ran out of turns" line. The answer still starts with `INCOMPLETE:` and `complete` is `false`; it names the limit hit, carries the sub-agent's own summary (line-capped) and keeps the "files may be partly changed, check git status and git diff" warning. If the model writes nothing even then, the answer names the limit hit and says it wrote no summary. A summary written on exactly the last allowed turn used to be discarded as INCOMPLETE and is now returned as complete. `TaskResult` gains `stoppedBy`, and `turnsUsed` now includes the write-up turn, so it can read one above the cap. Task system prompt rule 5 describes the final turn.
