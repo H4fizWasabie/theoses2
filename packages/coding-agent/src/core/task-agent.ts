@@ -11,7 +11,7 @@
 import type { AgentOptions, ThinkingLevel } from "theoses-agent-core";
 import type { Api, Model } from "theoses-ai";
 import { type Static, Type } from "typebox";
-import { createBudgetedAgent, endedOnToolCall, lastAssistantText } from "./background-agent.ts";
+import { createBudgetedAgent, endedOnToolCall } from "./background-agent.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { ProviderHooks } from "./provider-hooks.ts";
@@ -32,12 +32,23 @@ export const TASK_AGENT_TOOLS = ["read", "grep", "find", "ls", "edit", "write", 
 export interface TaskResult {
 	/** The summary the parent sees (line-capped). Never the sub-agent's tool output. */
 	answer: string;
-	/** false when the budget ran out: the work may be partly done, and files may be partly changed. */
+	/**
+	 * false when the sub-agent did not summarize on its own, usually because the budget ran out: the work may be
+	 * partly done and files partly changed. `answer` then holds what it reported on its final turn, or INCOMPLETE if nothing.
+	 */
 	complete: boolean;
+	/** Includes the final write-up turn. */
 	turnsUsed: number;
 	inputTokens: number;
 	outputTokens: number;
+	/** The budget limits the run reached, e.g. "30-turn cap"; empty when none. */
+	stoppedBy: string[];
 }
+
+const FINALIZE_PROMPT =
+	"Stop. Write your final summary now from what you have done. Say plainly what is finished, what is not, and what you did not verify. Do not call any tools.";
+
+const PARTLY_CHANGED = "Files may be partly changed; check with git status and git diff before relying on it.";
 
 function buildTaskSystemPrompt(cwd: string): string {
 	return `You are a sub-agent working on one self-contained task for a parent agent. You have your own context; the parent sees only your final message, never your tool calls or their output.
@@ -49,7 +60,7 @@ Rules:
 2. Read a file before you edit it. Keep changes minimal and in the style of the code around them. Change only what the task needs.
 3. Check your work before you finish: run the relevant test or command and look at the result.
 4. Your final message is a summary of at most ${TASK_CAPS.lines} lines: what you changed (file:line), how you checked it (the command and what it printed), and anything left undone or uncertain. Pointers, not pasted code or output.
-5. You have at most ${TASK_CAPS.maxTurns} turns. If you run out, the parent is told the work is incomplete.`;
+5. You have at most ${TASK_CAPS.maxTurns} turns. If you run out, you get one last turn with no tools to write your summary: say what is finished, what is not, and what you did not verify. The parent is told the work is incomplete.`;
 }
 
 export interface RunTaskOptions {
@@ -99,23 +110,37 @@ export async function runTask(options: RunTaskOptions): Promise<TaskResult> {
 			options.onStatus?.(`${event.toolName}: ${JSON.stringify(event.args).slice(0, 120)}`);
 		}
 	});
-	let stats: Awaited<ReturnType<typeof handle.prompt>>;
+	let result: Awaited<ReturnType<typeof handle.promptToAnswer>>;
 	try {
-		stats = await handle.prompt(options.prompt);
+		// A cap can cut the job off mid-work; the handle then gives it one last turn with no tools to say what is
+		// done and what is not, so the parent gets that instead of reconstructing it from git.
+		result = await handle.promptToAnswer(options.prompt, {
+			finalizePrompt: FINALIZE_PROMPT,
+			isAnswer: (text) => text.length > 0 && !endedOnToolCall(handle.agent.state.messages),
+		});
 	} finally {
 		unsubscribe();
 	}
 
-	const summary = lastAssistantText(handle.agent.state.messages);
-	const complete = !stats.stoppedByBudget && !endedOnToolCall(handle.agent.state.messages) && summary.length > 0;
+	const { stats, stoppedBy } = result;
+	const hasSummary = result.text.length > 0 && !endedOnToolCall(handle.agent.state.messages);
+	const complete = hasSummary && !result.finalized;
+	let answer: string;
+	if (complete) {
+		answer = capSummary(result.text);
+	} else if (hasSummary) {
+		const why = stoppedBy.length > 0 ? `hit its ${stoppedBy.join(" and ")}` : "ended without a final summary";
+		answer = `INCOMPLETE: the task ${why} before it finished. ${PARTLY_CHANGED}\nWhat it reported:\n${capSummary(result.text)}`;
+	} else {
+		answer = `INCOMPLETE: the task ran out of turns before a final summary. ${PARTLY_CHANGED}`;
+	}
 	return {
-		answer: complete
-			? capSummary(summary)
-			: "INCOMPLETE: the task ran out of turns before a final summary. Files may be partly changed; check with git status and git diff before relying on it.",
+		answer,
 		complete,
 		turnsUsed: stats.turns,
 		inputTokens: stats.inputTokens,
 		outputTokens: stats.outputTokens,
+		stoppedBy,
 	};
 }
 
