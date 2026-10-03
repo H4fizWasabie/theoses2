@@ -103,13 +103,17 @@ export function createChannelSessions(options: ChannelSessionsOptions) {
 		// settings.json's defaultThinkingLevel wins even over a resumed session's saved level, so a long-lived
 		// Channel Session can be retuned with a settings edit and restart. High when unset (#60).
 		const settingsManager = SettingsManager.create(cwd);
+		const thinkingLevel = settingsManager.getDefaultThinkingLevel() ?? "high";
 		const { session } = await createAgentSession({
 			sessionManager,
 			settingsManager,
-			thinkingLevel: settingsManager.getDefaultThinkingLevel() ?? "high",
+			thinkingLevel,
 			appendSystemPrompt: options.appendSystemPrompt,
 			customTools: options.customTools,
 		});
+		// With no model the SDK pins the level to "off"; a model that becomes available later (an extension
+		// registering a provider) would then inherit it. Without a model setThinkingLevel keeps any level.
+		if (!session.model) session.setThinkingLevel(thinkingLevel);
 
 		let runningTool: string | undefined;
 		session.subscribe((event) => {
