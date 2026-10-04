@@ -3,7 +3,11 @@ import { fauxAssistantMessage, fauxToolCall } from "theoses-ai";
 import type { ExtensionAPI } from "theoses-coding-agent";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
+import { MID_TASK_NOTE } from "../../src/core/agent-session.ts";
 import { createHarness, getAssistantTexts, getMessageText, getUserTexts, type Harness } from "./harness.ts";
+
+/** A steered message as delivered: marked as sent mid-task. */
+const steered = (text: string) => `${MID_TASK_NOTE}\n${text}`;
 
 async function createWaitingHarness(
 	options: {
@@ -105,7 +109,7 @@ describe("AgentSession queue characterization", () => {
 			fauxAssistantMessage(fauxToolCall("wait", {}), { stopReason: "toolUse" }),
 			(context) => {
 				const sawSteer = context.messages.some(
-					(message) => message.role === "user" && getMessageText(message) === "steer now",
+					(message) => message.role === "user" && getMessageText(message) === steered("steer now"),
 				);
 				return fauxAssistantMessage(sawSteer ? "saw steer" : "missing steer");
 			},
@@ -118,7 +122,7 @@ describe("AgentSession queue characterization", () => {
 		releaseToolExecution();
 		await promptPromise;
 
-		expect(getUserTexts(harness)).toEqual(["start", "steer now"]);
+		expect(getUserTexts(harness)).toEqual(["start", steered("steer now")]);
 		expect(getAssistantTexts(harness)).toContain("saw steer");
 	});
 
@@ -172,7 +176,7 @@ describe("AgentSession queue characterization", () => {
 		releaseToolExecution();
 		await promptPromise;
 
-		expect(getUserTexts(harness)).toEqual(["start", "steer 1", "steer 2"]);
+		expect(getUserTexts(harness)).toEqual(["start", steered("steer 1"), steered("steer 2")]);
 		expect(getAssistantTexts(harness)).toEqual(["", "handled steer 1", "handled steer 2"]);
 	});
 
@@ -226,7 +230,7 @@ describe("AgentSession queue characterization", () => {
 		releaseToolExecution();
 		await promptPromise;
 
-		expect(batchedUserMessages).toEqual(["start", "steer 1", "steer 2"]);
+		expect(batchedUserMessages).toEqual(["start", steered("steer 1"), steered("steer 2")]);
 		expect(getAssistantTexts(harness)).toEqual(["", "batched steer response"]);
 	});
 
@@ -368,7 +372,7 @@ describe("AgentSession queue characterization", () => {
 			if (
 				event.type === "message_start" &&
 				event.message.role === "user" &&
-				getMessageText(event.message) === "queued"
+				getMessageText(event.message) === steered("queued")
 			) {
 				countsAtQueuedMessageStart.push(harness.session.pendingMessageCount);
 			}

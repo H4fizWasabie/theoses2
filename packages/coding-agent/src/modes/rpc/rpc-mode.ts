@@ -413,13 +413,13 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			}
 
 			case "steer": {
-				await session.steer(command.message, command.images);
-				return success(id, "steer");
+				const queued = await session.steer(command.message, command.images, { source: "rpc" });
+				return success(id, "steer", { queued });
 			}
 
 			case "follow_up": {
-				await session.followUp(command.message, command.images);
-				return success(id, "follow_up");
+				const queued = await session.followUp(command.message, command.images, { source: "rpc" });
+				return success(id, "follow_up", { queued });
 			}
 
 			case "abort": {

@@ -79,7 +79,7 @@ The `images` field is optional. Each image uses `ImageContent` format: `{"type":
 
 #### steer
 
-Queue a steering message while the agent is running. It is delivered after the current assistant turn finishes executing its tool calls, before the next LLM call. Skill commands and prompt templates are expanded. Extension commands are not allowed (use `prompt` instead).
+Queue a steering message while the agent is running. It is delivered after the current assistant turn finishes executing its tool calls, before the next LLM call, marked as sent mid-task. It goes through the same intake as `prompt`: `UserPromptSubmit` hooks, extension `input` handlers, then skill command and prompt template expansion. Extension commands are not allowed (use `prompt` instead). A message accepted while a run is active lands in that run, even when a hook is still running as the run would end.
 
 ```json
 {"type": "steer", "message": "Stop and do this instead"}
@@ -94,14 +94,16 @@ The `images` field is optional. Each image uses `ImageContent` format (same as `
 
 Response:
 ```json
-{"type": "response", "command": "steer", "success": true}
+{"type": "response", "command": "steer", "success": true, "data": {"queued": true}}
 ```
+
+`queued` is `false` when a hook or an extension `input` handler blocked or handled the message.
 
 See [set_steering_mode](#set_steering_mode) for controlling how steering messages are processed.
 
 #### follow_up
 
-Queue a follow-up message to be processed after the agent finishes. Delivered only when agent has no more tool calls or steering messages. Skill commands and prompt templates are expanded. Extension commands are not allowed (use `prompt` instead).
+Queue a follow-up message to be processed after the agent finishes. Delivered only when agent has no more tool calls or steering messages. It goes through the same intake as `prompt` (see `steer`). Extension commands are not allowed (use `prompt` instead).
 
 ```json
 {"type": "follow_up", "message": "After you're done, also do this"}
@@ -116,7 +118,7 @@ The `images` field is optional. Each image uses `ImageContent` format (same as `
 
 Response:
 ```json
-{"type": "response", "command": "follow_up", "success": true}
+{"type": "response", "command": "follow_up", "success": true, "data": {"queued": true}}
 ```
 
 See [set_follow_up_mode](#set_follow_up_mode) for controlling how follow-up messages are processed.
