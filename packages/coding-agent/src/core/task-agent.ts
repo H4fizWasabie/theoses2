@@ -11,7 +11,7 @@
 import type { AgentOptions, ThinkingLevel } from "theoses-agent-core";
 import type { Api, Model } from "theoses-ai";
 import { type Static, Type } from "typebox";
-import { createBudgetedAgent, endedOnToolCall } from "./background-agent.ts";
+import { createBudgetedAgent } from "./background-agent.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { ProviderHooks } from "./provider-hooks.ts";
@@ -76,12 +76,6 @@ export interface RunTaskOptions {
 	beforeToolCall?: AgentOptions["beforeToolCall"];
 }
 
-function capSummary(answer: string): string {
-	const lines = answer.split("\n");
-	if (lines.length <= TASK_CAPS.lines) return answer;
-	return `${lines.slice(0, TASK_CAPS.lines).join("\n")}\n[truncated by harness: exceeded ${TASK_CAPS.lines} lines]`;
-}
-
 export async function runTask(options: RunTaskOptions): Promise<TaskResult> {
 	// The tools have different detail types; the wrapper only needs the common ToolDefinition shape.
 	const definitions: ToolDefinition<any, any, any>[] = [
@@ -104,39 +98,32 @@ export async function runTask(options: RunTaskOptions): Promise<TaskResult> {
 		providerHooks: options.providerHooks,
 		thinkingLevel: options.thinkingLevel,
 		beforeToolCall: options.beforeToolCall,
+		onStatus: options.onStatus,
+		capLines: TASK_CAPS.lines,
 	});
-	const unsubscribe = handle.agent.subscribe((event) => {
-		if (event.type === "tool_execution_start") {
-			options.onStatus?.(`${event.toolName}: ${JSON.stringify(event.args).slice(0, 120)}`);
-		}
+	// A cap can cut the job off mid-work; the handle then gives it one last turn with no tools to say what is
+	// done and what is not, so the parent gets that instead of reconstructing it from git.
+	const { status, text, stats, stoppedBy } = await handle.promptToAnswer(options.prompt, {
+		finalizePrompt: FINALIZE_PROMPT,
 	});
-	let result: Awaited<ReturnType<typeof handle.promptToAnswer>>;
-	try {
-		// A cap can cut the job off mid-work; the handle then gives it one last turn with no tools to say what is
-		// done and what is not, so the parent gets that instead of reconstructing it from git.
-		result = await handle.promptToAnswer(options.prompt, {
-			finalizePrompt: FINALIZE_PROMPT,
-			isAnswer: (text) => text.length > 0 && !endedOnToolCall(handle.agent.state.messages),
-		});
-	} finally {
-		unsubscribe();
-	}
 
-	const { stats, stoppedBy } = result;
-	const hasSummary = result.text.length > 0 && !endedOnToolCall(handle.agent.state.messages);
-	const complete = hasSummary && !result.finalized;
-	const why = stoppedBy.length > 0 ? `hit its ${stoppedBy.join(" and ")}` : "ended without a final summary";
+	const why =
+		stoppedBy.length > 0
+			? `hit its ${stoppedBy.join(" and ")}`
+			: options.signal?.aborted
+				? "was stopped"
+				: "ended without a final summary";
 	let answer: string;
-	if (complete) {
-		answer = capSummary(result.text);
-	} else if (hasSummary) {
-		answer = `INCOMPLETE: the task ${why}. ${PARTLY_CHANGED}\nWhat it reported:\n${capSummary(result.text)}`;
+	if (status === "complete") {
+		answer = text;
+	} else if (status === "partial") {
+		answer = `INCOMPLETE: the task ${why}. ${PARTLY_CHANGED}\nWhat it reported:\n${text}`;
 	} else {
 		answer = `INCOMPLETE: the task ${why} and wrote no summary. ${PARTLY_CHANGED}`;
 	}
 	return {
 		answer,
-		complete,
+		complete: status === "complete",
 		turnsUsed: stats.turns,
 		inputTokens: stats.inputTokens,
 		outputTokens: stats.outputTokens,

@@ -1,17 +1,16 @@
 /**
- * Shared runner core for background sub-agents (explorer.ts, researcher.ts): an isolated `Agent`
- * with a turns/input-token budget, provider-hook wiring (so cost-watch sees its traffic under its
- * own model), and abort-signal plumbing. Deliberately does not cover consolidation's
- * modelRuntime.completeSimple() calls - that bypass of extension hooks is its own documented
- * decision (see memory-consolidation.ts), not a duplicate of this.
+ * Shared runner core for sub-agents (explorer.ts, researcher.ts, task-agent.ts, plan-reviewer.ts): an isolated
+ * `Agent` with a turns/input-token budget, provider-hook wiring (so cost-watch sees its traffic under its own
+ * model), abort-signal plumbing, a live status line and a line cap. Deliberately does not cover consolidation's
+ * modelRuntime.completeSimple() calls - that bypass of extension hooks is its own documented decision (see
+ * memory-consolidation.ts), not a duplicate of this.
  *
- * Each caller keeps what's actually different about it on top of the returned handle: explorer
- * subscribes to `agent` itself for its live status line and enforces its own line cap on the
- * answer; researcher composes its own abort signal (caller signal + a timeout). Each decides
- * what counts as an answer (`isAnswer`) and passes its own finalize prompt to `promptToAnswer()`,
- * which owns the rest: the tool-free finalize turn when the first prompt ends without one.
- * `prompt()` accumulates turns/tokens across repeat calls rather than resetting them, so that
- * finalize turn still counts against the same budget as the first prompt.
+ * `promptToAnswer()` owns what a run ended with: whether the agent answered (its last message is an assistant
+ * message with text and no tool call, and the caller's `isAnswer` accepts the text), the tool-free finalize turn
+ * when it did not, and the status: complete, partial (a cap or abort cut it short) or none. Each caller keeps
+ * only its prompts, its tools, what counts as an answer, and how it words the result. `prompt()` accumulates
+ * turns/tokens across repeat calls rather than resetting them, so the finalize turn counts against the same
+ * budget as the first prompt.
  */
 
 import {
@@ -46,6 +45,31 @@ export function endedOnToolCall(messages: AgentMessage[]): boolean {
 	return last?.role === "assistant" && Array.isArray(last.content) && last.content.some((b) => b.type === "toolCall");
 }
 
+/**
+ * The text of the run's final message when that message is an assistant reply with no tool call, else "". A cap
+ * stops the loop after a turn's tool results, so a capped run ends on a tool result: the narration beside its last
+ * tool call ("Let me run the tests.") is not an answer, though `lastAssistantText` would return it.
+ */
+function finalReplyText(messages: AgentMessage[]): string {
+	const last = messages[messages.length - 1];
+	if (last?.role !== "assistant" || endedOnToolCall(messages)) return "";
+	return lastAssistantText([last]);
+}
+
+function capLines(text: string, maxLines: number | undefined): string {
+	const lines = text.split("\n");
+	if (maxLines === undefined || lines.length <= maxLines) return text;
+	return `${lines.slice(0, maxLines).join("\n")}\n[truncated by harness: exceeded ${maxLines} lines]`;
+}
+
+function summarizeArgs(args: unknown): string {
+	try {
+		return (JSON.stringify(args) ?? "").slice(0, 120);
+	} catch {
+		return "";
+	}
+}
+
 export interface CreateBudgetedAgentOptions {
 	systemPrompt: string;
 	model: Model<Api>;
@@ -60,25 +84,43 @@ export interface CreateBudgetedAgentOptions {
 	thinkingLevel?: ThinkingLevel;
 	/** Runs before every tool call of the sub-agent; a sub-agent that changes files uses the parent's own gate. */
 	beforeToolCall?: AgentOptions["beforeToolCall"];
+	/** Called with "<tool>: <args, first 120 chars>" as each tool call starts, for a live status line. */
+	onStatus?: (status: string) => void;
+	/** Truncates the text `promptToAnswer` returns to this many lines, with a note saying so. */
+	capLines?: number;
 }
 
 export interface BudgetedAgentTurnStats {
 	turns: number;
 	inputTokens: number;
 	outputTokens: number;
-	/** True once maxTurns or maxInputTokens was hit - the caller's INCOMPLETE contract, not this module's. */
+	/** Total cost of the run's assistant messages, from their reported usage. */
+	cost: number;
+	/** True once maxTurns or maxInputTokens was hit. */
 	stoppedByBudget: boolean;
 }
 
 export interface PromptToAnswerOptions {
 	/** Sent as one extra turn with no tools when the first prompt did not end in an answer. */
 	finalizePrompt: string;
-	/** The caller's judgment of what counts as an answer, given the last assistant text and the stats so far. */
-	isAnswer: (text: string, stats: BudgetedAgentTurnStats) => boolean;
+	/**
+	 * The caller's judgment of whether the final reply's text counts as an answer, given the stats so far. Only
+	 * asked about a final assistant reply with text and no tool call; anything else is never an answer. Without it,
+	 * every such reply is one.
+	 */
+	isAnswer?: (text: string, stats: BudgetedAgentTurnStats) => boolean;
 }
 
+/**
+ * complete: answered, and no cap or abort cut the run short (an answer written in the finalize turn counts when
+ * the model had only stopped to narrate, and one written on the last allowed turn counts too). partial: answered
+ * only in the finalize turn a cap forced, or the signal aborted. none: no answer.
+ */
+export type AnswerStatus = "complete" | "partial" | "none";
+
 export interface PromptedAnswer {
-	/** The last assistant text after the run, including the finalize turn if there was one. */
+	status: AnswerStatus;
+	/** The answer (line-capped) when there is one; otherwise the last assistant text, as notes. */
 	text: string;
 	/** Accumulated over the first prompt and the finalize turn. */
 	stats: BudgetedAgentTurnStats;
@@ -89,7 +131,7 @@ export interface PromptedAnswer {
 }
 
 export interface BudgetedAgentHandle {
-	/** The underlying Agent, for a caller that needs its own subscription (e.g. explorer's onStatus). */
+	/** The underlying Agent, for a caller that needs its own state or subscription. */
 	agent: Agent;
 	/**
 	 * Run one prompt to completion. Turns/tokens accumulate across repeat calls on the same
@@ -108,6 +150,7 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 	let turns = 0;
 	let inputTokens = 0;
 	let outputTokens = 0;
+	let cost = 0;
 	let stoppedByBudget = false;
 	const hooks = options.providerHooks;
 
@@ -149,7 +192,10 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 				// Issue #390: `input` excludes cached tokens, and a multi-turn sub-agent resends its context mostly as cache reads.
 				inputTokens += (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
 				outputTokens += usage.output ?? 0;
+				cost += usage.cost?.total ?? 0;
 			}
+		} else if (event.type === "tool_execution_start") {
+			options.onStatus?.(`${event.toolName}: ${summarizeArgs(event.args)}`);
 		}
 	});
 
@@ -159,7 +205,12 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 
 	const prompt = async (text: string): Promise<BudgetedAgentTurnStats> => {
 		await agent.prompt(text);
-		return { turns, inputTokens, outputTokens, stoppedByBudget };
+		return { turns, inputTokens, outputTokens, cost, stoppedByBudget };
+	};
+
+	const answerOf = (stats: BudgetedAgentTurnStats, isAnswer: PromptToAnswerOptions["isAnswer"]) => {
+		const reply = finalReplyText(agent.state.messages);
+		return reply.length > 0 && (isAnswer?.(reply, stats) ?? true) ? reply : undefined;
 	};
 
 	return {
@@ -173,13 +224,26 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 						inputTokens >= options.maxInputTokens && `${options.maxInputTokens / 1000}K input-token cap`,
 					].filter((limit): limit is string => typeof limit === "string")
 				: [];
+			let answer = answerOf(stats, isAnswer);
 			let finalized = false;
-			if (!options.signal?.aborted && !isAnswer(lastAssistantText(agent.state.messages), stats)) {
+			if (answer === undefined && !options.signal?.aborted) {
 				finalized = true;
 				agent.state.tools = [];
 				stats = await prompt(finalizePrompt);
+				answer = answerOf(stats, isAnswer);
 			}
-			return { text: lastAssistantText(agent.state.messages), stats, finalized, stoppedBy };
+			if (answer === undefined) {
+				return { status: "none", text: lastAssistantText(agent.state.messages), stats, finalized, stoppedBy };
+			}
+			// A cap that fired on the turn the agent answered cut nothing off; only one that forced the finalize turn did.
+			const cutShort = (finalized && stoppedBy.length > 0) || options.signal?.aborted === true;
+			return {
+				status: cutShort ? "partial" : "complete",
+				text: capLines(answer, options.capLines),
+				stats,
+				finalized,
+				stoppedBy,
+			};
 		},
 	};
 }

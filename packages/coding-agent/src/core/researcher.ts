@@ -16,7 +16,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Static, Type } from "typebox";
 import { getAgentDir } from "../config.ts";
-import { createBudgetedAgent, endedOnToolCall, lastAssistantText } from "./background-agent.ts";
+import { createBudgetedAgent } from "./background-agent.ts";
 import { resolveBackgroundModel } from "./background-models.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -120,27 +120,25 @@ export async function runResearch(options: RunResearchOptions): Promise<Research
 	// can cut it off mid-research (2026-09-30: the job stopped on "let me write the report directly" and
 	// returned nothing). Either way the handle gives it one last turn, with no tools, to write up what it has.
 	const {
+		status,
+		text,
 		stats,
-		finalized,
 		stoppedBy: budgetLimits,
 	} = await handle.promptToAnswer(options.question, {
 		finalizePrompt: FINALIZE_PROMPT,
 		isAnswer: looksLikeReport,
 	});
 	const stoppedBy = signal.aborted ? [...budgetLimits, "time limit"] : budgetLimits;
-	const cutShort = finalized && budgetLimits.length > 0;
 
-	const text = lastAssistantText(handle.agent.state.messages);
-	const hasReport = !endedOnToolCall(handle.agent.state.messages) && looksLikeReport(text);
-	const complete = hasReport && !signal.aborted && !cutShort;
 	let report: string;
-	if (!hasReport) {
+	if (status === "none") {
 		report = `INCOMPLETE: the job hit its budget or timeout before finishing.${text ? `\n\nLast notes:\n${text}` : ""}`;
-	} else if (cutShort) {
+	} else if (status === "partial") {
 		report = `Note: the job stopped early (${stoppedBy.join(", ")}), so this report covers only what it had gathered.\n\n${text}`;
 	} else {
 		report = text;
 	}
+	const complete = status === "complete";
 	const result = {
 		report,
 		complete,
@@ -150,7 +148,7 @@ export async function runResearch(options: RunResearchOptions): Promise<Research
 		stoppedBy,
 	};
 	console.error(
-		`[research] ${complete ? "complete" : hasReport ? "partial" : "no report"}: ${result.turnsUsed} turns, ${Math.round(result.inputTokens / 1000)}K in, ${result.tavilyCalls} searches${stoppedBy.length > 0 ? `, hit ${stoppedBy.join(", ")}` : ""}`,
+		`[research] ${status === "none" ? "no report" : status}: ${result.turnsUsed} turns, ${Math.round(result.inputTokens / 1000)}K in, ${result.tavilyCalls} searches${stoppedBy.length > 0 ? `, hit ${stoppedBy.join(", ")}` : ""}`,
 	);
 	return result;
 }

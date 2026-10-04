@@ -1,5 +1,6 @@
 import type { ProviderHeaders } from "theoses-ai";
 import { type AssistantMessage, EventStream, getModel } from "theoses-ai/compat";
+import { Type } from "typebox";
 import { describe, expect, it, vi } from "vitest";
 import { createBudgetedAgent, endedOnToolCall, lastAssistantText } from "../src/core/background-agent.ts";
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
@@ -71,7 +72,7 @@ describe("createBudgetedAgent", () => {
 
 		const stats = await handle.prompt("question");
 
-		expect(stats).toEqual({ turns: 1, inputTokens: 1000, outputTokens: 50, stoppedByBudget: false });
+		expect(stats).toEqual({ turns: 1, inputTokens: 1000, outputTokens: 50, cost: 0, stoppedByBudget: false });
 		expect(lastAssistantText(handle.agent.state.messages)).toBe("the answer");
 		expect(endedOnToolCall(handle.agent.state.messages)).toBe(false);
 	});
@@ -153,7 +154,7 @@ describe("createBudgetedAgent", () => {
 		await handle.prompt("first question");
 		const stats = await handle.prompt("finalize");
 
-		expect(stats).toEqual({ turns: 2, inputTokens: 2000, outputTokens: 100, stoppedByBudget: false });
+		expect(stats).toEqual({ turns: 2, inputTokens: 2000, outputTokens: 100, cost: 0, stoppedByBudget: false });
 		expect(lastAssistantText(handle.agent.state.messages)).toBe("second");
 	});
 
@@ -200,7 +201,13 @@ describe("createBudgetedAgent", () => {
 
 			expect(result.finalized).toBe(true);
 			expect(result.text).toBe("Summary: final");
-			expect(result.stats).toEqual({ turns: 2, inputTokens: 2000, outputTokens: 100, stoppedByBudget: false });
+			expect(result.stats).toEqual({
+				turns: 2,
+				inputTokens: 2000,
+				outputTokens: 100,
+				cost: 0,
+				stoppedByBudget: false,
+			});
 			expect(handle.agent.state.tools).toEqual([]);
 			expect(callCount()).toBe(2);
 		});
@@ -227,6 +234,87 @@ describe("createBudgetedAgent", () => {
 
 			expect(result.finalized).toBe(true);
 			expect(callCount()).toBe(2);
+		});
+
+		const noopTool = {
+			name: "noop",
+			label: "noop",
+			description: "does nothing",
+			parameters: Type.Object({ path: Type.String() }),
+			execute: async () => ({ content: [{ type: "text" as const, text: "ok" }], details: undefined }),
+		} as Parameters<typeof createBudgetedAgent>[0]["tools"][number];
+		const narrationWithToolCall = (turn: number) =>
+			assistant("", {
+				content: [
+					{ type: "text", text: "Let me look again." },
+					{ type: "toolCall", id: `c${turn}`, name: "noop", arguments: { path: "a.txt" } },
+				],
+				stopReason: "toolUse",
+			});
+
+		it("reports complete for an answer the first prompt wrote on its own", async () => {
+			const { runtime } = fakeRuntime(assistant("Summary: done"));
+
+			const result = await handleFor(runtime).promptToAnswer("q", {
+				finalizePrompt: "write it up",
+				isAnswer: isReport,
+			});
+
+			expect(result.status).toBe("complete");
+		});
+
+		it("does not take the narration beside a capped run's last tool call for an answer", async () => {
+			const { runtime } = fakeRuntime(narrationWithToolCall(1), assistant("Summary: written up"));
+			const handle = handleFor(runtime, { maxTurns: 1, tools: [noopTool] });
+
+			const result = await handle.promptToAnswer("q", { finalizePrompt: "write it up" });
+
+			expect(result.finalized).toBe(true);
+			expect(result.status).toBe("partial");
+			expect(result.text).toBe("Summary: written up");
+		});
+
+		it("reports none, with the last text as notes, when even the finalize turn writes no answer", async () => {
+			const { runtime } = fakeRuntime(assistant("let me look"), assistant("still looking"));
+
+			const result = await handleFor(runtime).promptToAnswer("q", {
+				finalizePrompt: "write it up",
+				isAnswer: isReport,
+			});
+
+			expect(result.status).toBe("none");
+			expect(result.text).toBe("still looking");
+		});
+
+		it("caps the answer's lines, reports tool calls as status, and sums the cost", async () => {
+			const answer = assistant("Summary\nline 2\nline 3", {
+				usage: {
+					input: 1000,
+					output: 50,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 1050,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.25 },
+				},
+			});
+			const { runtime } = fakeRuntime(narrationWithToolCall(1), answer);
+			const statuses: string[] = [];
+			const handle = createBudgetedAgent({
+				systemPrompt: "test",
+				model,
+				tools: [noopTool],
+				modelRuntime: runtime,
+				maxTurns: 5,
+				maxInputTokens: 100_000,
+				capLines: 2,
+				onStatus: (status) => statuses.push(status),
+			});
+
+			const result = await handle.promptToAnswer("q", { finalizePrompt: "write it up" });
+
+			expect(result.text).toBe("Summary\nline 2\n[truncated by harness: exceeded 2 lines]");
+			expect(statuses).toEqual(['noop: {"path":"a.txt"}']);
+			expect(result.stats.cost).toBe(0.25);
 		});
 
 		it("skips the finalize turn once the signal has aborted", async () => {
