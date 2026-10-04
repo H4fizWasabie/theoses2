@@ -16,6 +16,8 @@
 import { readFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import type {
+	AfterToolCallContext,
+	AfterToolCallResult,
 	Agent,
 	AgentEvent,
 	AgentMessage,
@@ -140,7 +142,7 @@ import {
 import { createSessionSystemPrompt, type SessionSystemPrompt } from "./session-system-prompt.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
-import { createTaskToolDefinition } from "./task-agent.ts";
+import { createTaskToolDefinition, type TaskToolOptions } from "./task-agent.ts";
 import { TaskPlanGuard } from "./task-plan-guard.ts";
 import { resolveThinkingLevel } from "./thinking-level.ts";
 import { createToolRegistry, initialActiveToolNames, type ToolRegistry } from "./tool-registry.ts";
@@ -717,54 +719,62 @@ export class AgentSession {
 			return pushed.length > 0 ? pushed : await this._runStopHooks();
 		};
 
-		this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
-			const runner = this._extensionRunner;
-			const hookResult = runner.hasHandlers("tool_result")
-				? await runner.emitToolResult({
-						type: "tool_result",
-						toolName: toolCall.name,
-						toolCallId: toolCall.id,
-						input: args as Record<string, unknown>,
-						content: result.content,
-						details: result.details,
-						isError,
-						usage: result.usage,
-					})
-				: undefined;
+		this.agent.afterToolCall = (context) => this._afterToolCall(context);
+	}
 
-			const content = hookResult?.content ?? result.content ?? [];
-			// Runs after the extension hook so images injected or replaced by extensions are normalized too.
-			const normalizedContent = await normalizeToolResultImages(content, {
-				autoResizeImages: this.settingsManager.getImageAutoResize(),
-			});
+	/**
+	 * After every tool call of this session and of its task sub-agent: extension `tool_result` handlers, image
+	 * normalization, then the owner's PostToolUse hooks.
+	 */
+	private async _afterToolCall({
+		toolCall,
+		args,
+		result,
+		isError,
+	}: AfterToolCallContext): Promise<AfterToolCallResult | undefined> {
+		const runner = this._extensionRunner;
+		const hookResult = runner.hasHandlers("tool_result")
+			? await runner.emitToolResult({
+					type: "tool_result",
+					toolName: toolCall.name,
+					toolCallId: toolCall.id,
+					input: args as Record<string, unknown>,
+					content: result.content,
+					details: result.details,
+					isError,
+					usage: result.usage,
+				})
+			: undefined;
 
-			// The owner's PostToolUse hooks run last, on what the model would now see, and can add context to it.
-			const finalIsError = hookResult?.isError ?? isError;
-			const hookContext = await runPostToolUse(this.settingsManager.getCommandHooks(), this._hookContext(), {
-				toolName: toolCall.name,
-				toolCallId: toolCall.id,
-				input: args as Record<string, unknown>,
-				content: normalizedContent,
-				isError: finalIsError,
-			});
-			const finalContent =
-				hookContext.length > 0
-					? [
-							...normalizedContent,
-							...hookContext.map((text) => ({ type: "text" as const, text: `[Hook] ${text}` })),
-						]
-					: normalizedContent;
+		const content = hookResult?.content ?? result.content ?? [];
+		// Runs after the extension hook so images injected or replaced by extensions are normalized too.
+		const normalizedContent = await normalizeToolResultImages(content, {
+			autoResizeImages: this.settingsManager.getImageAutoResize(),
+		});
 
-			if (!hookResult && finalContent === content) {
-				return undefined;
-			}
+		// The owner's PostToolUse hooks run last, on what the model would now see, and can add context to it.
+		const finalIsError = hookResult?.isError ?? isError;
+		const hookContext = await runPostToolUse(this.settingsManager.getCommandHooks(), this._hookContext(), {
+			toolName: toolCall.name,
+			toolCallId: toolCall.id,
+			input: args as Record<string, unknown>,
+			content: normalizedContent,
+			isError: finalIsError,
+		});
+		const finalContent =
+			hookContext.length > 0
+				? [...normalizedContent, ...hookContext.map((text) => ({ type: "text" as const, text: `[Hook] ${text}` }))]
+				: normalizedContent;
 
-			return {
-				content: finalContent,
-				details: hookResult?.details,
-				isError: finalIsError,
-				usage: hookResult?.usage,
-			};
+		if (!hookResult && finalContent === content) {
+			return undefined;
+		}
+
+		return {
+			content: finalContent,
+			details: hookResult?.details,
+			isError: finalIsError,
+			usage: hookResult?.usage,
 		};
 	}
 
@@ -2392,6 +2402,15 @@ export class AgentSession {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
+		// Shared with the task sub-agent, which does the parent's own work with the same tools.
+		const sharedToolOptions: TaskToolOptions = {
+			read: { autoResizeImages },
+			bash: { commandPrefix: shellCommandPrefix, shellPath },
+			edit: {
+				siblingHint: this.settingsManager.getEditSiblingHint(),
+				resultSnippet: this.settingsManager.getEditSnippet(),
+			},
+		};
 		const baseToolDefinitions = this._baseToolsOverride
 			? Object.fromEntries(
 					Object.entries(this._baseToolsOverride).map(([name, tool]) => [
@@ -2400,12 +2419,7 @@ export class AgentSession {
 					]),
 				)
 			: createAllToolDefinitions(this._cwd, {
-					read: { autoResizeImages },
-					bash: { commandPrefix: shellCommandPrefix, shellPath },
-					edit: {
-						siblingHint: this.settingsManager.getEditSiblingHint(),
-						resultSnippet: this.settingsManager.getEditSnippet(),
-					},
+					...sharedToolOptions,
 					workingNote: (note) => this.sessionManager.appendWorkingNote(note),
 					workingNoteClear: () => this.sessionManager.clearWorkingNote(),
 					taskPlan: {
@@ -2439,6 +2453,8 @@ export class AgentSession {
 			getThinkingLevel: () => this.thinkingLevel,
 			providerHooks,
 			beforeToolCall: (context) => this._gateToolCall(context),
+			afterToolCall: (context) => this._afterToolCall(context),
+			toolOptions: sharedToolOptions,
 		});
 
 		// Same reason as `explore` above for living here rather than in tools/index.ts.
