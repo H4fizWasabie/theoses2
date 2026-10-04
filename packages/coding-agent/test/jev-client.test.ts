@@ -85,6 +85,16 @@ describe("askJevNoul timeout", () => {
 		vi.stubGlobal("fetch", refused);
 		expect(await askJevNoul({ message: "hi" }, "q", { timeoutMs: 20, retries: 1 })).toBeUndefined();
 		expect(refused).toHaveBeenCalledTimes(1);
+
+		// An HTTP failure whose body read then times out is still an HTTP failure.
+		const httpError = vi.fn(async () => ({
+			ok: false,
+			status: 502,
+			text: () => Promise.reject(new DOMException("The operation was aborted due to timeout", "TimeoutError")),
+		}));
+		vi.stubGlobal("fetch", httpError);
+		expect(await askJevNoul({ message: "hi" }, "q", { timeoutMs: 20, retries: 1 })).toBeUndefined();
+		expect(httpError).toHaveBeenCalledTimes(1);
 	});
 
 	it("passes a default timeout signal when none is given", async () => {

@@ -288,12 +288,12 @@ export async function applyConsolidationResult(
 	for (const edge of parsed.edges) {
 		const from = resolve(edge.from);
 		const to = resolve(edge.to);
-		// Two facts that were merged into one stored node would otherwise become a self-edge.
-		if (from === to) continue;
 		if (!exists(from) || !exists(to)) {
 			dangling++;
 			continue;
 		}
+		// Two facts that were merged into one stored node would otherwise become a self-edge.
+		if (from === to) continue;
 		memoryStore.addEdge(from, { target: to, rel: edge.rel });
 	}
 	const related = parsed.episode.relatedFactIds?.map(resolve);

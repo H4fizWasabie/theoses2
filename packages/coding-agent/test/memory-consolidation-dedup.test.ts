@@ -184,6 +184,7 @@ describe("applyConsolidationResult does not write a fact the store already has",
 			edges: [
 				{ from: "f7", to: other.id, rel: "depends_on" },
 				{ from: "f1", to: "f9", rel: "depends_on" },
+				{ from: "f5", to: "f5", rel: "depends_on" },
 				{ from: "f1", to: other.id, rel: "depends_on" },
 			],
 			episode: { ...EPISODE, relatedFactIds: ["f1", "f4"] },
@@ -192,6 +193,6 @@ describe("applyConsolidationResult does not write a fact the store already has",
 		const created = store.listNodes().find((node) => node.id !== other.id);
 		expect(created?.edges).toEqual([{ target: other.id, rel: "depends_on" }]);
 		expect(recordEpisode).toHaveBeenCalledWith(expect.objectContaining({ relatedSemanticNodeIds: [created?.id] }));
-		expect(log).toHaveBeenCalledWith(expect.stringContaining("dropped 3 reference(s)"));
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("dropped 4 reference(s)"));
 	});
 });

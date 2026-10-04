@@ -94,7 +94,9 @@ async function askJev(
 				signal: AbortSignal.timeout(timeoutMs),
 			});
 			if (!response.ok) {
-				console.error(`Jev call failed ${describe()}: ${response.status} ${(await response.text()).slice(0, 200)}`);
+				// The body read can time out too; that must not turn an HTTP failure into a retry.
+				const detail = await response.text().catch(() => "");
+				console.error(`Jev call failed ${describe()}: ${response.status} ${detail.slice(0, 200)}`);
 				return undefined;
 			}
 			const parsed = (await response.json()) as JevResponse;
