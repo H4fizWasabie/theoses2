@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix: a Task Plan no longer outlives its task. `SessionManager.getTaskPlan` walked the whole branch, so a plan left open in one task stayed current across every later Task Boundary and rejected the next task's `create` with "A plan is already open" (production 2026-10-04: an open plan from 10-01 survived nine boundaries). The lookup now stops at the latest boundary's anchor message (`beforeEntryId`), not at the boundary entry, which is written after its turn's reply; a plan created in the new task's first turn is still found. The `task_plan` tool and the stop guard both read through it.
+
 ## [1.0.119] - 2026-10-04
 
 - fix: the Turn Settlement Jev checks (task-boundary detection and the consolidation trigger) send one fresh request after a timeout. Jev answers in well under 2 seconds (p50 300 ms, max 1.4 s over 20 calls from production) or stalls: about 8% of those calls hit the 5-second cap in production over 7 days, and a longer wait would not have helped. `JevCallOptions.retries` sets it; only a timeout is retried, and the other callers are unchanged.

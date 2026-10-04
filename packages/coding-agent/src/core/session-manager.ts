@@ -31,6 +31,7 @@ import {
 } from "./messages.ts";
 import { type SessionLookupKey, sessionLookupKey } from "./session-cwd.ts";
 import { externalizeImages, hydrateImages } from "./session-images.ts";
+import { TASK_BOUNDARY_CUSTOM_TYPE, type TaskBoundaryData } from "./task-boundary-detector.ts";
 import { TASK_PLAN_ENTRY_TYPE, type TaskPlan } from "./task-plan.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
@@ -1193,12 +1194,23 @@ export class SessionManager {
 		};
 	}
 
-	/** The current Task Plan (issue #382): the latest `task_plan` custom entry on this branch. */
+	/** The current Task Plan (issue #382): the latest `task_plan` custom entry on this branch, within the
+	 * current task. A plan from before the latest task boundary belongs to an earlier task: returning it let
+	 * an open plan from one task reject every later task's `create` (2026-10-04). */
 	getTaskPlan(): TaskPlan | undefined {
 		// Walks back from the leaf and stops at the first plan entry: read on every file-changing tool call.
+		// The boundary entry is written after its turn's reply, so the task starts at its anchor message,
+		// not at the boundary entry itself.
+		let taskStartId: string | undefined;
 		let entry = this.leafId ? this.byId.get(this.leafId) : undefined;
 		while (entry) {
-			if (entry.type === "custom" && entry.customType === TASK_PLAN_ENTRY_TYPE) return entry.data as TaskPlan;
+			if (entry.type === "custom") {
+				if (entry.customType === TASK_PLAN_ENTRY_TYPE) return entry.data as TaskPlan;
+				if (entry.customType === TASK_BOUNDARY_CUSTOM_TYPE && taskStartId === undefined) {
+					taskStartId = (entry.data as TaskBoundaryData).beforeEntryId;
+				}
+			}
+			if (entry.id === taskStartId) return undefined;
 			entry = entry.parentId ? this.byId.get(entry.parentId) : undefined;
 		}
 		return undefined;
