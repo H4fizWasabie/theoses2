@@ -141,6 +141,60 @@ describe("AgentSession intake for queued messages", () => {
 		expect(harness.session.isStreaming).toBe(false);
 	});
 
+	it("ends the run after a bounded wait when an input handler itself waits for the session to go idle", async () => {
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const waitTool: AgentTool = {
+			name: "wait",
+			label: "Wait",
+			description: "Wait for release",
+			parameters: Type.Object({}),
+			execute: async () => {
+				await gate;
+				return { content: [{ type: "text", text: "released" }], details: {} };
+			},
+		};
+		const harness = await createHarness({
+			tools: [waitTool],
+			extensionFactories: [
+				(pi) => {
+					pi.on("input", async (event, ctx) => {
+						if (event.text !== "after-idle") return undefined;
+						while (!ctx.isIdle()) await new Promise((resolve) => setTimeout(resolve, 10));
+						return undefined;
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		(harness.session as unknown as { _intakeHoldMs: number })._intakeHoldMs = 200;
+		const toolStarted = new Promise<void>((resolve) => {
+			const unsubscribe = harness.session.subscribe((event) => {
+				if (event.type === "tool_execution_start") {
+					unsubscribe();
+					resolve();
+				}
+			});
+		});
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("wait", {}), { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		const run = harness.session.prompt("start");
+
+		await toolStarted;
+		const steering = harness.session.steer("after-idle");
+		release();
+		await run;
+
+		expect(harness.session.isStreaming).toBe(false);
+		// Past the bound the run ended; the handler then saw idle and the message was queued for the next prompt.
+		await expect(steering).resolves.toBe(true);
+		expect(harness.session.pendingMessageCount).toBe(1);
+	});
+
 	it("drops a message still in intake when the queue is cleared, as /stop does", async () => {
 		const { harness, release, toolStarted, callWait } = await waiting({
 			UserPromptSubmit: [{ command: "grep -q slow-hook && sleep 0.3; exit 0" }],

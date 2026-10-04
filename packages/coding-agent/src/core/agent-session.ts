@@ -373,6 +373,9 @@ export function decoratePromptText(
 export const MID_TASK_NOTE =
 	"[Sent while you were working on the current task. If it is a question, answer it briefly; if it changes the task, adjust. Then keep working: put your next tool call in the same response, because a text-only response ends the task. Stop only if the user asks you to stop or wait, or if the message conflicts with what was agreed; then ask.]";
 
+/** Longer than a default command hook's 30s timeout; a handler that never settles must not hang a run forever. */
+const INTAKE_HOLD_MS = 60_000;
+
 /** A message waiting in the steering or follow-up queue. */
 interface QueuedInput {
 	/** What was submitted, for the queue display and for restoring it to an editor. */
@@ -443,6 +446,8 @@ export class AgentSession {
 	private _followUpQueue: QueuedInput[] = [];
 	/** Messages accepted while a run was active and still in intake; the run waits for them before it ends. */
 	private readonly _inputInIntake = new Set<Promise<unknown>>();
+	/** How long a run waits for messages still in intake before it ends anyway (see _waitForInputInIntake). */
+	private _intakeHoldMs = INTAKE_HOLD_MS;
 	/** Bumped by clearQueue(), so a message still in intake when the queue was cleared is dropped, not queued. */
 	private _queueGeneration = 0;
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
@@ -1713,9 +1718,24 @@ export class AgentSession {
 		}
 	}
 
+	/**
+	 * Bounded by _intakeHoldMs: an input handler that itself waits for the session to go idle would otherwise hang
+	 * the run forever. Past the bound the run ends, and a message that finishes intake later stays queued until
+	 * the next prompt.
+	 */
 	private async _waitForInputInIntake(): Promise<void> {
+		const deadline = Date.now() + this._intakeHoldMs;
 		while (this._inputInIntake.size > 0) {
-			await Promise.allSettled([...this._inputInIntake]);
+			const remaining = deadline - Date.now();
+			if (remaining <= 0) return;
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			await Promise.race([
+				Promise.allSettled([...this._inputInIntake]),
+				new Promise((resolve) => {
+					timer = setTimeout(resolve, remaining);
+				}),
+			]);
+			clearTimeout(timer);
 		}
 	}
 
