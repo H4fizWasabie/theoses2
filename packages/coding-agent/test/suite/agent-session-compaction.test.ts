@@ -9,12 +9,19 @@ import {
 } from "theoses-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { estimateTokens } from "../../src/core/compaction/index.ts";
+import type { CompactionRun } from "../../src/core/compaction/run.ts";
+import type { OperationLoop } from "../../src/core/operation-loop.ts";
 import { createHarness, getUserTexts, type Harness } from "./harness.ts";
 
 type SessionWithCompactionInternals = {
-	_checkCompaction: (assistantMessage: AssistantMessage, skipAbortedCheck?: boolean) => Promise<boolean>;
-	_runAutoCompaction: (reason: "overflow" | "threshold", willRetry: boolean) => Promise<boolean>;
+	_operationLoop: OperationLoop;
+	_compactionRun: CompactionRun;
 };
+
+/** Stubs the Compaction Run so a test sees only the trigger decision the Operation Loop makes. */
+function spyOnCompactionRun(internals: SessionWithCompactionInternals) {
+	return vi.spyOn(internals._compactionRun, "run").mockResolvedValue({ kind: "skipped" });
+}
 
 function createUsage(totalTokens: number) {
 	return {
@@ -305,7 +312,7 @@ describe("AgentSession compaction characterization", () => {
 		const getStreamCallCount = useSummaryStreamFn(harness, "auto summary from custom stream");
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
 
-		await sessionInternals._runAutoCompaction("threshold", false);
+		await sessionInternals._compactionRun.run({ reason: "threshold", willRetry: false });
 
 		const compactionEntries = harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction");
 		const compactionEnd = harness.eventsOfType("compaction_end").at(-1);
@@ -338,7 +345,9 @@ describe("AgentSession compaction characterization", () => {
 		};
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
 
-		await expect(sessionInternals._runAutoCompaction("threshold", false)).resolves.toBe(false);
+		await expect(
+			sessionInternals._compactionRun.run({ reason: "threshold", willRetry: false }),
+		).resolves.toMatchObject({ kind: "failed" });
 
 		expect(harness.eventsOfType("compaction_end").at(-1)).toMatchObject({
 			reason: "threshold",
@@ -448,7 +457,7 @@ describe("AgentSession compaction characterization", () => {
 			totalTokens: 100,
 			timestamp: Date.now(),
 		});
-		const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue(false);
+		const compactionRunSpy = spyOnCompactionRun(sessionInternals);
 		const compactionErrors: string[] = [];
 		harness.session.subscribe((event) => {
 			if (event.type === "compaction_end" && event.errorMessage) {
@@ -456,10 +465,10 @@ describe("AgentSession compaction characterization", () => {
 			}
 		});
 
-		await sessionInternals._checkCompaction(lengthOverflowMessage);
-		await sessionInternals._checkCompaction({ ...lengthOverflowMessage, timestamp: Date.now() + 1 });
+		await sessionInternals._operationLoop.beforePrompt(lengthOverflowMessage);
+		await sessionInternals._operationLoop.beforePrompt({ ...lengthOverflowMessage, timestamp: Date.now() + 1 });
 
-		expect(runAutoCompactionSpy).toHaveBeenCalledTimes(1);
+		expect(compactionRunSpy).toHaveBeenCalledTimes(1);
 		expect(compactionErrors).toContain(
 			"Context overflow recovery failed after one compact-and-retry attempt. Try reducing context or switching to a larger-context model.",
 		);
@@ -522,7 +531,11 @@ describe("AgentSession compaction characterization", () => {
 
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
 
-		await expect(sessionInternals._runAutoCompaction("threshold", false)).resolves.toBe(true);
+		// The run completes with the message still queued, so the Operation Loop continues (see operation-loop.test.ts).
+		await expect(
+			sessionInternals._compactionRun.run({ reason: "threshold", willRetry: false }),
+		).resolves.toMatchObject({ kind: "completed" });
+		expect(harness.session.agent.hasQueuedMessages()).toBe(true);
 	});
 
 	it("does not retry overflow recovery more than once", async () => {
@@ -534,7 +547,7 @@ describe("AgentSession compaction characterization", () => {
 			errorMessage: "prompt is too long",
 			timestamp: Date.now(),
 		});
-		const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue(false);
+		const compactionRunSpy = spyOnCompactionRun(sessionInternals);
 		const compactionErrors: string[] = [];
 		harness.session.subscribe((event) => {
 			if (event.type === "compaction_end" && event.errorMessage) {
@@ -542,10 +555,10 @@ describe("AgentSession compaction characterization", () => {
 			}
 		});
 
-		await sessionInternals._checkCompaction(overflowMessage);
-		await sessionInternals._checkCompaction({ ...overflowMessage, timestamp: Date.now() + 1 });
+		await sessionInternals._operationLoop.beforePrompt(overflowMessage);
+		await sessionInternals._operationLoop.beforePrompt({ ...overflowMessage, timestamp: Date.now() + 1 });
 
-		expect(runAutoCompactionSpy).toHaveBeenCalledTimes(1);
+		expect(compactionRunSpy).toHaveBeenCalledTimes(1);
 		expect(compactionErrors).toContain(
 			"Context overflow recovery failed after one compact-and-retry attempt. Try reducing context or switching to a larger-context model.",
 		);
@@ -613,11 +626,11 @@ describe("AgentSession compaction characterization", () => {
 			timestamp: Date.now(),
 		});
 
-		const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue(false);
+		const compactionRunSpy = spyOnCompactionRun(sessionInternals);
 
-		await sessionInternals._checkCompaction(staleAssistant, false);
+		await sessionInternals._operationLoop.beforePrompt(staleAssistant);
 
-		expect(runAutoCompactionSpy).not.toHaveBeenCalled();
+		expect(compactionRunSpy).not.toHaveBeenCalled();
 	});
 
 	it("triggers threshold compaction for error messages using the last successful usage", async () => {
@@ -641,11 +654,11 @@ describe("AgentSession compaction characterization", () => {
 			errorAssistant,
 		];
 
-		const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue(false);
+		const compactionRunSpy = spyOnCompactionRun(sessionInternals);
 
-		await sessionInternals._checkCompaction(errorAssistant);
+		await sessionInternals._operationLoop.beforePrompt(errorAssistant);
 
-		expect(runAutoCompactionSpy).toHaveBeenCalledWith("threshold", false);
+		expect(compactionRunSpy).toHaveBeenCalledWith({ reason: "threshold", willRetry: false });
 	});
 
 	it("does not trigger threshold compaction for error messages when no prior usage exists", async () => {
@@ -662,11 +675,11 @@ describe("AgentSession compaction characterization", () => {
 			errorAssistant,
 		];
 
-		const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue(false);
+		const compactionRunSpy = spyOnCompactionRun(sessionInternals);
 
-		await sessionInternals._checkCompaction(errorAssistant);
+		await sessionInternals._operationLoop.beforePrompt(errorAssistant);
 
-		expect(runAutoCompactionSpy).not.toHaveBeenCalled();
+		expect(compactionRunSpy).not.toHaveBeenCalled();
 	});
 
 	it("does not trigger threshold compaction when only kept pre-compaction usage exists", async () => {
@@ -707,11 +720,11 @@ describe("AgentSession compaction characterization", () => {
 			errorAssistant,
 		];
 
-		const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue(false);
+		const compactionRunSpy = spyOnCompactionRun(sessionInternals);
 
-		await sessionInternals._checkCompaction(errorAssistant);
+		await sessionInternals._operationLoop.beforePrompt(errorAssistant);
 
-		expect(runAutoCompactionSpy).not.toHaveBeenCalled();
+		expect(compactionRunSpy).not.toHaveBeenCalled();
 	});
 
 	it("does not trigger threshold compaction below the threshold or when disabled", async () => {
@@ -725,13 +738,13 @@ describe("AgentSession compaction characterization", () => {
 
 		const belowThresholdInternals = belowThresholdHarness.session as unknown as SessionWithCompactionInternals;
 		const disabledInternals = disabledHarness.session as unknown as SessionWithCompactionInternals;
-		const belowThresholdSpy = vi.spyOn(belowThresholdInternals, "_runAutoCompaction").mockResolvedValue(false);
-		const disabledSpy = vi.spyOn(disabledInternals, "_runAutoCompaction").mockResolvedValue(false);
+		const belowThresholdSpy = spyOnCompactionRun(belowThresholdInternals);
+		const disabledSpy = spyOnCompactionRun(disabledInternals);
 
-		await belowThresholdInternals._checkCompaction(
+		await belowThresholdInternals._operationLoop.beforePrompt(
 			createAssistant(belowThresholdHarness, { stopReason: "stop", totalTokens: 1_000, timestamp: Date.now() }),
 		);
-		await disabledInternals._checkCompaction(
+		await disabledInternals._operationLoop.beforePrompt(
 			createAssistant(disabledHarness, { stopReason: "stop", totalTokens: 1_000_000, timestamp: Date.now() }),
 		);
 

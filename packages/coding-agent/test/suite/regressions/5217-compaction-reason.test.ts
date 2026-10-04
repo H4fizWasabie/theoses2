@@ -1,10 +1,11 @@
 import { fauxAssistantMessage } from "theoses-ai";
 import { afterEach, describe, expect, it } from "vitest";
+import type { CompactionRun } from "../../../src/core/compaction/run.ts";
 import type { ExtensionFactory } from "../../../src/index.ts";
 import { createHarness, type Harness } from "../harness.ts";
 
 type SessionWithCompactionInternals = {
-	_runAutoCompaction: (reason: "overflow" | "threshold", willRetry: boolean) => Promise<boolean>;
+	_compactionRun: CompactionRun;
 };
 
 interface RecordedCompactionEvent {
@@ -71,7 +72,7 @@ describe("issue #5217 compaction reason on extension events", () => {
 		harnesses.push(harness);
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
 
-		await sessionInternals._runAutoCompaction("threshold", false);
+		await sessionInternals._compactionRun.run({ reason: "threshold", willRetry: false });
 
 		expect(recorded).toEqual([
 			{ type: "session_before_compact", reason: "threshold", willRetry: false },
@@ -85,7 +86,7 @@ describe("issue #5217 compaction reason on extension events", () => {
 		harnesses.push(harness);
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
 
-		await sessionInternals._runAutoCompaction("overflow", true);
+		await sessionInternals._compactionRun.run({ reason: "overflow", willRetry: true });
 
 		expect(recorded).toEqual([
 			{ type: "session_before_compact", reason: "overflow", willRetry: true },

@@ -1,10 +1,12 @@
 import type { AssistantMessage } from "theoses-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { CompactionRun } from "../../../src/core/compaction/run.ts";
+import type { OperationLoop } from "../../../src/core/operation-loop.ts";
 import { createHarness, type Harness } from "../harness.ts";
 
 type SessionWithCompactionInternals = {
-	_checkCompaction: (assistantMessage: AssistantMessage) => Promise<boolean>;
-	_runAutoCompaction: (reason: "overflow" | "threshold", willRetry: boolean) => Promise<boolean>;
+	_operationLoop: OperationLoop;
+	_compactionRun: CompactionRun;
 };
 
 function createZeroUsageAssistant(harness: Harness): AssistantMessage {
@@ -55,12 +57,12 @@ describe("issue #8328 zero-usage auto-compaction", () => {
 			assistant,
 		];
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
-		const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue(false);
+		const compactionRunSpy = vi.spyOn(sessionInternals._compactionRun, "run").mockResolvedValue({ kind: "skipped" });
 
-		await sessionInternals._checkCompaction(assistant);
+		await sessionInternals._operationLoop.beforePrompt(assistant);
 
-		expect(runAutoCompactionSpy).toHaveBeenCalledOnce();
-		expect(runAutoCompactionSpy).toHaveBeenCalledWith("threshold", false);
+		expect(compactionRunSpy).toHaveBeenCalledOnce();
+		expect(compactionRunSpy).toHaveBeenCalledWith({ reason: "threshold", willRetry: false });
 	});
 
 	it("does not compact when the zero-usage message estimate is below the threshold", async () => {
@@ -71,10 +73,10 @@ describe("issue #8328 zero-usage auto-compaction", () => {
 			assistant,
 		];
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
-		const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue(false);
+		const compactionRunSpy = vi.spyOn(sessionInternals._compactionRun, "run").mockResolvedValue({ kind: "skipped" });
 
-		await sessionInternals._checkCompaction(assistant);
+		await sessionInternals._operationLoop.beforePrompt(assistant);
 
-		expect(runAutoCompactionSpy).not.toHaveBeenCalled();
+		expect(compactionRunSpy).not.toHaveBeenCalled();
 	});
 });

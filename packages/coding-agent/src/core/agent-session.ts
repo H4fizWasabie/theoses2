@@ -39,13 +39,9 @@ import type {
 import {
 	clampThinkingLevel,
 	cleanupSessionResources,
-	createRetryBudget,
 	getSupportedThinkingLevels,
-	isContextOverflow,
-	isRetryableAssistantError,
 	modelsAreEqual,
 	type RetryCallbacks,
-	type RetryEnd,
 	resetApiProviders,
 	streamSimple,
 } from "theoses-ai/compat";
@@ -79,7 +75,6 @@ import {
 	generateBranchSummary,
 } from "./compaction/index.ts";
 import { type CompactionRun, createCompactionRun, type Summarizer } from "./compaction/run.ts";
-import { decideCompaction } from "./compaction/trigger.ts";
 import { pruneFinishedTurnOutputs } from "./context-pruning.ts";
 import { THINKING_LEVEL_OPTIONS } from "./defaults.ts";
 import { createExploreToolDefinition } from "./explorer.ts";
@@ -124,6 +119,7 @@ import { FileMemoryStore } from "./memory-store.ts";
 import { type BashExecutionMessage, type CustomMessage, createCustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
+import { createOperationLoop, type OperationLoop } from "./operation-loop.ts";
 import { reviewPlan } from "./plan-reviewer.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import { extensionProviderHooks } from "./provider-hooks.ts";
@@ -427,15 +423,12 @@ export class AgentSession {
 
 	// Compaction state
 	private readonly _compactionRun: CompactionRun;
-	private _overflowRecoveryAttempted = false;
 
 	// Branch summarization state
 	private _branchSummaryAbortController: AbortController | undefined = undefined;
 
-	// Retry state
-	private readonly _retry = createRetryBudget(() => this.settingsManager.getRetrySettings());
-	/** Set on agent_end by _willRetryAfterAgentEnd, consumed by _handlePostAgentRun. */
-	private _retryPending = false;
+	/** Retry, overflow recovery and post-run compaction within one operation. */
+	private readonly _operationLoop: OperationLoop;
 	/** What the latest operation ended with; returned by prompt(). */
 	private _lastOperationResult: PromptResult | undefined = undefined;
 
@@ -517,6 +510,16 @@ export class AgentSession {
 			},
 			emit: (event) => this._emit(event),
 			prepareSummarizer: () => this._prepareSummarizer(),
+		});
+		this._operationLoop = createOperationLoop({
+			agent: this.agent,
+			compactionRun: this._compactionRun,
+			getRetrySettings: () => this.settingsManager.getRetrySettings(),
+			getCompactionSettings: () => this.settingsManager.getCompactionSettings(),
+			getModel: () => this.model,
+			getBranch: () => this.sessionManager.getBranch(),
+			emit: (event) => this._emit(event),
+			finish: (outcome, msg) => this._finishOperation(outcome, msg),
 		});
 		this._fileCheckpoints = new FileCheckpoints(this.sessionManager, this._cwd);
 		if (this.sessionManager.isPersisted()) sweepCheckpoints(this.sessionManager.getCheckpointDirectory());
@@ -836,15 +839,11 @@ export class AgentSession {
 		}
 	}
 
-	// Track last assistant message for auto-compaction check
-	private _lastAssistantMessage: AssistantMessage | undefined = undefined;
-
 	/** Internal handler for agent events - shared by subscribe and reconnect */
 	private _handleAgentEvent = async (event: AgentEvent): Promise<void> => {
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
-			this._overflowRecoveryAttempted = false;
 			const messageText = contentText(event.message.content, "");
 			if (messageText) {
 				// Check steering queue first
@@ -867,10 +866,12 @@ export class AgentSession {
 		await this._emitExtensionEvent(event);
 
 		// Notify all listeners
-		// The retry decision is made once, here: agent_end reports it and _handlePostAgentRun acts on it.
-		const willRetry = event.type === "agent_end" && this._willRetryAfterAgentEnd(event);
-		if (event.type === "agent_end") this._retryPending = willRetry;
-		this._emit(event.type === "agent_end" ? { ...event, willRetry } : event);
+		// The retry decision is made once, here: agent_end reports it and the Operation Loop acts on it.
+		if (event.type === "agent_end") {
+			this._emit({ ...event, willRetry: this._operationLoop.agentEnded(event) });
+		} else {
+			this._emit(event);
+		}
 
 		// Handle session persistence
 		if (event.type === "message_end") {
@@ -893,34 +894,9 @@ export class AgentSession {
 				this.sessionManager.appendMessage(event.message);
 			}
 			// Other message types (bashExecution, compactionSummary, branchSummary) are persisted elsewhere
-
-			// Track assistant message for auto-compaction (checked on agent_end)
-			if (event.message.role === "assistant") {
-				this._lastAssistantMessage = event.message;
-
-				const assistantMsg = event.message as AssistantMessage;
-				if (assistantMsg.stopReason !== "error" && assistantMsg.stopReason !== "length") {
-					this._overflowRecoveryAttempted = false;
-				}
-
-				// Reset retry counter immediately on successful assistant response
-				// This prevents accumulation across multiple LLM calls within a turn
-				if (assistantMsg.stopReason !== "error") this._emitRetryEnd(this._retry.finish(true));
-			}
 		}
+		this._operationLoop.observe(event);
 	};
-
-	private _willRetryAfterAgentEnd(event: Extract<AgentEvent, { type: "agent_end" }>): boolean {
-		if (this._retry.exhausted) return false;
-
-		for (let i = event.messages.length - 1; i >= 0; i--) {
-			const message = event.messages[i];
-			if (message.role === "assistant") {
-				return this._isRetryableError(message as AssistantMessage);
-			}
-		}
-		return false;
-	}
 
 	/** Find the last assistant message in agent state (including aborted ones) */
 	private _findLastAssistantMessage(): AssistantMessage | undefined {
@@ -1151,7 +1127,7 @@ export class AgentSession {
 
 	/** Current retry attempt (0 if not retrying) */
 	get retryAttempt(): number {
-		return this._retry.attempt;
+		return this._operationLoop.retryAttempt;
 	}
 
 	/**
@@ -1259,7 +1235,7 @@ export class AgentSession {
 			// operation; no rebuild here, just apply whichever prompt is current.
 			this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
 			await this.agent.prompt(messages);
-			while (await this._handlePostAgentRun()) {
+			while ((await this._operationLoop.afterRun()) === "continue") {
 				await this.agent.continue();
 			}
 			return this._lastOperationResult;
@@ -1275,50 +1251,10 @@ export class AgentSession {
 		}
 	}
 
-	private async _handlePostAgentRun(): Promise<boolean> {
-		const msg = this._lastAssistantMessage;
-		this._lastAssistantMessage = undefined;
-		if (!msg) {
-			this._finishOperation("completed", undefined);
-			return false;
-		}
-
-		let outcome: OperationFinishedEntry["outcome"] =
-			msg.stopReason === "aborted" ? "aborted" : msg.stopReason === "error" ? "failed" : "completed";
-		if (this._retryPending) {
-			this._retryPending = false;
-			if (await this._prepareRetry(msg)) {
-				return true;
-			}
-			// _prepareRetry only declines when stop cancelled the backoff sleep.
-			outcome = "aborted";
-		}
-
-		if (msg.stopReason === "error") this._emitRetryEnd(this._retry.finish(false, msg.errorMessage));
-
-		// The operation ends before any post-turn compaction (a crash there must not read as an
-		// interrupted task), but not before overflow recovery, which continues the same operation.
-		let finished = false;
-		const finishOperation = () => {
-			if (finished) return;
-			finished = true;
-			this._finishOperation(outcome, msg);
-		};
-		if (await this._checkCompaction(msg, true, finishOperation)) {
-			return true;
-		}
-		finishOperation();
-
-		if (this.sessionManager.isWorkingNoteStale()) {
-			this.sessionManager.clearWorkingNote();
-		}
-
-		// The agent loop drains both queues before emitting agent_end. Any messages
-		// here were queued by agent_end extension handlers and need a continuation.
-		return this.agent.hasQueuedMessages();
-	}
-
-	/** Records the one outcome of an operation: retries and overflow recovery happen inside it, never after it. */
+	/**
+	 * Records the one outcome of an operation; called by the Operation Loop, which decides when. Retries and
+	 * overflow recovery happen inside an operation, never after it.
+	 */
 	private _finishOperation(outcome: OperationFinishedEntry["outcome"], msg: AssistantMessage | undefined): void {
 		this.sessionManager.appendOperationFinished(outcome);
 		const finalError =
@@ -1326,7 +1262,11 @@ export class AgentSession {
 				? { message: msg.errorMessage, provider: msg.provider, model: msg.model }
 				: undefined;
 		this._lastOperationResult = { outcome, finalError, planStatus: this._taskPlanGuard.planStatus() };
-		if (outcome !== "completed") return;
+		if (outcome !== "completed") {
+			// Backstop for a note no completed operation cleared.
+			if (msg && this.sessionManager.isWorkingNoteStale()) this.sessionManager.clearWorkingNote();
+			return;
+		}
 		// Issue #173: the Working Note is a scratchpad for the operation in
 		// progress, not a cross-operation memory — the harness owns clearing
 		// it so stale context from a finished task never bleeds into an
@@ -1476,7 +1416,7 @@ export class AgentSession {
 			// The user's new prompt is sent below, so do not call agent.continue() here.
 			const lastAssistant = this._findLastAssistantMessage();
 			if (lastAssistant) {
-				await this._checkCompaction(lastAssistant, false);
+				await this._operationLoop.beforePrompt(lastAssistant);
 			}
 
 			const messagesBeforeLimit = this.agent.state.messages.length;
@@ -2162,8 +2102,8 @@ export class AgentSession {
 	 * Manually compact the session context.
 	 *
 	 * This is the manual entry point used by `/compact`, RPC, and extensions. It is
-	 * separate from automatic threshold/overflow compaction, which enters through
-	 * `_checkCompaction()` and `_runAutoCompaction()`. Both execute the same
+	 * separate from automatic threshold/overflow compaction, which the Operation
+	 * Loop (`./operation-loop.ts`) starts. Both execute the same
 	 * Compaction Run (`./compaction/run.ts`); this method only maps its outcome to
 	 * a result or a thrown error.
 	 *
@@ -2191,85 +2131,6 @@ export class AgentSession {
 	 */
 	abortBranchSummary(): void {
 		this._branchSummaryAbortController?.abort();
-	}
-
-	/**
-	 * Dispatch automatic compaction after `agent_end` or before prompt submission.
-	 * Manual compaction does not call this method; it enters through `compact()`.
-	 *
-	 * The Compaction Trigger (`decideCompaction`) decides whether and why; this applies its answer and
-	 * calls `_runAutoCompaction()`, which executes a Compaction Run.
-	 *
-	 * @param assistantMessage The assistant message to check
-	 * @param skipAbortedCheck If false, include aborted messages (for pre-prompt check). Default: true
-	 * @param beforeCompaction Called just before a compaction that does not continue the turn
-	 * @returns Whether the post-run loop should call `agent.continue()` for overflow recovery or queued messages
-	 */
-	private async _checkCompaction(
-		assistantMessage: AssistantMessage,
-		skipAbortedCheck = true,
-		beforeCompaction?: () => void,
-	): Promise<boolean> {
-		const decision = decideCompaction({
-			settings: this.settingsManager.getCompactionSettings(),
-			assistantMessage,
-			skipAbortedCheck,
-			model: this.model,
-			branch: this.sessionManager.getBranch(),
-			messages: this.agent.state.messages,
-			overflowRecoveryAttempted: this._overflowRecoveryAttempted,
-			nowMs: Date.now(),
-		});
-		if (decision.kind === "none") return false;
-		if (decision.kind === "recovery-failed") {
-			await this._compactionRun.reportFailure("overflow", decision.errorMessage);
-			return false;
-		}
-
-		if (decision.willRetry) {
-			// Remove the failed or truncated message from agent state, compact, and retry once. The message
-			// remains in session history but is excluded from retry context.
-			this._overflowRecoveryAttempted = true;
-			const messages = this.agent.state.messages;
-			if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
-				this.agent.state.messages = messages.slice(0, -1);
-			}
-		} else {
-			beforeCompaction?.();
-		}
-		return await this._runAutoCompaction(decision.reason, decision.willRetry);
-	}
-
-	/**
-	 * Execute threshold or overflow compaction. Manual compaction uses
-	 * `AgentSession.compact()` instead. Both execute the same Compaction Run; this
-	 * method maps its outcome to the post-run loop's continue flag and, for overflow
-	 * retry, drops the failed assistant message again.
-	 *
-	 * @param reason Automatic trigger selected by `_checkCompaction()`
-	 * @param willRetry Whether to continue the interrupted turn after overflow compaction
-	 * @returns Whether the post-run loop should call `agent.continue()`
-	 */
-	private async _runAutoCompaction(reason: "overflow" | "threshold" | "turns", willRetry: boolean): Promise<boolean> {
-		const outcome = await this._compactionRun.run({ reason, willRetry });
-		if (outcome.kind !== "completed") return false;
-
-		if (willRetry) {
-			const messages = this.agent.state.messages;
-			const lastMsg = messages[messages.length - 1];
-			// The overflow response was persisted on message_end before _checkCompaction() removed it
-			// from agent state. Rebuilding state from the new compaction can restore that kept entry,
-			// leaving an assistant as the final message. agent.continue() rejects that state, so remove
-			// the retriable error or truncated-length response again before continuing the interrupted turn.
-			if (lastMsg?.role === "assistant" && (lastMsg.stopReason === "error" || lastMsg.stopReason === "length")) {
-				this.agent.state.messages = messages.slice(0, -1);
-			}
-			return true;
-		}
-
-		// Auto-compaction can complete while follow-up/steering/custom messages are waiting.
-		// Continue once so queued messages are delivered.
-		return this.agent.hasQueuedMessages();
 	}
 
 	/**
@@ -2658,16 +2519,6 @@ export class AgentSession {
 	// =========================================================================
 
 	/**
-	 * Check if an error is retryable (overloaded, rate limit, server errors).
-	 * Context overflow errors are NOT retryable (handled by compaction instead).
-	 */
-	private _isRetryableError(message: AssistantMessage): boolean {
-		// Context overflow is handled by compaction, not retry.
-		if (isContextOverflow(message, this.model?.contextWindow ?? 0)) return false;
-		return isRetryableAssistantError(message);
-	}
-
-	/**
 	 * Retry policy + callbacks shared by compaction and branch-summary summarization calls.
 	 * Uses the same `settings.retry` budget/backoff as agent-turn retries so a single transient
 	 * stream drop no longer fails the whole operation. `source` carries the context
@@ -2701,42 +2552,15 @@ export class AgentSession {
 	}
 
 	/**
-	 * Prepare a retryable error for continuation with exponential backoff.
-	 * @returns true if the caller should continue the agent, false otherwise
-	 */
-	private async _prepareRetry(message: AssistantMessage): Promise<boolean> {
-		// Whether to retry was already decided at agent_end (_willRetryAfterAgentEnd); this only runs it.
-		const retry = this._retry.next(message);
-		this._emit({ type: "auto_retry_start", ...retry });
-
-		// Remove error message from agent state (keep in session for history)
-		const messages = this.agent.state.messages;
-		if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
-			this.agent.state.messages = messages.slice(0, -1);
-		}
-
-		// Wait with exponential backoff (abortable)
-		if (await this._retry.sleep(retry.delayMs)) return true;
-		// Aborted during sleep - emit end event so UI can clean up
-		this._emitRetryEnd(this._retry.finish(false, "Retry cancelled"));
-		return false;
-	}
-
-	/** The one place a run of retries is reported as ended; `finish` returns undefined when nothing was retried. */
-	private _emitRetryEnd(end: RetryEnd | undefined): void {
-		if (end) this._emit({ type: "auto_retry_end", ...end });
-	}
-
-	/**
 	 * Cancel in-progress retry.
 	 */
 	abortRetry(): void {
-		this._retry.cancel();
+		this._operationLoop.cancelRetry();
 	}
 
 	/** Whether auto-retry is currently in progress */
 	get isRetrying(): boolean {
-		return this._retry.isSleeping;
+		return this._operationLoop.isRetrying;
 	}
 
 	/** Whether auto-retry is enabled */
