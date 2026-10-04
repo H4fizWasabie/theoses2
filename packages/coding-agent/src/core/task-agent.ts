@@ -4,8 +4,11 @@
  * on every later turn; the parent gets a few lines saying what changed, how it was checked, and what is left.
  *
  * Unlike `explore` (read-only, a cheap background model), a task can edit files and run commands, so it runs on the
- * parent's own model and thinking level, and every tool call goes through the parent's gate (owner hooks, extension
- * `tool_call` handlers, file checkpoints, the task plan guard). It cannot call `task` or `explore` itself.
+ * parent's own model and thinking level, with the parent's tool settings (shell prefix and path, edit hint and
+ * snippet, image resizing). Every tool call goes through the parent's gate before it runs (owner hooks, extension
+ * `tool_call` handlers, file checkpoints, the task plan guard) and through the parent's result handling after it
+ * (extension `tool_result` handlers, image normalization, owner PostToolUse hooks). It cannot call `task` or
+ * `explore` itself.
  */
 
 import type { AgentOptions, ThinkingLevel } from "theoses-agent-core";
@@ -15,12 +18,12 @@ import { createBudgetedAgent } from "./background-agent.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { ProviderHooks } from "./provider-hooks.ts";
-import { createBashToolDefinition } from "./tools/bash.ts";
-import { createEditToolDefinition } from "./tools/edit.ts";
+import { type BashToolOptions, createBashToolDefinition } from "./tools/bash.ts";
+import { createEditToolDefinition, type EditToolOptions } from "./tools/edit.ts";
 import { createFindToolDefinition } from "./tools/find.ts";
 import { createGrepToolDefinition } from "./tools/grep.ts";
 import { createLsToolDefinition } from "./tools/ls.ts";
-import { createReadToolDefinition } from "./tools/read.ts";
+import { createReadToolDefinition, type ReadToolOptions } from "./tools/read.ts";
 import { wrapToolDefinition } from "./tools/tool-definition-wrapper.ts";
 import { createWriteToolDefinition } from "./tools/write.ts";
 
@@ -74,18 +77,29 @@ export interface RunTaskOptions {
 	providerHooks?: ProviderHooks;
 	/** The parent's gate for tool calls; see the module comment. */
 	beforeToolCall?: AgentOptions["beforeToolCall"];
+	/** The parent's tool result handling; see the module comment. */
+	afterToolCall?: AgentOptions["afterToolCall"];
+	toolOptions?: TaskToolOptions;
+}
+
+/** The parent's settings for the tools a task shares with it. */
+export interface TaskToolOptions {
+	read?: ReadToolOptions;
+	bash?: BashToolOptions;
+	edit?: EditToolOptions;
 }
 
 export async function runTask(options: RunTaskOptions): Promise<TaskResult> {
+	const toolOptions = options.toolOptions ?? {};
 	// The tools have different detail types; the wrapper only needs the common ToolDefinition shape.
 	const definitions: ToolDefinition<any, any, any>[] = [
-		createReadToolDefinition(options.cwd),
+		createReadToolDefinition(options.cwd, toolOptions.read),
 		createGrepToolDefinition(options.cwd),
 		createFindToolDefinition(options.cwd),
 		createLsToolDefinition(options.cwd),
-		createEditToolDefinition(options.cwd),
+		createEditToolDefinition(options.cwd, toolOptions.edit),
 		createWriteToolDefinition(options.cwd),
-		createBashToolDefinition(options.cwd),
+		createBashToolDefinition(options.cwd, toolOptions.bash),
 	];
 	const handle = createBudgetedAgent({
 		systemPrompt: buildTaskSystemPrompt(options.cwd),
@@ -98,6 +112,7 @@ export async function runTask(options: RunTaskOptions): Promise<TaskResult> {
 		providerHooks: options.providerHooks,
 		thinkingLevel: options.thinkingLevel,
 		beforeToolCall: options.beforeToolCall,
+		afterToolCall: options.afterToolCall,
 		onStatus: options.onStatus,
 		capLines: TASK_CAPS.lines,
 	});
@@ -148,6 +163,8 @@ export interface TaskToolDeps {
 	getThinkingLevel: () => ThinkingLevel;
 	providerHooks?: ProviderHooks;
 	beforeToolCall?: AgentOptions["beforeToolCall"];
+	afterToolCall?: AgentOptions["afterToolCall"];
+	toolOptions?: TaskToolOptions;
 }
 
 export function createTaskToolDefinition(deps: TaskToolDeps): ToolDefinition<typeof taskSchema> {
@@ -176,6 +193,8 @@ export function createTaskToolDefinition(deps: TaskToolDeps): ToolDefinition<typ
 				signal,
 				providerHooks: deps.providerHooks,
 				beforeToolCall: deps.beforeToolCall,
+				afterToolCall: deps.afterToolCall,
+				toolOptions: deps.toolOptions,
 				onStatus: (status) => onUpdate?.({ content: [{ type: "text", text: status }], details: undefined }),
 			});
 			return { content: [{ type: "text", text: result.answer }], details: result };

@@ -61,4 +61,34 @@ describe("AgentSession task tool", () => {
 		h.session.rewindFiles(userId as string);
 		expect(readFileSync(target, "utf8")).toBe("old\n");
 	});
+
+	it("runs the sub-agent's tools with the parent's settings and through the parent's tool result handling", async () => {
+		const seen: Array<{ toolName: string; text: string }> = [];
+		const h = await createHarness({
+			settings: { taskTool: { enabled: true }, shellCommandPrefix: "MARK=from-parent-prefix" },
+			extensionFactories: [
+				(pi) => {
+					pi.on("tool_result", async (event) => {
+						const text = event.content.map((block) => (block.type === "text" ? block.text : "")).join("");
+						seen.push({ toolName: event.toolName, text });
+						return undefined;
+					});
+				},
+			],
+		});
+		harnesses.push(h);
+		h.setResponses([
+			fauxAssistantMessage(fauxToolCall("task", { description: "echo", prompt: "echo the mark" }), {
+				stopReason: "toolUse",
+			}),
+			fauxAssistantMessage(fauxToolCall("bash", { command: 'echo "mark=$MARK"' }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("Echoed the mark."),
+			fauxAssistantMessage("done"),
+		]);
+
+		await h.session.prompt("delegate it");
+
+		expect(seen.map((call) => call.toolName)).toEqual(["bash", "task"]);
+		expect(seen[0]?.text).toContain("mark=from-parent-prefix");
+	});
 });

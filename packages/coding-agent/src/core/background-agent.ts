@@ -84,6 +84,8 @@ export interface CreateBudgetedAgentOptions {
 	thinkingLevel?: ThinkingLevel;
 	/** Runs before every tool call of the sub-agent; a sub-agent that changes files uses the parent's own gate. */
 	beforeToolCall?: AgentOptions["beforeToolCall"];
+	/** Runs after every tool call of the sub-agent; a sub-agent doing the parent's work uses the parent's own hooks. */
+	afterToolCall?: AgentOptions["afterToolCall"];
 	/** Called with "<tool>: <args, first 120 chars>" as each tool call starts, for a live status line. */
 	onStatus?: (status: string) => void;
 	/** Truncates the text `promptToAnswer` returns to this many lines, with a note saying so. */
@@ -171,6 +173,7 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 					: (streamOptions as ModelsRequestTransforms | undefined)?.transformHeaders,
 			}),
 		beforeToolCall: options.beforeToolCall,
+		afterToolCall: options.afterToolCall,
 		onPayload: hooks?.onPayload,
 		onResponse: hooks?.onResponse,
 		shouldStopAfterTurn: () => {
