@@ -1,7 +1,8 @@
 /**
- * What a run's tool calls did, read back from its messages: which calls changed files, which commands
- * passed, and what they printed. Shared by the stop-time checks (claim-check.ts, task-plan.ts) so they
- * agree on what counts as a file change and what counts as a verification command.
+ * What a run's tool calls did, read back from its messages, and what one shell command reads, changes and
+ * executes. The parser behind verification-evidence.ts, which is where the stop-time checks (task plan, its
+ * guard, claim check) ask what a run changed and checked; file checkpoints and plan snapshots use
+ * `fileChangesOf` directly.
  */
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
@@ -680,36 +681,4 @@ export function isCheckCommand(run: ToolRun, cwd = process.cwd(), protectedPaths
 	if (!COMMAND_TOOLS.has(run.name) || run.command === undefined) return false;
 	const effect = commandEffect(run.command, cwd, protectedPaths);
 	return !effect.readOnly && !effect.changesFiles && runtimeBody(run.command);
-}
-
-/** Models retype commands with different spacing or line breaks; the command is what binds evidence, not its whitespace. */
-export function sameCommand(a: string, b: string): boolean {
-	const normalized = (command: string) => command.trim().replace(/\s+/g, " ");
-	return normalized(a) === normalized(b);
-}
-
-/**
- * Whether a passing check command ran after this run's last file change. `lastCheck` is the latest
- * check command after that change, passing or not; without one there is nothing to show.
- */
-export function checkAfterLastChange(
-	runs: ToolRun[],
-	command?: string,
-	cwd = process.cwd(),
-	after?: string,
-): { changed: boolean; lastCheck?: ToolRun; lastChange?: ToolRun } {
-	const protectedPaths = runs.filter((run) => FILE_TOOLS.has(run.name) && run.path).map((run) => run.path as string);
-	let lastChangeIndex = -1;
-	runs.forEach((run, i) => {
-		if (runChangesFiles(run, cwd, protectedPaths)) lastChangeIndex = i;
-	});
-	const lastCheck = runs
-		.slice(Math.max(lastChangeIndex, after === undefined ? -1 : runs.findIndex((run) => run.id === after)) + 1)
-		.filter(
-			(run) =>
-				isCheckCommand(run, cwd, protectedPaths) &&
-				(command === undefined || (run.command !== undefined && sameCommand(run.command, command))),
-		)
-		.pop();
-	return { changed: lastChangeIndex >= 0, lastCheck, lastChange: runs[lastChangeIndex] };
 }

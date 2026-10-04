@@ -509,6 +509,35 @@ describe("TaskPlanGuard", () => {
 		expect(readFileSync(file, "utf8")).toBe("gate 1\n");
 	});
 
+	it("reviews a plan whose only change is a shell write by absolute path into a cwd under the temp directory", async () => {
+		// The session cwd (dir) is under /tmp, as eval workspaces are. Judged against process.cwd() instead, a write
+		// into it reads as a scratch artifact, the run looks like it changed nothing, and the review is skipped.
+		const g = guard();
+		plan = created();
+		g.startOperation();
+		const check = tool("bash", { command: "bash run.sh --dry-run" }, "gates passed");
+		const checkId = (check[1] as { toolCallId: string }).toolCallId;
+		run = [
+			user("go"),
+			...tool("bash", { command: `sed -i 's/2-10/1/' ${join(dir, "run.sh")}` }, ""),
+			...check,
+			reply("Done."),
+		];
+		plan = {
+			...plan,
+			items: plan.items.map((i) => ({
+				...i,
+				status: "done" as const,
+				...(i.kind === "verify"
+					? { evidence: { toolCallId: checkId, command: "bash run.sh --dry-run", output: "gates passed" } }
+					: {}),
+			})),
+		};
+
+		expect(await g.beforeStop()).toEqual([]);
+		expect(reviews).toHaveLength(1);
+	});
+
 	it("replays 2026-09-28: a change outside cwd reaches the reviewer with absolute paths and its location", async () => {
 		const workspace = mkdtempSync(join(tmpdir(), "task-plan-workspace-"));
 		try {

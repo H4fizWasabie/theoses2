@@ -19,7 +19,8 @@
 import type { AgentMessage } from "theoses-agent-core";
 import type { AssistantMessage } from "theoses-ai";
 import { type CustomMessage, createCustomMessage } from "./messages.ts";
-import { checkAfterLastChange, FILE_TOOLS, firstLine, textOf, toolRuns } from "./tool-runs.ts";
+import { FILE_TOOLS, firstLine, textOf } from "./tool-runs.ts";
+import { type RunEvidence, readRunEvidence } from "./verification-evidence.ts";
 
 export const CLAIM_CHECK_CUSTOM_TYPE = "claim-check";
 
@@ -35,6 +36,10 @@ export interface ClaimCheckOptions {
 	verifyCovered?: boolean;
 	/** When a plan is present, unrelated runtime commands cannot mask its check. */
 	verifyCommand?: string;
+	/** With a plan, only a check after its verify item was declared counts, as for closing that item. */
+	verifyAfter?: string;
+	/** The caller's reading of this run, so both judge it the same way; read here (with `cwd`) when absent. */
+	evidence?: RunEvidence;
 	cwd?: string;
 }
 
@@ -51,7 +56,8 @@ export function findClaimProblem(runMessages: AgentMessage[], options: ClaimChec
 	const reply = lastReply(runMessages);
 	if (!reply) return undefined;
 	const replyText = textOf(reply.content);
-	const runs = toolRuns(runMessages);
+	const evidence = options.evidence ?? readRunEvidence(runMessages, options.cwd ?? process.cwd());
+	const { runs } = evidence;
 
 	// A: unresolved failed file changes.
 	// ponytail: raw path strings, so a retry via a relative vs absolute path counts as a different file; normalize against cwd if that shows up.
@@ -72,7 +78,8 @@ export function findClaimProblem(runMessages: AgentMessage[], options: ClaimChec
 
 	// B: verification claimed without a passing check command after the last file change.
 	if (!options.verifyCovered && VERIFICATION_CLAIM.test(replyText)) {
-		const { changed, lastCheck, lastChange } = checkAfterLastChange(runs, options.verifyCommand, options.cwd);
+		const { changed, lastChange } = evidence;
+		const lastCheck = evidence.check({ command: options.verifyCommand, after: options.verifyAfter });
 		if (changed) {
 			const what = lastChange?.path ?? firstLine(lastChange?.command ?? "a file", 80);
 			if (!lastCheck) {
