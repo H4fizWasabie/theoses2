@@ -174,4 +174,24 @@ describe("applyConsolidationResult does not write a fact the store already has",
 
 		expect(log).toHaveBeenCalledWith(expect.stringContaining("[memory-dedup] reused 1 stored node(s)"));
 	});
+
+	it("drops references to a fact the response never defined and still records the episode", async () => {
+		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+		const other = store.createNode({ subject: "Theoses runs on a Vultr VPS behind Caddy with automatic HTTPS" });
+
+		await apply({
+			facts: [{ id: "f1", subject: "The psychology pool is refilled weekly from OpenAlex and Europe PMC" }],
+			edges: [
+				{ from: "f7", to: other.id, rel: "depends_on" },
+				{ from: "f1", to: "f9", rel: "depends_on" },
+				{ from: "f1", to: other.id, rel: "depends_on" },
+			],
+			episode: { ...EPISODE, relatedFactIds: ["f1", "f4"] },
+		});
+
+		const created = store.listNodes().find((node) => node.id !== other.id);
+		expect(created?.edges).toEqual([{ target: other.id, rel: "depends_on" }]);
+		expect(recordEpisode).toHaveBeenCalledWith(expect.objectContaining({ relatedSemanticNodeIds: [created?.id] }));
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("dropped 3 reference(s)"));
+	});
 });
