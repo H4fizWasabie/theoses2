@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { estimateTokens } from "../../src/core/compaction/index.ts";
 import type { CompactionRun } from "../../src/core/compaction/run.ts";
 import type { OperationLoop } from "../../src/core/operation-loop.ts";
+import { appendWorkingNote } from "../../src/core/working-note.ts";
 import { createHarness, getUserTexts, type Harness } from "./harness.ts";
 
 type SessionWithCompactionInternals = {
@@ -197,6 +198,19 @@ describe("AgentSession compaction characterization", () => {
 
 		expect(getUserTexts(harness)).toContain("queued after compaction");
 		expect(harness.session.getLastAssistantText()).toBe("queued response");
+	});
+
+	it("shows the Working Note in the system prompt again once a compaction completes", async () => {
+		const harness = await createHarness({ withConfiguredAuth: false });
+		harnesses.push(harness);
+		seedCompactableSession(harness);
+		useSummaryStreamFn(harness, "summary");
+		appendWorkingNote(harness.sessionManager, "fact: the build needs NODE_ENV=test");
+		expect(harness.session.systemPrompt).not.toContain("NODE_ENV=test");
+
+		await harness.session.compact();
+
+		expect(harness.session.systemPrompt).toContain("fact: the build needs NODE_ENV=test");
 	});
 
 	it("throws when compacting without a model", async () => {

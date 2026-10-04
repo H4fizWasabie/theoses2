@@ -52,29 +52,31 @@ describe("AgentSession bash and persistence characterization", () => {
 		expect(harness.session.messages[harness.session.messages.length - 1]?.role).toBe("bashExecution");
 	});
 
-	it("auto-logs the bash command into the Working Note (issue #173)", async () => {
-		const harness = await createHarness();
+	it("logs the model's bash commands into the Working Note, but not a task sub-agent's (issue #173)", async () => {
+		const harness = await createHarness({ settings: { taskTool: { enabled: true } } });
 		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("bash", { command: "echo parent" }), { stopReason: "toolUse" }),
+			fauxAssistantMessage(fauxToolCall("bash", { command: "exit 3" }), { stopReason: "toolUse" }),
+			fauxAssistantMessage(fauxToolCall("task", { description: "echo", prompt: "echo child" }), {
+				stopReason: "toolUse",
+			}),
+			// sub-agent
+			fauxAssistantMessage(fauxToolCall("bash", { command: "echo child" }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("Echoed child."),
+			// parent
+			fauxAssistantMessage("done"),
+		]);
 
-		harness.session.recordBashResult("echo hi", {
-			output: "hi",
-			exitCode: 0,
-			cancelled: false,
-			truncated: false,
-		});
+		await harness.session.prompt("run things");
 
-		expect(harness.sessionManager.getWorkingNote()).toBe("ran: echo hi");
-
-		harness.session.recordBashResult("ls -la", {
-			output: "",
-			exitCode: 0,
-			cancelled: false,
-			truncated: false,
-		});
-
-		// Append-only: the second command's log line joins the first rather than replacing it.
-		expect(harness.sessionManager.getWorkingNote()).toBe("ran: echo hi\nran: ls -la");
-		expect(getEntryTypes(harness)).toContain("message");
+		// The completed operation clears the note, so read what it held before that from the log.
+		const notes = harness.sessionManager
+			.getEntries()
+			.flatMap((entry) => (entry.type === "working_note" ? [entry.note] : []));
+		expect(notes).toContain("ran: echo parent\nran: exit 3 (failed)");
+		expect(notes.some((note) => note.includes("echo child"))).toBe(false);
+		expect(notes.at(-1)).toBe("");
 	});
 
 	it("defers bash results while streaming and flushes them before the next prompt", async () => {
