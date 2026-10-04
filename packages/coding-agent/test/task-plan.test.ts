@@ -10,12 +10,14 @@ import {
 	applyPlanAction,
 	formatPlanStatus,
 	needsReview,
+	refreshFinalVerify,
 	type TaskPlan,
 	type TaskPlanInput,
 } from "../src/core/task-plan.ts";
 import { TaskPlanGuard } from "../src/core/task-plan-guard.ts";
 import { commandEffect } from "../src/core/tool-runs.ts";
 import { generateUnifiedPatch } from "../src/core/tools/edit-diff.ts";
+import { readRunEvidence } from "../src/core/verification-evidence.ts";
 
 let nextId = 0;
 
@@ -76,6 +78,52 @@ function created(input: Partial<TaskPlanInput> = {}): TaskPlan {
 	if (!result.plan) throw new Error(result.error);
 	return result.plan;
 }
+
+describe("refreshFinalVerify", () => {
+	const check = "bash run.sh --dry-run";
+	const verified = () => [
+		user("go"),
+		...tool("edit", { path: "run.sh" }, "ok"),
+		...tool("bash", { command: check }, "passed"),
+	];
+
+	function closed(run: AgentMessage[]): TaskPlan {
+		const result = act(created(), { action: "update", id: 3, status: "done" }, run);
+		if (!result.plan) throw new Error(result.error);
+		return result.plan;
+	}
+
+	function refresh(plan: TaskPlan, run: AgentMessage[]): TaskPlan {
+		return refreshFinalVerify(plan, readRunEvidence(run, process.cwd()));
+	}
+
+	it("returns the plan itself while the final gate's evidence is current, or the run changed nothing", () => {
+		const run = verified();
+		const plan = closed(run);
+		expect(refresh(plan, run)).toBe(plan);
+		expect(refresh(plan, [user("next"), ...tool("bash", { command: check }, "passed later")])).toBe(plan);
+	});
+
+	it("keeps the final gate closed on a passing rerun, with the rerun as its evidence", () => {
+		const run = verified();
+		const plan = closed(run);
+		run.push(...tool("bash", { command: check }, "passed again"));
+		expect(refresh(plan, run).items[2]).toMatchObject({ status: "done", evidence: { output: "passed again" } });
+	});
+
+	it("reopens the final gate after a later change, unless the check passed again after it", () => {
+		const edited = [...verified(), ...tool("edit", { path: "run.sh" }, "later edit")];
+		const plan = closed(verified());
+		expect(refresh(plan, edited).items[2]).toMatchObject({ status: "open", evidence: undefined });
+		const failed = [...edited, ...tool("bash", { command: check }, "FAILURE: gate 1", true)];
+		expect(refresh(plan, failed).items[2]).toMatchObject({ status: "open", evidence: undefined });
+		const passed = [...edited, ...tool("bash", { command: check }, "passed after the edit")];
+		expect(refresh(plan, passed).items[2]).toMatchObject({
+			status: "done",
+			evidence: { output: "passed after the edit" },
+		});
+	});
+});
 
 describe("commandEffect", () => {
 	it.each([
@@ -610,6 +658,29 @@ describe("TaskPlanGuard", () => {
 		expect((await g.beforeStop())[0]).toMatchObject({ customType: "claim-check" });
 		expect(plan?.items[2]).toMatchObject({ status: "open", evidence: undefined });
 		expect(reviews).toHaveLength(0);
+	});
+
+	it("keeps the final gate closed and reviews the plan when its check is rerun with no change after it", async () => {
+		plan = created();
+		const g = guard();
+		g.startOperation();
+		plan = { ...plan, items: plan.items.map((i) => (i.kind === "step" ? { ...i, status: "done" as const } : i)) };
+		run = [
+			user("go"),
+			...tool("task_plan", {}, "plan"),
+			...tool("edit", { path: "run.sh" }, "ok"),
+			...tool("bash", { command: "bash run.sh --dry-run" }, "gates passed"),
+		];
+		plan = act(plan, { action: "update", id: 3, status: "done" }, run).plan;
+		run.push(
+			...tool("bash", { command: "bash run.sh --dry-run" }, "gates passed again"),
+			reply("Done and verified."),
+		);
+
+		expect(await g.beforeStop()).toEqual([]);
+		expect(plan?.items[2]).toMatchObject({ status: "done", evidence: { output: "gates passed again" } });
+		expect(reviews).toHaveLength(1);
+		expect(reviews[0].verifyOutput).toContain("gates passed again");
 	});
 
 	it("does not resurrect an old plan for a new unplanned change", async () => {

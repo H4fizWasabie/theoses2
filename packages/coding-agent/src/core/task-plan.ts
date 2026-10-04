@@ -169,6 +169,26 @@ function boundedOutput(output: string, maxChars = 4000): string {
 	return `${output.slice(0, half)}${marker}${output.slice(-half)}`;
 }
 
+function evidenceOf(run: ToolRun): VerificationEvidence {
+	return { toolCallId: run.id, command: run.command as string, output: boundedOutput(run.output) };
+}
+
+/**
+ * Keeps the final verify item's evidence current when the run changed files, by the same rule that closes it: a
+ * matching check that passed after the last change becomes its evidence; with none, the item reopens. Earlier verify
+ * items keep their historical evidence. Returns `plan` itself when nothing changes.
+ */
+export function refreshFinalVerify(plan: TaskPlan, runEvidence: RunEvidence): TaskPlan {
+	const final = plan.items.filter((item) => item.kind === "verify").at(-1);
+	if (plan.abandoned || !final || final.status === "open" || !runEvidence.changed) return plan;
+	const { run } = verificationResult(runEvidence, final.verifyCommand, final.verifyAfter);
+	if (run && run.id === final.evidence?.toolCallId) return plan;
+	const refreshed: PlanItem = run
+		? { ...final, evidence: evidenceOf(run) }
+		: { ...final, status: "open", evidence: undefined };
+	return { ...plan, items: plan.items.map((item) => (item.id === final.id ? refreshed : item)) };
+}
+
 /** Each closed item's captured result, including evidence from earlier turns, for the reviewer. */
 export function verifyOutput(plan: TaskPlan, maxChars = 4000): string | undefined {
 	const parts = plan.items
@@ -318,11 +338,7 @@ export function applyPlanAction(
 				const result = verificationResult(runEvidence, verifyCommand, verifyAfter);
 				if (result.problem || !result.run)
 					return { error: `Cannot close verify item ${item.id}: ${result.problem}` };
-				evidence = {
-					toolCallId: result.run.id,
-					command: result.run.command as string,
-					output: boundedOutput(result.run.output),
-				};
+				evidence = evidenceOf(result.run);
 			}
 			const items = current.items.map((i) => {
 				if (i.id !== item.id) return i;
