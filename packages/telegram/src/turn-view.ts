@@ -30,7 +30,8 @@ export interface TurnViewOptions {
 /**
  * How one turn looks in the chat: a live status message while tools run, which then becomes the answer
  * (or, in tool-call-detail mode, stays as the tool block with the answer sent separately); the provider
- * error when the turn failed; generated images; and nothing at all when /stop halted it.
+ * error when the turn failed; generated images; and nothing at all when /stop halted it. The answer to a
+ * message steered in mid-turn goes out as soon as it is written, threaded to that message.
  */
 export function createTurnView(outbox: Outbox, options: TurnViewOptions) {
 	const { replyTo, toolCallDetail } = options;
@@ -41,6 +42,10 @@ export function createTurnView(outbox: Outbox, options: TurnViewOptions) {
 	const toolCallEntries: ToolCallEntry[] = [];
 	const generatedImages: Buffer[] = [];
 	const toolCallLogger = createToolCallLogger();
+	/** Owner messages steered into this turn that it hasn't read yet, oldest first. */
+	const steeredIds: number[] = [];
+	/** The steered message the next assistant text answers. */
+	let answerTo: number | undefined;
 
 	/** Sends the status message once, then edits it in place. Failures (rate limits, "not modified") are ignored. */
 	const setStatus = (text: string, format: MessageFormat) => {
@@ -55,8 +60,25 @@ export function createTurnView(outbox: Outbox, options: TurnViewOptions) {
 	};
 
 	return {
+		/** `messageId` was steered into this turn; the turn's first text after reading it goes out at once, as a reply to it. */
+		steered(messageId: number): void {
+			steeredIds.push(messageId);
+		},
+
 		onEvent(event: AgentSessionEvent): void {
-			response = assistantText(event) ?? response;
+			if (event.type === "message_start" && event.message.role === "user" && steeredIds.length > 0) {
+				answerTo = steeredIds.shift();
+			}
+			const text = assistantText(event);
+			if (text && answerTo !== undefined) {
+				// Held for the end of the turn, a mid-task answer would be replaced by the final reply and never seen.
+				const to = answerTo;
+				answerTo = undefined;
+				response = undefined;
+				statusPending = statusPending.then(() => sendReply(outbox, text, [], to, undefined));
+			} else {
+				response = text ?? response;
+			}
 			if (event.type === "tool_execution_start") {
 				toolCallLogger.start(event.toolCallId);
 				if (toolCallDetail) {
@@ -118,6 +140,8 @@ export function createTurnView(outbox: Outbox, options: TurnViewOptions) {
 		},
 	};
 }
+
+export type TurnView = ReturnType<typeof createTurnView>;
 
 function assistantText(event: AgentSessionEvent): string | undefined {
 	if (event.type !== "message_end" || event.message.role !== "assistant") return undefined;

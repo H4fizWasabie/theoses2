@@ -151,6 +151,72 @@ describe("Channel Session", () => {
 		expect(session.isRunning).toBe(false);
 	});
 
+	it("steers a message into the running turn, which reads it after the tool call and carries on", async () => {
+		let contextAfterTool = "";
+		faux.setResponses([
+			fauxAssistantMessage([fauxToolCall("bash", { command: "sleep 0.2" })], { stopReason: "toolUse" }),
+			(context) => {
+				contextAfterTool = JSON.stringify(context.messages);
+				return fauxAssistantMessage("main, carrying on");
+			},
+		]);
+		const session = await registry().open("chat-1");
+		let steered: boolean | undefined;
+		const users: string[] = [];
+		const result = await session.submit({ text: "go" }, (event) => {
+			if (event.type === "tool_execution_start") steered = session.steer({ text: "which branch?" });
+			if (event.type === "message_start" && event.message.role === "user") {
+				users.push(JSON.stringify(event.message.content));
+			}
+		});
+
+		expect(steered).toBe(true);
+		expect(result?.outcome).toBe("completed");
+		expect(users).toHaveLength(2);
+		expect(users[1]).toContain("which branch?");
+		expect(contextAfterTool).toContain("which branch?");
+		expect(contextAfterTool).toContain("Sent while you were working on the current task");
+	});
+
+	it("refuses to steer when nothing runs, and refuses commands", async () => {
+		faux.setResponses([
+			fauxAssistantMessage([fauxToolCall("bash", { command: "sleep 0.2" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		const session = await registry().open("chat-1");
+		expect(session.steer({ text: "hello" })).toBe(false);
+		let command: boolean | undefined;
+		await session.submit({ text: "go" }, (event) => {
+			if (event.type === "tool_execution_start") command = session.steer({ text: "/compact" });
+		});
+		expect(command).toBe(false);
+	});
+
+	it("stop drops a steered message, so the next turn never acts on it", async () => {
+		let nextContext = "";
+		faux.setResponses([
+			fauxAssistantMessage([fauxToolCall("bash", { command: "sleep 30" })], { stopReason: "toolUse" }),
+			(context) => {
+				nextContext = JSON.stringify(context.messages);
+				return fauxAssistantMessage("ok");
+			},
+		]);
+		const session = await registry().open("chat-1");
+		let stop: Promise<unknown> | undefined;
+		const result = await session.submit({ text: "go" }, (event) => {
+			if (event.type === "tool_execution_start") {
+				session.steer({ text: "also delete the branch" });
+				stop = session.stop();
+			}
+		});
+		await stop;
+		expect(result?.outcome).toBe("aborted");
+
+		await session.submit({ text: "next" });
+		expect(nextContext).toContain("next");
+		expect(nextContext).not.toContain("also delete the branch");
+	});
+
 	it("stop on an idle session reports nothing running", async () => {
 		const session = await registry().open("chat-1");
 		expect(await session.stop()).toEqual({ wasRunning: false, runningTool: undefined });

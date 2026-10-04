@@ -2,12 +2,18 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Bot, type Context, InputFile } from "grammy";
 import type { Message } from "grammy/types";
-import { type ChannelInput, configureHttpDispatcher, createChannelSessions, getAgentDir } from "theoses-coding-agent";
-import { readInbound, resolvePrompt } from "./inbound.ts";
+import {
+	type ChannelInput,
+	type ChannelSession,
+	configureHttpDispatcher,
+	createChannelSessions,
+	getAgentDir,
+} from "theoses-coding-agent";
+import { readInbound, resolvePrompt, steerInput } from "./inbound.ts";
 import { rewindReply } from "./rewind.ts";
 import { createSendFileTool } from "./send-file.ts";
 import { createTurnQueue, type StopDecision } from "./turn-queue.ts";
-import { createTurnView, type Outbox } from "./turn-view.ts";
+import { createTurnView, type Outbox, type TurnView } from "./turn-view.ts";
 
 // No settings.json override plumbing here (telegram doesn't load SettingsManager);
 // this applies the shared default idle timeout globally so a stalled/looping
@@ -259,6 +265,8 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 		customTools: [sendFileTool],
 	});
 	const albums = new Map<string, Message[]>();
+	/** The turn each chat is running (from prepared to finishing), for steering into it. */
+	const activeTurns = new Map<string, { session: ChannelSession; view: TurnView }>();
 	let toolCallDetailEnabled = loadToolCallDetailPreference();
 
 	// One typing indicator per chat, on while any turn is queued, preparing, running or finishing. It starts
@@ -346,8 +354,32 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 				grammyOutbox(bot, id, () => refreshTyping(chat, id)),
 				{ replyTo, toolCallDetail: toolCallDetailEnabled },
 			);
-			return { session, input, onEvent: view.onEvent, finish: (result, opts) => view.finish(result, opts) };
+			const turn = { session, view };
+			activeTurns.set(chat, turn);
+			return {
+				session,
+				input,
+				onEvent: view.onEvent,
+				finish: (result, opts) => {
+					if (activeTurns.get(chat) === turn) activeTurns.delete(chat);
+					return view.finish(result, opts);
+				},
+			};
 		});
+	};
+
+	/**
+	 * Hands a plain text message to the chat's running turn, which reads it after its current tool calls, as
+	 * Claude Code and the TUI do. Queued behind the turn instead, the owner could neither steer the task nor
+	 * ask about it until it ended. False when there is no running turn to take it.
+	 */
+	const steerRunningTurn = (chat: string, message: Message): boolean => {
+		const turn = activeTurns.get(chat);
+		const input = steerInput(message);
+		if (!turn || !input || !turn.session.steer(input)) return false;
+		turn.view.steered(message.message_id);
+		bot.api.setMessageReaction(message.chat.id, message.message_id, [{ type: "emoji", emoji: "👀" }]).catch(() => {});
+		return true;
 	};
 
 	bot.on("message", async (ctx) => {
@@ -378,6 +410,8 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			);
 			return;
 		}
+
+		if (steerRunningTurn(chat, ctx.message)) return;
 
 		// Telegram delivers an album as separate messages sharing a media_group_id. The first one
 		// becomes the leader and handles them all as a single turn; the others just join its list.
