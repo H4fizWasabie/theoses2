@@ -76,6 +76,16 @@ describe("Theoses2 Working Note", () => {
 		expect(rest).toEqual([]);
 	});
 
+	it("keeps a multi-line command on one ran: line, so it is dropped and replaced as one", () => {
+		const manager = SessionManager.inMemory();
+		const heredoc = "python3 - <<'EOF'\nprint('hi')\nEOF";
+		recordWorkingNoteCommand(manager, heredoc, true);
+		appendWorkingNote(manager, "fact: python3 is 3.12");
+		recordWorkingNoteCommand(manager, heredoc, false);
+
+		expect(manager.getWorkingNote()).toBe("fact: python3 is 3.12\nran: python3 - <<'EOF'\\nprint('hi')\\nEOF");
+	});
+
 	it("moves a command run again to the end, with its latest result", () => {
 		const manager = SessionManager.inMemory();
 		recordWorkingNoteCommand(manager, "npm test", true);

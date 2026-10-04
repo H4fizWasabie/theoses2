@@ -770,10 +770,11 @@ export class AgentSession {
 
 		this.agent.afterToolCall = async (context) => {
 			const result = await this._afterToolCall(context);
-			// Only this session's own bash: a task sub-agent's commands are work the parent never sees.
+			// Only this session's own bash: a task sub-agent's commands are work the parent never sees. Whether the
+			// command failed is its own result, not what an extension's tool_result handler rewrote it to.
 			if (context.toolCall.name === "bash") {
 				const { command } = context.args as { command: string };
-				recordWorkingNoteCommand(this.sessionManager, command, result?.isError ?? context.isError);
+				recordWorkingNoteCommand(this.sessionManager, command, context.isError);
 			}
 			return result;
 		};

@@ -47,10 +47,11 @@ export function appendWorkingNote(store: WorkingNoteStore, line: string): void {
 
 /**
  * Logs one bash command, the model's or the owner's: `ran: <command>`, plus `(failed)` when it did not succeed. A
- * command run again replaces its earlier line, so the note keeps the latest result and its recency.
+ * command run again replaces its earlier line, so the note keeps the latest result and its recency. A multi-line
+ * command (a heredoc) is kept on one line, with its line breaks written as `\n`, so it stays one `ran:` line.
  */
 export function recordWorkingNoteCommand(store: WorkingNoteStore, command: string, failed: boolean): void {
-	const trimmed = command.trim();
+	const trimmed = command.trim().replace(/\r?\n/g, "\\n");
 	if (!trimmed) return;
 	const ran = `${RAN}${trimmed.length > COMMAND_CAP ? `${trimmed.slice(0, COMMAND_CAP)}…` : trimmed}`;
 	const lines = linesOf(store).filter((line) => line !== ran && line !== `${ran}${FAILED}`);
