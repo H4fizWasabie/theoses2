@@ -634,15 +634,19 @@ export class AgentSession {
 			};
 		}
 
-		const isOAuth = this._modelRuntime.isUsingOAuth(model.provider);
-		if (isOAuth) {
-			throw new Error(
-				`Authentication failed for "${model.provider}". ` +
+		throw this._missingAuthError(model.provider);
+	}
+
+	/** The error for a provider with no usable credentials, worded for OAuth or API-key auth. */
+	private _missingAuthError(provider: string): Error {
+		if (this._modelRuntime.isUsingOAuth(provider)) {
+			return new Error(
+				`Authentication failed for "${provider}". ` +
 					`Credentials may have expired or network is unavailable. ` +
-					`Run '/login ${model.provider}' to re-authenticate.`,
+					`Run '/login ${provider}' to re-authenticate.`,
 			);
 		}
-		throw new Error(formatNoApiKeyFoundMessage(model.provider));
+		return new Error(formatNoApiKeyFoundMessage(provider));
 	}
 
 	private async _getSummarizationRequestAuth(model: Model<any>): Promise<{
@@ -1414,17 +1418,7 @@ export class AgentSession {
 			const hasConfiguredAuth =
 				this._modelRuntime.hasConfiguredAuth(this.model.provider) ||
 				(await this._modelRuntime.checkAuth(this.model.provider)) !== undefined;
-			if (!hasConfiguredAuth) {
-				const isOAuth = this._modelRuntime.isUsingOAuth(this.model.provider);
-				if (isOAuth) {
-					throw new Error(
-						`Authentication failed for "${this.model.provider}". ` +
-							`Credentials may have expired or network is unavailable. ` +
-							`Run '/login ${this.model.provider}' to re-authenticate.`,
-					);
-				}
-				throw new Error(formatNoApiKeyFoundMessage(this.model.provider));
-			}
+			if (!hasConfiguredAuth) throw this._missingAuthError(this.model.provider);
 
 			// Check if we need to compact before sending (catches aborted responses).
 			// The user's new prompt is sent below, so do not call agent.continue() here.
