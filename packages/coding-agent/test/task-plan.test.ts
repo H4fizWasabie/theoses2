@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Originals } from "../src/core/file-checkpoints.ts";
 import * as planReviewer from "../src/core/plan-reviewer.ts";
 import { buildPrompt, PLAN_REVIEW_CUSTOM_TYPE, parseReview, type ReviewOutcome } from "../src/core/plan-reviewer.ts";
+import { SessionManager } from "../src/core/session-manager.ts";
+import { TASK_BOUNDARY_CUSTOM_TYPE } from "../src/core/task-boundary-detector.ts";
 import {
 	applyPlanAction,
 	formatPlanStatus,
@@ -354,6 +356,32 @@ describe("task plan replays", () => {
 		const closed = act(added, { action: "update", id: 8, status: "done" }, passed);
 		expect(closed.plan?.items[7]).toMatchObject({ id: 8, status: "done" });
 		expect(closed.plan?.items[4]).toMatchObject({ id: 5, status: "done" });
+	});
+});
+
+describe("SessionManager.getTaskPlan", () => {
+	// Production 2026-10-04: an open plan from issue #486 (10-01) survived nine task switches and
+	// rejected the next task's create with "A plan is already open".
+	const say = (text: string) => ({ role: "user" as const, content: text, timestamp: 0 });
+
+	it("does not return a plan from before the latest task boundary", () => {
+		const session = SessionManager.inMemory();
+		session.appendMessage(say("fix issue 486"));
+		session.setTaskPlan(created());
+		const anchor = session.appendMessage(say("now fix the psychology refill"));
+		session.appendCustomEntry(TASK_BOUNDARY_CUSTOM_TYPE, { taskSummary: "psychology", beforeEntryId: anchor });
+		expect(session.getTaskPlan()).toBeUndefined();
+	});
+
+	it("returns a plan created in the new task's first turn, before the boundary entry was written", () => {
+		const session = SessionManager.inMemory();
+		session.appendMessage(say("fix issue 486"));
+		session.setTaskPlan(created({ goal: "old" }));
+		const anchor = session.appendMessage(say("now fix the psychology refill"));
+		session.setTaskPlan(created({ goal: "new" }));
+		// The detector writes the boundary after the turn's reply (turn-settlement.ts).
+		session.appendCustomEntry(TASK_BOUNDARY_CUSTOM_TYPE, { taskSummary: "psychology", beforeEntryId: anchor });
+		expect(session.getTaskPlan()?.goal).toBe("new");
 	});
 });
 
