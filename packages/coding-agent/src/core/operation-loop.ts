@@ -32,6 +32,8 @@ export interface OperationLoopDeps {
 	emit: (event: Extract<AgentSessionEvent, { type: "auto_retry_start" | "auto_retry_end" }>) => void;
 	/** Records the one outcome of the operation. Called exactly once per pass that does not continue. */
 	finish: (outcome: OperationFinishedEntry["outcome"], msg: AssistantMessage | undefined) => void;
+	/** Settles once no message accepted during the run is still on its way into the queue. */
+	waitForInput: () => Promise<void>;
 }
 
 export interface OperationLoop {
@@ -183,7 +185,8 @@ export function createOperationLoop(deps: OperationLoopDeps): OperationLoop {
 			finish();
 
 			// The agent loop drains both queues before agent_end. Anything here was queued by agent_end
-			// extension handlers and needs a continuation.
+			// extension handlers, or accepted during the run and still in intake then, and needs a continuation.
+			await deps.waitForInput();
 			return agent.hasQueuedMessages() ? "continue" : "done";
 		},
 

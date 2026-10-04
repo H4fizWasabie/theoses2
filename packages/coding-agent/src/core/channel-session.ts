@@ -1,7 +1,7 @@
 import type { ThinkingLevel } from "theoses-agent-core";
 import type { Api, Model } from "theoses-ai";
-import { type AgentSessionEvent, decoratePromptText, type PromptOptions, type PromptResult } from "./agent-session.ts";
-import { formatClockAnnotation, stripClockAnnotation } from "./clock.ts";
+import type { AgentSessionEvent, PromptOptions, PromptResult } from "./agent-session.ts";
+import { stripClockAnnotation } from "./clock.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import { describeRewindPlan, FILE_CHECKPOINT_ENTRY_TYPE, type RewindResult } from "./file-checkpoints.ts";
 import { findExactModelReferenceMatch } from "./model-resolver.ts";
@@ -59,13 +59,6 @@ export interface ChannelInput {
 	/** See PromptOptions.settlementText. */
 	settlementText?: string;
 }
-
-/**
- * Prefixes a steered message. Without it a mid-task message reads like a fresh request, and a model that
- * answers it in text alone ends the run, leaving the task it was working on unfinished.
- */
-export const MID_TASK_NOTE =
-	"[Sent while you were working on the current task. If it is a question, answer it briefly; if it changes the task, adjust. Then keep working: put your next tool call in the same response, because a text-only response ends the task. Stop only if the user asks you to stop or wait, or if the message conflicts with what was agreed; then ask.]";
 
 function userText(content: string | Array<{ type: string; text?: string }>): string {
 	const text =
@@ -175,16 +168,11 @@ export function createChannelSessions(options: ChannelSessionsOptions) {
 			steer(input) {
 				// Commands keep their submit path: prompt() runs extension commands, a steered message never would.
 				if (!session.isStreaming || input.text.startsWith("/")) return false;
-				const text = decoratePromptText(
-					`${MID_TASK_NOTE}\n${input.text}`,
-					undefined,
-					input.replyContext,
-					formatClockAnnotation(),
-				);
-				// steer() queues before its first await, so the message is queued while the run is still active, and
-				// AgentSession keeps a run going while messages are queued. It rejects only for extension commands,
-				// which the note prefix rules out.
-				session.steer(text).catch((error: unknown) => console.error("Steering failed:", error));
+				// AgentSession keeps the run going until a message accepted mid-run is through intake and queued, so it
+				// lands in this run. It rejects only for extension commands, which the check above routes to submit.
+				session
+					.steer(input.text, undefined, { replyContext: input.replyContext })
+					.catch((error: unknown) => console.error("Steering failed:", error));
 				return true;
 			},
 			async stop() {

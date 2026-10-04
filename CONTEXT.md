@@ -25,7 +25,7 @@ The unit of change to a Working Note: one model-invoked append, persisted as its
 _Avoid_: session note entry, note record
 
 **Abort Notice**:
-A rendering rule, not stored state: when the most recent operation's outcome is `aborted` (the engine's existing `OperationFinishedRecord`), the next turn's prompt is prefixed with an explicit notice that the prior task was cancelled and should not be resumed. No new persistence — reuses the engine's existing abort/outcome records.
+A rendering rule, not stored state: when the most recent operation's outcome is `aborted` (the engine's existing `OperationFinishedRecord`), the next prompt that starts an operation is prefixed with an explicit notice that the prior task was cancelled and should not be resumed. A message steered or queued into a running operation never carries it: it joins the operation in flight. No new persistence — reuses the engine's existing abort/outcome records.
 _Avoid_: stop marker, boundary marker
 
 **Turn Settlement**:

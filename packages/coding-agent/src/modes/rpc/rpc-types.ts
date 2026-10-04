@@ -115,8 +115,9 @@ export interface RpcSessionState {
 export type RpcResponse =
 	// Prompting (async - events follow)
 	| { id?: string; type: "response"; command: "prompt"; success: true }
-	| { id?: string; type: "response"; command: "steer"; success: true }
-	| { id?: string; type: "response"; command: "follow_up"; success: true }
+	// queued is false when a UserPromptSubmit hook or an extension input handler blocked or handled the message
+	| { id?: string; type: "response"; command: "steer"; success: true; data: { queued: boolean } }
+	| { id?: string; type: "response"; command: "follow_up"; success: true; data: { queued: boolean } }
 	| { id?: string; type: "response"; command: "abort"; success: true }
 	| { id?: string; type: "response"; command: "new_session"; success: true; data: { cancelled: boolean } }
 

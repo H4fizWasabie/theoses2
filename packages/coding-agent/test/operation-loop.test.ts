@@ -73,6 +73,7 @@ function setup(options: { baseDelayMs?: number; runOutcome?: CompactionRunOutcom
 		getBranch: () => [],
 		emit: (event) => log.push(event.type === "auto_retry_start" ? "retry_start" : `retry_end:${event.success}`),
 		finish: (outcome) => log.push(`finish:${outcome}`),
+		waitForInput: async () => {},
 	};
 	const loop = createOperationLoop(deps);
 

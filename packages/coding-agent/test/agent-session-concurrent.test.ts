@@ -193,8 +193,8 @@ describe("AgentSession concurrent prompt guard", () => {
 		const firstPrompt = session.prompt("First message");
 		await waitForStreaming(session);
 
-		// steer should work while streaming
-		expect(() => session.steer("Steering message")).not.toThrow();
+		// steer should work while streaming; it queues once the message is through intake
+		await expect(session.steer("Steering message")).resolves.toBe(true);
 		expect(session.pendingMessageCount).toBe(1);
 
 		// Cleanup
@@ -208,8 +208,8 @@ describe("AgentSession concurrent prompt guard", () => {
 		const firstPrompt = session.prompt("First message");
 		await waitForStreaming(session);
 
-		// followUp should work while streaming
-		expect(() => session.followUp("Follow-up message")).not.toThrow();
+		// followUp should work while streaming; it queues once the message is through intake
+		await expect(session.followUp("Follow-up message")).resolves.toBe(true);
 		expect(session.pendingMessageCount).toBe(1);
 
 		// Cleanup
@@ -247,7 +247,7 @@ describe("AgentSession concurrent prompt guard", () => {
 								.join("\n");
 						});
 
-					if (userTexts.some((text) => text.startsWith("Steer from extension"))) {
+					if (userTexts.some((text) => text.includes("Steer from extension"))) {
 						sawSteeringMessage = true;
 						stream.push({ type: "start", partial: createAssistantMessage("") });
 						stream.push({ type: "done", reason: "stop", message: createAssistantMessage("Steered") });

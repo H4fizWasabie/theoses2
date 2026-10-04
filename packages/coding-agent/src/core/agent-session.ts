@@ -303,6 +303,14 @@ export interface PromptOptions {
 	settlementText?: string;
 }
 
+/** Options for steer() and followUp(). */
+export interface QueueOptions {
+	/** Bounded content of the message this one is replying to. */
+	replyContext?: string;
+	/** Source of input for extension input event handlers. Defaults to "interactive". */
+	source?: InputSource;
+}
+
 /** How the operation a prompt() ran ended, after retries and overflow recovery. */
 export interface PromptResult {
 	outcome: OperationFinishedEntry["outcome"];
@@ -356,6 +364,21 @@ export function decoratePromptText(
 				? `${INTERRUPTED_NOTICE}\n\n`
 				: "";
 	return `${notice}${addReplyContext(text, replyContext)}${clockAnnotation}`;
+}
+
+/**
+ * Prefixes a steered message. Without it a mid-task message reads like a fresh request, and a model that
+ * answers it in text alone ends the run, leaving the task it was working on unfinished.
+ */
+export const MID_TASK_NOTE =
+	"[Sent while you were working on the current task. If it is a question, answer it briefly; if it changes the task, adjust. Then keep working: put your next tool call in the same response, because a text-only response ends the task. Stop only if the user asks you to stop or wait, or if the message conflicts with what was agreed; then ask.]";
+
+/** A message waiting in the steering or follow-up queue. */
+interface QueuedInput {
+	/** What was submitted, for the queue display and for restoring it to an editor. */
+	text: string;
+	/** The message handed to the agent; `message_start` carries this same object when it is delivered. */
+	message: AgentMessage;
 }
 
 /** Options for model/thinking mutations. */
@@ -414,10 +437,14 @@ export class AgentSession {
 	private _idleWaitPromise: Promise<void> | undefined;
 	private _resolveIdleWait: (() => void) | undefined;
 
-	/** Tracks pending steering messages for UI display. Removed when delivered. */
-	private _steeringMessages: string[] = [];
-	/** Tracks pending follow-up messages for UI display. Removed when delivered. */
-	private _followUpMessages: string[] = [];
+	/** Pending steering messages, for display. Removed when delivered. */
+	private _steeringQueue: QueuedInput[] = [];
+	/** Pending follow-up messages, for display. Removed when delivered. */
+	private _followUpQueue: QueuedInput[] = [];
+	/** Messages accepted while a run was active and still in intake; the run waits for them before it ends. */
+	private readonly _inputInIntake = new Set<Promise<unknown>>();
+	/** Bumped by clearQueue(), so a message still in intake when the queue was cleared is dropped, not queued. */
+	private _queueGeneration = 0;
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
 	/** Research job accounting; outlives runtime rebuilds so the per-session limits hold. */
@@ -522,6 +549,7 @@ export class AgentSession {
 			getBranch: () => this.sessionManager.getBranch(),
 			emit: (event) => this._emit(event),
 			finish: (outcome, msg) => this._finishOperation(outcome, msg),
+			waitForInput: () => this._waitForInputInIntake(),
 		});
 		this._fileCheckpoints = new FileCheckpoints(this.sessionManager, this._cwd);
 		if (this.sessionManager.isPersisted()) sweepCheckpoints(this.sessionManager.getCheckpointDirectory());
@@ -815,8 +843,8 @@ export class AgentSession {
 	private _emitQueueUpdate(): void {
 		this._emit({
 			type: "queue_update",
-			steering: [...this._steeringMessages],
-			followUp: [...this._followUpMessages],
+			steering: this._steeringQueue.map((queued) => queued.text),
+			followUp: this._followUpQueue.map((queued) => queued.text),
 		});
 	}
 
@@ -854,20 +882,13 @@ export class AgentSession {
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
-			const messageText = contentText(event.message.content, "");
-			if (messageText) {
-				// Check steering queue first
-				const steeringIndex = this._steeringMessages.indexOf(messageText);
-				if (steeringIndex !== -1) {
-					this._steeringMessages.splice(steeringIndex, 1);
+			// The agent delivers the same object it was queued with, so two identical texts never match the wrong entry.
+			for (const queue of [this._steeringQueue, this._followUpQueue]) {
+				const index = queue.findIndex((queued) => queued.message === event.message);
+				if (index !== -1) {
+					queue.splice(index, 1);
 					this._emitQueueUpdate();
-				} else {
-					// Check follow-up queue
-					const followUpIndex = this._followUpMessages.indexOf(messageText);
-					if (followUpIndex !== -1) {
-						this._followUpMessages.splice(followUpIndex, 1);
-						this._emitQueueUpdate();
-					}
+					break;
 				}
 			}
 		}
@@ -1305,6 +1326,12 @@ export class AgentSession {
 	 * @throws Error if no model selected or no API key available (when not streaming)
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<PromptResult | undefined> {
+		// Queued while a run is active: the run waits for it (see _holdRunFor). Otherwise it starts its own run.
+		return this.isStreaming ? this._holdRunFor(this._prompt(text, options)) : this._prompt(text, options);
+	}
+
+	private async _prompt(text: string, options?: PromptOptions): Promise<PromptResult | undefined> {
+		const generation = this._queueGeneration;
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		const preflightResult = options?.preflightResult;
 		let messages: AgentMessage[] | undefined;
@@ -1327,77 +1354,40 @@ export class AgentSession {
 				);
 			}
 
-			// Emit input event for extension interception (before skill/template expansion)
-			let currentText = text;
-			let currentImages = normalizeImages(options?.images);
-			// The owner's UserPromptSubmit hooks see what a person typed, not what an extension sent on their behalf.
-			if ((options?.source ?? "interactive") !== "extension") {
-				const submitted = await runUserPromptSubmit(
-					this.settingsManager.getCommandHooks(),
-					this._hookContext(),
-					currentText,
-				);
-				if (submitted.action === "handled") {
-					await this.sendCustomMessage(
-						{
-							customType: "hook-blocked",
-							content: `A hook blocked this prompt: ${submitted.reason}`,
-							display: true,
-						},
-						{ triggerTurn: false },
-					);
-					preflightResult?.(true);
-					return;
-				}
-				if (submitted.action === "transform") currentText = submitted.text;
+			const input = await this._intake(text, normalizeImages(options?.images), {
+				source: options?.source ?? "interactive",
+				streamingBehavior: this.isStreaming ? options?.streamingBehavior : undefined,
+				expandPromptTemplates,
+			});
+			if (!input) {
+				preflightResult?.(true);
+				return;
 			}
-			if (this._extensionRunner.hasHandlers("input")) {
-				const inputResult = await this._extensionRunner.emitInput(
-					currentText,
-					currentImages,
-					options?.source ?? "interactive",
-					this.isStreaming ? options?.streamingBehavior : undefined,
-				);
-				if (inputResult.action === "handled") {
-					preflightResult?.(true);
-					return;
-				}
-				if (inputResult.action === "transform") {
-					currentText = inputResult.text;
-					currentImages = inputResult.images ?? currentImages;
-				}
-			}
-
-			// Expand skill commands (/skill:name args) and prompt templates (/template args)
-			let expandedText = currentText;
-			if (expandPromptTemplates) {
-				expandedText = this._expandSkillCommand(expandedText);
-				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
-			}
-			const contextualText = decoratePromptText(
-				expandedText,
-				this.sessionManager.getLastOperationOutcome(),
-				options?.replyContext,
-				formatClockAnnotation(),
-			);
 			// Last prompt wins: one agent_end can cover queued follow-ups, and settlement wants the newest intent.
 			this._settlementText = options?.settlementText ?? text;
 
-			// If streaming, queue via steer() or followUp() based on option
+			// If streaming, queue as a steer or follow-up based on option
 			if (this.isStreaming) {
 				if (!options?.streamingBehavior) {
 					throw new Error(
 						"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
 					);
 				}
-				if (options.streamingBehavior === "followUp") {
-					await this._queueFollowUp(contextualText, currentImages);
-				} else {
-					await this._queueSteer(contextualText, currentImages);
+				// Dropped when the queue was cleared (stop) while this message was in intake.
+				if (generation === this._queueGeneration) {
+					this._enqueue(options.streamingBehavior, text, input, options.replyContext);
 				}
 				preflightResult?.(true);
 				return;
 			}
+
+			const currentImages = input.images;
+			const contextualText = decoratePromptText(
+				input.text,
+				this.sessionManager.getLastOperationOutcome(),
+				options?.replyContext,
+				formatClockAnnotation(),
+			);
 
 			// Flush any pending bash messages before the new prompt
 			this._flushPendingBashMessages();
@@ -1589,76 +1579,146 @@ export class AgentSession {
 	/**
 	 * Queue a steering message while the agent is running.
 	 * Delivered after the current assistant turn finishes executing its tool calls,
-	 * before the next LLM call.
-	 * Expands skill commands and prompt templates. Errors on extension commands.
+	 * before the next LLM call. Goes through the same intake as prompt(): the owner's
+	 * UserPromptSubmit hooks, extension input handlers, skill and template expansion.
 	 * @param images Optional image attachments to include with the message
+	 * @returns false when a hook or input handler blocked or handled the message, so nothing was queued
 	 * @throws Error if text is an extension command
 	 */
-	async steer(text: string, images?: ImageContent[]): Promise<void> {
-		// Check for extension commands (cannot be queued)
-		if (text.startsWith("/")) {
-			this._throwIfExtensionCommand(text);
-		}
-
-		// Expand skill commands and prompt templates
-		let expandedText = this._expandSkillCommand(text);
-		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
-
-		await this._queueSteer(expandedText, images);
+	async steer(text: string, images?: ImageContent[], options?: QueueOptions): Promise<boolean> {
+		return this._queueInput("steer", text, images, options);
 	}
 
 	/**
 	 * Queue a follow-up message to be processed after the agent finishes.
 	 * Delivered only when agent has no more tool calls or steering messages.
-	 * Expands skill commands and prompt templates. Errors on extension commands.
+	 * Goes through the same intake as prompt() (see steer()).
 	 * @param images Optional image attachments to include with the message
+	 * @returns false when a hook or input handler blocked or handled the message, so nothing was queued
 	 * @throws Error if text is an extension command
 	 */
-	async followUp(text: string, images?: ImageContent[]): Promise<void> {
-		// Check for extension commands (cannot be queued)
+	async followUp(text: string, images?: ImageContent[], options?: QueueOptions): Promise<boolean> {
+		return this._queueInput("followUp", text, images, options);
+	}
+
+	private async _queueInput(
+		mode: "steer" | "followUp",
+		text: string,
+		images: ImageContent[] | undefined,
+		options: QueueOptions | undefined,
+	): Promise<boolean> {
+		// Extension commands cannot be queued; prompt() runs them immediately.
 		if (text.startsWith("/")) {
 			this._throwIfExtensionCommand(text);
 		}
-
-		// Expand skill commands and prompt templates
-		let expandedText = this._expandSkillCommand(text);
-		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
-
-		await this._queueFollowUp(expandedText, images);
+		const generation = this._queueGeneration;
+		const queue = async () => {
+			const input = await this._intake(text, images, {
+				source: options?.source ?? "interactive",
+				streamingBehavior: mode,
+				expandPromptTemplates: true,
+			});
+			if (!input || generation !== this._queueGeneration) return false;
+			this._settlementText = text;
+			this._enqueue(mode, text, input, options?.replyContext);
+			return true;
+		};
+		return this.isStreaming ? this._holdRunFor(queue()) : queue();
 	}
 
 	/**
-	 * Internal: Queue a steering message (already expanded, no extension command check).
+	 * The intake every submitted message goes through, whether it starts a run or is queued into one: the owner's
+	 * UserPromptSubmit hooks (not for extension-sent messages), extension input handlers, then skill and template
+	 * expansion. Undefined when a hook or handler blocked or handled the message.
 	 */
-	private async _queueSteer(text: string, images?: ImageContent[]): Promise<void> {
-		this._steeringMessages.push(text);
-		this._emitQueueUpdate();
-		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
-		if (images) {
-			content.push(...images);
+	private async _intake(
+		text: string,
+		images: ImageContent[] | undefined,
+		options: { source: InputSource; streamingBehavior?: "steer" | "followUp"; expandPromptTemplates: boolean },
+	): Promise<{ text: string; images: ImageContent[] | undefined } | undefined> {
+		let currentText = text;
+		let currentImages = images;
+		// The owner's UserPromptSubmit hooks see what a person typed, not what an extension sent on their behalf.
+		if (options.source !== "extension") {
+			const submitted = await runUserPromptSubmit(
+				this.settingsManager.getCommandHooks(),
+				this._hookContext(),
+				currentText,
+			);
+			if (submitted.action === "handled") {
+				await this.sendCustomMessage(
+					{
+						customType: "hook-blocked",
+						content: `A hook blocked this prompt: ${submitted.reason}`,
+						display: true,
+					},
+					{ triggerTurn: false },
+				);
+				return undefined;
+			}
+			if (submitted.action === "transform") currentText = submitted.text;
 		}
-		this.agent.steer({
-			role: "user",
-			content,
-			timestamp: Date.now(),
-		});
+		if (this._extensionRunner.hasHandlers("input")) {
+			const inputResult = await this._extensionRunner.emitInput(
+				currentText,
+				currentImages,
+				options.source,
+				options.streamingBehavior,
+			);
+			if (inputResult.action === "handled") return undefined;
+			if (inputResult.action === "transform") {
+				currentText = inputResult.text;
+				currentImages = inputResult.images ?? currentImages;
+			}
+		}
+		// Expand skill commands (/skill:name args) and prompt templates (/template args)
+		if (options.expandPromptTemplates) {
+			currentText = this._expandSkillCommand(currentText);
+			currentText = expandPromptTemplate(currentText, [...this.promptTemplates]);
+		}
+		return { text: currentText, images: currentImages };
 	}
 
 	/**
-	 * Internal: Queue a follow-up message (already expanded, no extension command check).
+	 * Queues a message that passed intake into the running operation. It carries no Abort Notice: that belongs to
+	 * the message that starts an operation, and this one joins the operation in flight. A steer is marked as
+	 * arriving mid-task.
 	 */
-	private async _queueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
-		this._followUpMessages.push(text);
+	private _enqueue(
+		mode: "steer" | "followUp",
+		submittedText: string,
+		input: { text: string; images: ImageContent[] | undefined },
+		replyContext: string | undefined,
+	): void {
+		const body = mode === "steer" ? `${MID_TASK_NOTE}\n${input.text}` : input.text;
+		const content: (TextContent | ImageContent)[] = [
+			{ type: "text", text: decoratePromptText(body, undefined, replyContext, formatClockAnnotation()) },
+		];
+		if (input.images) content.push(...input.images);
+		const message: AgentMessage = { role: "user", content, timestamp: Date.now() };
+		(mode === "steer" ? this._steeringQueue : this._followUpQueue).push({ text: submittedText, message });
 		this._emitQueueUpdate();
-		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
-		if (images) {
-			content.push(...images);
+		if (mode === "steer") this.agent.steer(message);
+		else this.agent.followUp(message);
+	}
+
+	/**
+	 * Keeps the running operation from ending until `work` (a message accepted mid-run, still in intake) settles.
+	 * Hooks can take seconds; without this the run could end first and leave the message queued in an idle agent.
+	 */
+	private async _holdRunFor<T>(work: Promise<T>): Promise<T> {
+		this._inputInIntake.add(work);
+		try {
+			return await work;
+		} finally {
+			this._inputInIntake.delete(work);
 		}
-		this.agent.followUp({
-			role: "user",
-			content,
-			timestamp: Date.now(),
-		});
+	}
+
+	private async _waitForInputInIntake(): Promise<void> {
+		while (this._inputInIntake.size > 0) {
+			await Promise.allSettled([...this._inputInIntake]);
+		}
 	}
 
 	/**
@@ -1772,10 +1832,11 @@ export class AgentSession {
 	 * @returns Object with steering and followUp arrays
 	 */
 	clearQueue(): { steering: string[]; followUp: string[] } {
-		const steering = [...this._steeringMessages];
-		const followUp = [...this._followUpMessages];
-		this._steeringMessages = [];
-		this._followUpMessages = [];
+		const steering = this.getSteeringMessages();
+		const followUp = this.getFollowUpMessages();
+		this._queueGeneration++;
+		this._steeringQueue = [];
+		this._followUpQueue = [];
 		this.agent.clearAllQueues();
 		this._emitQueueUpdate();
 		return { steering, followUp };
@@ -1783,17 +1844,17 @@ export class AgentSession {
 
 	/** Number of pending messages (includes both steering and follow-up) */
 	get pendingMessageCount(): number {
-		return this._steeringMessages.length + this._followUpMessages.length;
+		return this._steeringQueue.length + this._followUpQueue.length;
 	}
 
-	/** Get pending steering messages (read-only) */
-	getSteeringMessages(): readonly string[] {
-		return this._steeringMessages;
+	/** Pending steering messages, as submitted */
+	getSteeringMessages(): string[] {
+		return this._steeringQueue.map((queued) => queued.text);
 	}
 
-	/** Get pending follow-up messages (read-only) */
-	getFollowUpMessages(): readonly string[] {
-		return this._followUpMessages;
+	/** Pending follow-up messages, as submitted */
+	getFollowUpMessages(): string[] {
+		return this._followUpQueue.map((queued) => queued.text);
 	}
 
 	get resourceLoader(): ResourceLoader {

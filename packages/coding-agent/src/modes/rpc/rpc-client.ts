@@ -201,16 +201,20 @@ export class RpcClient {
 
 	/**
 	 * Queue a steering message to interrupt the agent mid-run.
+	 * @returns false when a hook or extension input handler blocked or handled it
 	 */
-	async steer(message: string, images?: ImageContent[]): Promise<void> {
-		await this.send({ type: "steer", message, images });
+	async steer(message: string, images?: ImageContent[]): Promise<boolean> {
+		const response = await this.send({ type: "steer", message, images });
+		return this.getData<{ queued: boolean }>(response).queued;
 	}
 
 	/**
 	 * Queue a follow-up message to be processed after the agent finishes.
+	 * @returns false when a hook or extension input handler blocked or handled it
 	 */
-	async followUp(message: string, images?: ImageContent[]): Promise<void> {
-		await this.send({ type: "follow_up", message, images });
+	async followUp(message: string, images?: ImageContent[]): Promise<boolean> {
+		const response = await this.send({ type: "follow_up", message, images });
+		return this.getData<{ queued: boolean }>(response).queued;
 	}
 
 	/**
