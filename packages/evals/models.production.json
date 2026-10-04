@@ -1,0 +1,18 @@
+{
+	"providers": {
+		"openrouter": {
+			"modelOverrides": {
+				"z-ai/glm-5.3-flash": {
+					"compat": {
+						"openRouterRouting": {
+							"order": ["GMICloud", "Novita"],
+							"quantizations": ["fp8"],
+							"allow_fallbacks": false
+						}
+					},
+					"maxTokens": 65536
+				}
+			}
+		}
+	}
+}
