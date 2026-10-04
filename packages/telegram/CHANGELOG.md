@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.118] - 2026-10-04
+
 - feat: a text message sent while a turn is running is steered into that turn instead of queued behind it, so the owner can redirect a task or ask about it mid-run. It gets a 👀 reaction, the turn reads it after its current tool call, and the answer is sent at once as a reply to it instead of being replaced by the final reply. Attachments, albums and commands still queue; `/stop` also drops a steered message the turn hasn't read.
 
 ## [1.0.112] - 2026-09-30
