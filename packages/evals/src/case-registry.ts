@@ -43,6 +43,9 @@ export const SUITE_FILES: Record<Suite, string> = {
 /** Evals that are not coding cases: always run in `smoke`/`rotate`, or only in `full`. */
 export const EXTRA_FILES = { smoke: "src/smoke.eval.ts", extensions: "src/extensions.eval.ts" } as const;
 
+/** The smoke eval's one case; its harness is `smoke-<id>`. */
+export const SMOKE_CASE_ID = "basic-prompt";
+
 export const evalCases: EvalCase[] = [
 	{ suite: "coding", id: "fix-off-by-one", category: "bugfix", core: true },
 	{ suite: "coding", id: "fix-from-stack-trace", category: "bugfix" },

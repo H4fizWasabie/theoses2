@@ -1,12 +1,13 @@
 import type { ThinkingLevel } from "theoses-agent-core";
 import { expect } from "vitest";
 import { describeEval } from "vitest-evals";
+import { SMOKE_CASE_ID } from "./case-registry.ts";
 import { createTheosesCodingAgentHarness } from "./theoses-harness.ts";
 
 // The production model rejects thinking "off" ("Reasoning is mandatory"), and this eval runs in every tier. It checks the
 // plumbing, not reasoning depth, so it defaults to "low" (max made this one-word answer take 25s); EVAL_THINKING_LEVEL overrides.
 const theosesCodingAgentHarness = createTheosesCodingAgentHarness({
-	name: "smoke-basic-prompt",
+	name: `smoke-${SMOKE_CASE_ID}`,
 	noTools: "all",
 	thinkingLevel: (process.env.EVAL_THINKING_LEVEL as ThinkingLevel | undefined) ?? "low",
 });
