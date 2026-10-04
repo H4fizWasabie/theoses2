@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- refactor: the Operation Loop, `createOperationLoop` in `operation-loop.ts`, owns what happens after each agent run inside one operation: retry a retryable error after backoff, recover from overflow with one compact-and-retry, run post-turn compaction, or finish. It holds the retry budget and the flags that used to be written in `AgentSession`'s event handler and read in its post-run step (`_retryPending`, `_overflowRecoveryAttempted`, `_lastAssistantMessage`), plus the pre-prompt compaction check; the three copies of "drop the failed response from agent state" are one helper. `AgentSession` keeps the `agent.continue()` loop and what finishing records. One small difference: the stale-Working-Note backstop for aborted or failed operations now runs when the operation finishes, before post-turn compaction instead of after it. The loop has a direct test with a fake agent and Compaction Run.
+
 ## [1.0.117] - 2026-10-03
 
 - refactor: the decision of whether and why to compact after an assistant message is its own module, `decideCompaction` in `compaction/trigger.ts`: a snapshot of the settings, message, model, branch and agent messages in, an action out (nothing, compact for overflow, threshold or turns with or without a retry, or overflow recovery failed). `AgentSession._checkCompaction` now only builds the snapshot and applies the action, and its comment lists all four cases (it listed three). Compaction behavior is unchanged; the overflow, threshold, stale-usage and cache-deferral cases now have a direct table test.

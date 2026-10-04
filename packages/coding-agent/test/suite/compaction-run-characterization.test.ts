@@ -1,5 +1,6 @@
 import { type AssistantMessage, fauxAssistantMessage } from "theoses-ai";
 import { afterEach, describe, expect, it } from "vitest";
+import type { CompactionRun } from "../../src/core/compaction/run.ts";
 import type { InlineExtension } from "../../src/index.ts";
 import { createHarness, type Harness } from "./harness.ts";
 
@@ -9,7 +10,7 @@ import { createHarness, type Harness } from "./harness.ts";
  */
 
 type AutoCompactionInternals = {
-	_runAutoCompaction: (reason: "overflow" | "threshold" | "turns", willRetry: boolean) => Promise<boolean>;
+	_compactionRun: CompactionRun;
 };
 
 /** `default` leaves the hook without a result, so the built-in summarizer runs. */
@@ -118,7 +119,7 @@ describe("compaction run characterization", () => {
 		const { harness, log } = await open("summary");
 		const internals = harness.session as unknown as AutoCompactionInternals;
 
-		await internals._runAutoCompaction("threshold", false);
+		await internals._compactionRun.run({ reason: "threshold", willRetry: false });
 
 		expect(log).toEqual([
 			"event:start:threshold",
@@ -143,11 +144,13 @@ describe("compaction run characterization", () => {
 		expect(harness.session.isCompacting).toBe(false);
 	});
 
-	it("auto hook cancel: resolves false and reports an aborted failure", async () => {
+	it("auto hook cancel: does not complete and reports an aborted failure", async () => {
 		const { harness, log } = await open("cancel");
 		const internals = harness.session as unknown as AutoCompactionInternals;
 
-		await expect(internals._runAutoCompaction("threshold", false)).resolves.toBe(false);
+		await expect(internals._compactionRun.run({ reason: "threshold", willRetry: false })).resolves.not.toMatchObject({
+			kind: "completed",
+		});
 
 		expect(log).toEqual([
 			"event:start:threshold",
@@ -175,16 +178,16 @@ describe("compaction run characterization", () => {
 		]);
 	});
 
-	it("auto abortCompaction during the hook: resolves false and reports an aborted failure", async () => {
+	it("auto abortCompaction during the hook: does not complete and reports an aborted failure", async () => {
 		const { harness, log } = await open("wait-for-abort");
 		const internals = harness.session as unknown as AutoCompactionInternals;
 
-		const run = internals._runAutoCompaction("threshold", false);
+		const run = internals._compactionRun.run({ reason: "threshold", willRetry: false });
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(harness.session.isCompacting).toBe(true);
 		harness.session.abortCompaction();
 
-		await expect(run).resolves.toBe(false);
+		await expect(run).resolves.not.toMatchObject({ kind: "completed" });
 		expect(log).toEqual([
 			"event:start:threshold",
 			"hook:before:threshold",
@@ -211,14 +214,16 @@ describe("compaction run characterization", () => {
 		]);
 	});
 
-	it("auto summarizer failure: resolves false and reports Auto-compaction failed", async () => {
+	it("auto summarizer failure: does not complete and reports Auto-compaction failed", async () => {
 		const { harness, log } = await open("default");
 		harness.session.agent.streamFunction = () => {
 			throw new Error("summary generator blew up");
 		};
 		const internals = harness.session as unknown as AutoCompactionInternals;
 
-		await expect(internals._runAutoCompaction("threshold", false)).resolves.toBe(false);
+		await expect(internals._compactionRun.run({ reason: "threshold", willRetry: false })).resolves.not.toMatchObject({
+			kind: "completed",
+		});
 
 		expect(log).toEqual([
 			"event:start:threshold",
@@ -242,14 +247,16 @@ describe("compaction run characterization", () => {
 		]);
 	});
 
-	it("auto with nothing to compact: resolves false and stays silent", async () => {
+	it("auto with nothing to compact: does not complete and stays silent", async () => {
 		const log: string[] = [];
 		const harness = await createHarness();
 		harnesses.push(harness);
 		recordEvents(harness, log);
 		const internals = harness.session as unknown as AutoCompactionInternals;
 
-		await expect(internals._runAutoCompaction("threshold", false)).resolves.toBe(false);
+		await expect(internals._compactionRun.run({ reason: "threshold", willRetry: false })).resolves.not.toMatchObject({
+			kind: "completed",
+		});
 
 		expect(log).toEqual([]);
 	});
@@ -268,7 +275,10 @@ describe("compaction run characterization", () => {
 			harness.session.subscribe((event) => {
 				if (event.type === "compaction_end") seen.push({ label, isCompacting: harness.session.isCompacting });
 			});
-			await (harness.session as unknown as AutoCompactionInternals)._runAutoCompaction("threshold", false);
+			await (harness.session as unknown as AutoCompactionInternals)._compactionRun.run({
+				reason: "threshold",
+				willRetry: false,
+			});
 		}
 
 		expect(seen).toEqual([
