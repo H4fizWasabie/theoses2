@@ -13,9 +13,10 @@ import type { AgentMessage, BeforeToolCallResult } from "theoses-agent-core";
 import { claimCheck, FINAL_REPLY_NOTE } from "./claim-check.ts";
 import { createCustomMessage } from "./messages.ts";
 import { formatFindings, logReview, PLAN_REVIEW_CUSTOM_TYPE, type ReviewOutcome } from "./plan-reviewer.ts";
-import { formatPlanStatus, isPlanOpen, needsReview, runTouchedPlan, type TaskPlan, verifyOutput } from "./task-plan.ts";
-import { checkAfterLastChange, fileChangesOf, firstLine, textOf, toolRuns } from "./tool-runs.ts";
+import { formatPlanStatus, isPlanOpen, needsReview, type TaskPlan, verifyOutput } from "./task-plan.ts";
+import { fileChangesOf, firstLine, textOf } from "./tool-runs.ts";
 import { resolveToCwd } from "./tools/path-utils.ts";
+import { readRunEvidence } from "./verification-evidence.ts";
 
 /** Files bigger than this are listed in the diff by name only. */
 const MAX_SNAPSHOT_BYTES = 1_000_000;
@@ -133,27 +134,22 @@ export class TaskPlanGuard {
 
 	async beforeStop(): Promise<AgentMessage[]> {
 		const run = this.deps.runMessages();
+		// One reading of the run per stop, so the reopen rule, the claim check and the review trigger agree.
+		const evidence = readRunEvidence(run, this.deps.cwd);
 		const enabled = this.deps.enabled();
 		let plan = enabled ? this.deps.getPlan() : undefined;
-		const planUsed =
-			toolRuns(run).some((tool) => tool.name === "task_plan") ||
-			JSON.stringify(plan ?? null) !== this.planAtOperationStart;
+		const planUsed = evidence.usedPlanTool || JSON.stringify(plan ?? null) !== this.planAtOperationStart;
 		let latestVerify =
 			planUsed && !plan?.abandoned ? plan?.items.filter((item) => item.kind === "verify").at(-1) : undefined;
-		const checks = checkAfterLastChange(
-			toolRuns(run),
-			latestVerify?.verifyCommand,
-			this.deps.cwd,
-			latestVerify?.verifyAfter,
-		);
+		const lastCheck = evidence.check({ command: latestVerify?.verifyCommand, after: latestVerify?.verifyAfter });
 		// Earlier stages keep their historical evidence. The final gate must be fresh when more source changes land.
 		if (
 			plan &&
 			!plan.abandoned &&
 			latestVerify &&
 			latestVerify.status !== "open" &&
-			checks.changed &&
-			(!latestVerify.evidence || checks.lastCheck?.id !== latestVerify.evidence.toolCallId)
+			evidence.changed &&
+			(!latestVerify.evidence || lastCheck?.id !== latestVerify.evidence.toolCallId)
 		) {
 			plan = {
 				...plan,
@@ -170,12 +166,17 @@ export class TaskPlanGuard {
 			latestVerify?.status !== "open" &&
 			latestVerify?.evidence !== undefined;
 
-		const claim = claimCheck(run, { verifyCovered, verifyCommand: latestVerify?.verifyCommand, cwd: this.deps.cwd });
+		const claim = claimCheck(run, {
+			verifyCovered,
+			verifyCommand: latestVerify?.verifyCommand,
+			verifyAfter: latestVerify?.verifyAfter,
+			evidence,
+		});
 		if (claim) return [claim];
 		if (!enabled) return [];
 
 		const reviewedThisRun = run.some((m) => m.role === "custom" && m.customType === PLAN_REVIEW_CUSTOM_TYPE);
-		if (!reviewedThisRun && planUsed && runTouchedPlan(run) && needsReview(plan)) {
+		if (!reviewedThisRun && planUsed && evidence.touchedPlan && needsReview(plan)) {
 			const outcome = await this.deps.review({
 				plan,
 				diff: this.diff(),

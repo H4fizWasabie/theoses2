@@ -57,7 +57,7 @@ An optional record of a change's obligations, including root cause, siblings and
 _Avoid_: todo list, checklist
 
 **Verification Evidence**:
-The recorded successful execution of a Task Plan criterion's declared runtime check, after declaration and the latest source change, retained with that criterion for review. It establishes what actually ran and returned, not that arbitrary assertions adequately cover the criterion.
+The recorded successful execution of a Task Plan criterion's declared runtime check, after declaration and the latest source change, retained with that criterion for review. It establishes what actually ran and returned, not that arbitrary assertions adequately cover the criterion. What counts is decided in one place, `readRunEvidence` in `core/verification-evidence.ts`: one reading of a run (with the session cwd and the files the run edited) that answers what it changed, which check ran after its last change and its declaration, and whether a declared command is a runtime check at all. The Task Plan, its stop guard and the claim check all ask it.
 _Avoid_: green command, verification note
 
 **Plan Review**:

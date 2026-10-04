@@ -18,14 +18,8 @@
  * "continue". Pure functions only; the session wiring is in agent-session.ts.
  */
 import type { AgentMessage } from "theoses-agent-core";
-import {
-	checkAfterLastChange,
-	firstLine,
-	isCheckCommand,
-	runChangesFiles,
-	type ToolRun,
-	toolRuns,
-} from "./tool-runs.ts";
+import { firstLine, type ToolRun } from "./tool-runs.ts";
+import { type RunEvidence, readRunEvidence } from "./verification-evidence.ts";
 
 export const TASK_PLAN_ENTRY_TYPE = "task_plan";
 export const MAX_PLAN_ITEMS = 12;
@@ -141,23 +135,22 @@ export function formatPlanStatus(plan: TaskPlan): string {
 	return [...items, ...(review ? [review] : [])].join(" · ");
 }
 
-function declaredCommandProblem(command: string | undefined, cwd: string): string | undefined {
+function declaredCommandProblem(command: string | undefined, runEvidence: RunEvidence): string | undefined {
 	if (!command?.trim()) return "declare `verify_command`: the exact runtime command for this item.";
-	const run: ToolRun = { id: "", name: "bash", command, path: undefined, output: "", isError: false };
-	if (!isCheckCommand(run, cwd))
+	if (!runEvidence.isRuntimeCheck(command))
 		return "`verify_command` must execute runtime behavior (run the tests or the changed code), not just syntax/lint/build, help/list, observation or source/unknown writes. If no existing command qualifies, put the check in a script and declare that (for example `bash scripts/verify.sh`).";
 	return undefined;
 }
 
+/** Only this item's declared runtime command, after the last source/unknown change and its declaration, can close it. */
 function verificationResult(
-	runMessages: AgentMessage[],
+	runEvidence: RunEvidence,
 	command: string | undefined,
-	cwd: string,
 	after?: string,
 ): { run?: ToolRun; problem?: string } {
-	const declaration = declaredCommandProblem(command, cwd);
+	const declaration = declaredCommandProblem(command, runEvidence);
 	if (declaration) return { problem: declaration };
-	const { lastCheck } = checkAfterLastChange(toolRuns(runMessages), command, cwd, after);
+	const lastCheck = runEvidence.check({ command, after });
 	if (!lastCheck)
 		return {
 			problem: `no check command matching \`verify_command\` has run since the last file change. Run exactly \`${command}\`, then close this item.`,
@@ -167,15 +160,6 @@ function verificationResult(
 			problem: `the matching runtime check failed: ${firstLine(lastCheck.output)}. Fix it and rerun before closing this item.`,
 		};
 	return { run: lastCheck };
-}
-
-/** Only this item's declared runtime command, after the last source/unknown change, can close it. */
-export function verifyEvidenceProblem(
-	runMessages: AgentMessage[],
-	command: string | undefined,
-	cwd = process.cwd(),
-): string | undefined {
-	return verificationResult(runMessages, command, cwd).problem;
 }
 
 function boundedOutput(output: string, maxChars = 4000): string {
@@ -210,6 +194,7 @@ export function applyPlanAction(
 	input: TaskPlanInput,
 	context: { runMessages: AgentMessage[]; request: string; now?: Date; cwd?: string },
 ): PlanActionResult {
+	const runEvidence = readRunEvidence(context.runMessages, context.cwd ?? process.cwd());
 	switch (input.action) {
 		case "show":
 			return current ? { plan: current } : { error: "No task plan." };
@@ -225,7 +210,7 @@ export function applyPlanAction(
 			if (!goal) return { error: "create needs `goal`." };
 			if (!verify) return { error: "create needs `verify`: the check that will prove the change works." };
 			const verifyCommand = input.verify_command?.trim();
-			const declaration = declaredCommandProblem(verifyCommand, context.cwd ?? process.cwd());
+			const declaration = declaredCommandProblem(verifyCommand, runEvidence);
 			if (declaration) return { error: `create needs valid verification: ${declaration}` };
 			const kind = input.kind ?? "change";
 			const steps = (input.items ?? []).map((text) => text.trim()).filter(Boolean);
@@ -236,7 +221,7 @@ export function applyPlanAction(
 					kind: "verify" as const,
 					text: verify,
 					verifyCommand,
-					verifyAfter: toolRuns(context.runMessages).at(-1)?.id,
+					verifyAfter: runEvidence.lastRunId,
 				},
 			];
 			if (drafts.length > MAX_PLAN_ITEMS) {
@@ -269,7 +254,7 @@ export function applyPlanAction(
 			}
 			const verifyCommand = input.verify_command?.trim();
 			if (!hasOpenVerify) {
-				const declaration = declaredCommandProblem(verifyCommand, context.cwd ?? process.cwd());
+				const declaration = declaredCommandProblem(verifyCommand, runEvidence);
 				if (declaration) return { error: `add needs valid verification: ${declaration}` };
 			}
 			const extra = hasOpenVerify ? 0 : 1;
@@ -289,7 +274,7 @@ export function applyPlanAction(
 					kind: "verify",
 					text: verify as string,
 					verifyCommand,
-					verifyAfter: toolRuns(context.runMessages).at(-1)?.id,
+					verifyAfter: runEvidence.lastRunId,
 					status: "open",
 				});
 			}
@@ -304,14 +289,14 @@ export function applyPlanAction(
 			let verifyCommand = item.verifyCommand;
 			let verifyAfter =
 				item.kind === "verify" && status === "open" && item.status !== "open"
-					? toolRuns(context.runMessages).at(-1)?.id
+					? runEvidence.lastRunId
 					: item.verifyAfter;
 			if (input.verify_command !== undefined) {
 				if (item.kind !== "verify" || status !== "open")
 					return { error: "Change `verify_command` only while the verify item is open; rerun before closing." };
 				verifyCommand = input.verify_command.trim();
-				verifyAfter = toolRuns(context.runMessages).at(-1)?.id;
-				const declaration = declaredCommandProblem(verifyCommand, context.cwd ?? process.cwd());
+				verifyAfter = runEvidence.lastRunId;
+				const declaration = declaredCommandProblem(verifyCommand, runEvidence);
 				if (declaration) return { error: declaration };
 			}
 			// Issue #388: a note written for a closed status (a deferral reason) is stale once the status
@@ -330,12 +315,7 @@ export function applyPlanAction(
 			let evidence: VerificationEvidence | undefined;
 			if (closing && item.kind === "verify") {
 				// A deferral captures the declared local runtime check, not an unapproved live publish.
-				const result = verificationResult(
-					context.runMessages,
-					verifyCommand,
-					context.cwd ?? process.cwd(),
-					verifyAfter,
-				);
+				const result = verificationResult(runEvidence, verifyCommand, verifyAfter);
 				if (result.problem || !result.run)
 					return { error: `Cannot close verify item ${item.id}: ${result.problem}` };
 				evidence = {
@@ -360,9 +340,4 @@ export function applyPlanAction(
 			return { plan: { ...current, abandoned: reason } };
 		}
 	}
-}
-
-/** True when this run did anything the plan governs: changed files or touched the plan. */
-export function runTouchedPlan(runMessages: AgentMessage[]): boolean {
-	return toolRuns(runMessages).some((run) => run.name === "task_plan" || runChangesFiles(run));
 }

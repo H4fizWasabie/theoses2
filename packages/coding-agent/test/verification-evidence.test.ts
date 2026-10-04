@@ -11,6 +11,7 @@ import { createBashTool } from "../src/core/tools/bash.ts";
 import { createTaskPlanToolDefinition } from "../src/core/tools/task-plan.ts";
 import { wrapToolDefinition } from "../src/core/tools/tool-definition-wrapper.ts";
 import { createWriteTool } from "../src/core/tools/write.ts";
+import { readRunEvidence } from "../src/core/verification-evidence.ts";
 
 let nextId = 0;
 function tool(name: string, args: Record<string, unknown>, output = "PASS", isError = false): AgentMessage[] {
@@ -566,5 +567,40 @@ describe("actual runtime and claim-check regression", () => {
 			{ role: "assistant", content: [{ type: "text", text: "Tested and verified." }] } as AgentMessage,
 		];
 		expect(findClaimProblem(messages)).toContain("no check command");
+	});
+});
+
+describe("one reading of a run for every evidence question", () => {
+	const reply = (text: string) => ({ role: "assistant", content: [{ type: "text", text }] }) as AgentMessage;
+
+	it("judges a declared command with the protected paths it will be judged with as evidence", () => {
+		// A write to a scratch path is an artifact, unless this run edited that file: then it is a source change,
+		// and a command making it could never count as evidence. Declaration and evidence must agree.
+		const edited = join(tmpdir(), `evidence-protected-${process.pid}.txt`);
+		const command = `node tests/feature.mjs > ${edited}`;
+		expect(readRunEvidence([], "/srv/project").isRuntimeCheck(command)).toBe(true);
+		expect(readRunEvidence(tool("write", { path: edited }), "/srv/project").isRuntimeCheck(command)).toBe(false);
+	});
+
+	it("does not let a check from before the verify item was declared satisfy the claim check", () => {
+		const check = tool("bash", { command: CHECK });
+		const checkId = (check[1] as { toolCallId: string }).toolCallId;
+		const messages = [...tool("edit", { path: "feature.mjs" }), ...check, reply("Tested and verified.")];
+
+		expect(findClaimProblem(messages, { verifyCommand: CHECK })).toBeUndefined();
+		expect(findClaimProblem(messages, { verifyCommand: CHECK, verifyAfter: checkId })).toContain("no check command");
+	});
+
+	it("reports what the run changed and touched", () => {
+		const evidence = readRunEvidence(
+			[...tool("read", { path: "a.ts" }), ...tool("edit", { path: "a.ts" }), ...tool("bash", { command: CHECK })],
+			process.cwd(),
+		);
+		expect(evidence.changed).toBe(true);
+		expect(evidence.lastChange?.name).toBe("edit");
+		expect(evidence.touchedPlan).toBe(true);
+		expect(evidence.usedPlanTool).toBe(false);
+		expect(evidence.check()?.command).toBe(CHECK);
+		expect(readRunEvidence(tool("read", { path: "a.ts" }), process.cwd()).touchedPlan).toBe(false);
 	});
 });
