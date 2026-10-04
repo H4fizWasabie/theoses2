@@ -34,6 +34,16 @@ export type CodingHarnessOptions = {
 	transformSystemPrompt?: (defaultPrompt: string) => string;
 };
 
+/** Settings for an A/B or coding harness: the task plan switch, the diagnosis override, then the arm's own settings. */
+function harnessSettings(taskPlan: boolean, settings: CodingHarnessOptions["settings"]) {
+	return {
+		taskPlan: { enabled: taskPlan },
+		// EVAL_SIBLING_HINT=off runs without the edit sibling hint, for diagnosis runs that must not have it.
+		...(process.env.EVAL_SIBLING_HINT === "off" ? { editSiblingHint: false } : {}),
+		...settings,
+	};
+}
+
 /**
  * The harness for one coding task. The deployed agent runs the task plan off (the library default is on, which adds
  * task-plan and independent plan-review round trips that pushed a trivial rename past the timeout), so `taskPlan`
@@ -50,12 +60,7 @@ export function codingHarness(
 		// Production runs at "max" (settings.json defaultThinkingLevel); baseline the same. EVAL_THINKING_LEVEL overrides it,
 		// to test whether the level changes behavior (workflow input `thinking`).
 		thinkingLevel: (process.env.EVAL_THINKING_LEVEL as ThinkingLevel | undefined) ?? "max",
-		// EVAL_SIBLING_HINT=off runs without the edit sibling hint, for diagnosis runs that must not have it.
-		settings: {
-			taskPlan: { enabled: taskPlan },
-			...(process.env.EVAL_SIBLING_HINT === "off" ? { editSiblingHint: false } : {}),
-			...settings,
-		},
+		settings: harnessSettings(taskPlan, settings),
 		transformSystemPrompt,
 		output: ({ session }): CodingOutput => gradeWorkspace(session.sessionManager.getCwd(), task),
 	});
@@ -71,7 +76,7 @@ function replayHarness(
 		name,
 		seed: (cwd) => seedReplayWorkspace(cwd, task),
 		thinkingLevel: (process.env.EVAL_THINKING_LEVEL as ThinkingLevel | undefined) ?? "max",
-		settings: { taskPlan: { enabled: taskPlan }, ...settings },
+		settings: harnessSettings(taskPlan, settings),
 		transformSystemPrompt,
 		output: ({ session }) => gradeReplay(session.sessionManager.getCwd(), task),
 	});
