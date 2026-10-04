@@ -146,7 +146,7 @@ async function callJevRelated(
 				reactsToReply: JEV_REACTS_TO_REPLY_QUESTION,
 				topicSwitch: JEV_TOPIC_SWITCH_QUESTION,
 			},
-			{ label: "task-boundary" },
+			{ label: "task-boundary", retries: 1 },
 		);
 		return answers;
 	}
@@ -156,7 +156,7 @@ async function callJevRelated(
 			continuesTask: JEV_CONTINUES_TASK_QUESTION,
 			topicSwitch: JEV_TOPIC_SWITCH_QUESTION,
 		},
-		{ label: "task-boundary" },
+		{ label: "task-boundary", retries: 1 },
 	);
 	return answers;
 }

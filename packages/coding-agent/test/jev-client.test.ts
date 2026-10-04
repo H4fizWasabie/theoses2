@@ -47,6 +47,46 @@ describe("askJevNoul timeout", () => {
 		expect(logged).toContain("(timeout 20ms, questions=answer, state=16 chars)");
 	});
 
+	it("sends a fresh request after a timeout when the caller asks for a retry", async () => {
+		vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+		const fetchMock = vi
+			.fn()
+			.mockImplementationOnce(
+				(_url: string, init: RequestInit) =>
+					new Promise((_resolve, reject) => {
+						init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+					}),
+			)
+			.mockImplementationOnce(async () => new Response(JSON.stringify({ answers: { answer: { noul: 0.7 } } })));
+		vi.stubGlobal("fetch", fetchMock);
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		expect(await askJevNoul({ message: "hi" }, "q", { timeoutMs: 20, retries: 1 })).toBe(0.7);
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(String(errorSpy.mock.calls[0]?.[0])).toContain("timeout 20ms");
+	});
+
+	it("does not retry without the option, or after an error that is not a timeout", async () => {
+		vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const stalled = vi.fn(
+			(_url: string, init: RequestInit) =>
+				new Promise((_resolve, reject) => {
+					init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+				}),
+		);
+		vi.stubGlobal("fetch", stalled);
+		expect(await askJevNoul({ message: "hi" }, "q", { timeoutMs: 20 })).toBeUndefined();
+		expect(stalled).toHaveBeenCalledTimes(1);
+
+		const refused = vi.fn(async () => {
+			throw new TypeError("fetch failed");
+		});
+		vi.stubGlobal("fetch", refused);
+		expect(await askJevNoul({ message: "hi" }, "q", { timeoutMs: 20, retries: 1 })).toBeUndefined();
+		expect(refused).toHaveBeenCalledTimes(1);
+	});
+
 	it("passes a default timeout signal when none is given", async () => {
 		vi.stubEnv("OPENROUTER_API_KEY", "test-key");
 		const fetchMock = vi.fn(async () => new Response(JSON.stringify({ answers: { answer: { noul: 0.7 } } })));

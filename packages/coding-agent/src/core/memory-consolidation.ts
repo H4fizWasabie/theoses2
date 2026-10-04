@@ -57,7 +57,7 @@ export async function shouldTriggerConsolidation(
 	const noul = await askJevNoul(
 		{ message: userMessageText },
 		"Does `message` signal that the user considers the current task or conversation finished (e.g. thanks, a sign-off, or explicit confirmation of completion), rather than continuing it?",
-		{ label: "consolidation-trigger" },
+		{ label: "consolidation-trigger", retries: 1 },
 	);
 	if (noul === undefined) return false; // Jev call failed: skip this turn, the turn ceiling still catches a long session eventually
 	return noul >= CONSOLIDATION_TRIGGER_THRESHOLD;

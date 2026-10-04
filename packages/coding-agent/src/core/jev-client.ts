@@ -28,6 +28,10 @@ export interface JevCallOptions {
 	/** Names the call site in failure logs ("task-boundary", "memory-gate", ...). Without it a bare
 	 * "aborted due to timeout" cannot be traced to one of the five callers. */
 	label?: string;
+	/** Fresh requests to send after a timeout, for callers that can wait (Turn Settlement). Jev answers in
+	 * well under 2s (p50 300ms, max 1.4s over 20 calls from production on 2026-10-04) or not at all: about 8%
+	 * of settlement calls stalled to the 5s cap, so a new request helps where a longer wait would not. */
+	retries?: number;
 }
 
 /** What Jev judges: any JSON object. Questions can point into nested fields by path, e.g. `nodes.n3`. */
@@ -74,28 +78,34 @@ async function askJev(
 
 	const body = { model: JEV_MODEL, state, questions };
 	const timeoutMs = options.timeoutMs ?? JEV_DEFAULT_TIMEOUT_MS;
-	const startedAt = performance.now();
-	const describe = () =>
-		`[${options.label ?? "unlabeled"}] after ${Math.round(performance.now() - startedAt)}ms ` +
-		`(timeout ${timeoutMs}ms, questions=${Object.keys(questions).join(",")}, state=${JSON.stringify(state).length} chars)`;
+	const retries = options.retries ?? 0;
+	for (let attempt = 0; ; attempt++) {
+		const startedAt = performance.now();
+		const describe = () =>
+			`[${options.label ?? "unlabeled"}] after ${Math.round(performance.now() - startedAt)}ms ` +
+			`(timeout ${timeoutMs}ms, questions=${Object.keys(questions).join(",")}, state=${JSON.stringify(state).length} chars` +
+			`${attempt > 0 ? `, retry ${attempt}` : ""})`;
 
-	try {
-		const response = await fetch(JEV_DECISIONS_URL, {
-			method: "POST",
-			headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-			body: JSON.stringify(body),
-			signal: AbortSignal.timeout(timeoutMs),
-		});
-		if (!response.ok) {
-			console.error(`Jev call failed ${describe()}: ${response.status} ${(await response.text()).slice(0, 200)}`);
+		try {
+			const response = await fetch(JEV_DECISIONS_URL, {
+				method: "POST",
+				headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+				body: JSON.stringify(body),
+				signal: AbortSignal.timeout(timeoutMs),
+			});
+			if (!response.ok) {
+				console.error(`Jev call failed ${describe()}: ${response.status} ${(await response.text()).slice(0, 200)}`);
+				return undefined;
+			}
+			const parsed = (await response.json()) as JevResponse;
+			if (typeof parsed.usage?.cost === "number") logJevCost(parsed.usage.cost, options.label);
+			return parsed;
+		} catch (error) {
+			console.error(`Jev call failed ${describe()}:`, error instanceof Error ? error.message : error);
+			// Only a timeout is worth a new request; a network or parse error would fail the same way again.
+			if (error instanceof Error && error.name === "TimeoutError" && attempt < retries) continue;
 			return undefined;
 		}
-		const parsed = (await response.json()) as JevResponse;
-		if (typeof parsed.usage?.cost === "number") logJevCost(parsed.usage.cost, options.label);
-		return parsed;
-	} catch (error) {
-		console.error(`Jev call failed ${describe()}:`, error instanceof Error ? error.message : error);
-		return undefined;
 	}
 }
 
