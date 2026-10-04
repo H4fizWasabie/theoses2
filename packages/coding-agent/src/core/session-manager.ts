@@ -35,16 +35,6 @@ import { TASK_PLAN_ENTRY_TYPE, type TaskPlan } from "./task-plan.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
 
-export const WORKING_NOTE_WRITE_CAP = 2000;
-export const WORKING_NOTE_INJECTION_CAP = 2000;
-
-/**
- * Backstop for when the model forgets to clear the Working Note itself (see `working_note`
- * tool's `clear` mode). If this many user turns pass with no write or clear touching the note,
- * it's treated as abandoned/stale and cleared automatically.
- */
-export const WORKING_NOTE_STALE_TURNS = 5;
-
 export interface ChannelSessionKey {
 	channel: string;
 	channelSessionId: string;
@@ -1226,67 +1216,17 @@ export class SessionManager {
 		return note;
 	}
 
-	/**
-	 * Appends one line to the Working Note (issue #173): the model, and the
-	 * harness itself (e.g. auto-logged bash commands), add facts incrementally
-	 * rather than resending the whole note each time. Oldest whole lines are
-	 * dropped once the combined note exceeds WORKING_NOTE_WRITE_CAP, so a
-	 * single overlong line is hard-truncated from its start rather than
-	 * silently dropping the entire note.
-	 */
-	appendWorkingNote(line: string): string {
-		const trimmedLine = line.trim();
-		if (!trimmedLine) throw new Error("Working Note line cannot be empty");
-		const existing = this.getWorkingNote();
-		let combined = existing ? `${existing}\n${trimmedLine}` : trimmedLine;
-		let lines = combined.split("\n");
-		while (combined.length > WORKING_NOTE_WRITE_CAP && lines.length > 1) {
-			lines = lines.slice(1);
-			combined = lines.join("\n");
-		}
-		if (combined.length > WORKING_NOTE_WRITE_CAP) {
-			combined = combined.slice(combined.length - WORKING_NOTE_WRITE_CAP);
-		}
+	/** Records the whole Working Note; its content rules live in working-note.ts. */
+	writeWorkingNote(note: string): string {
 		const entry: WorkingNoteEntry = {
 			type: "working_note",
 			id: generateId(this.byId),
 			parentId: this.leafId,
 			timestamp: new Date().toISOString(),
-			note: combined,
+			note,
 		};
 		this._appendEntry(entry);
 		return entry.id;
-	}
-
-	clearWorkingNote(): string {
-		const entry: WorkingNoteEntry = {
-			type: "working_note",
-			id: generateId(this.byId),
-			parentId: this.leafId,
-			timestamp: new Date().toISOString(),
-			note: "",
-		};
-		this._appendEntry(entry);
-		return entry.id;
-	}
-
-	/** True once the Working Note has gone `WORKING_NOTE_STALE_TURNS` user turns untouched. */
-	isWorkingNoteStale(): boolean {
-		if (!this.getWorkingNote()) return false;
-		const branch = this.getBranch();
-		let boundary = 0;
-		for (let i = branch.length - 1; i >= 0; i--) {
-			if (branch[i].type === "working_note") {
-				boundary = i + 1;
-				break;
-			}
-		}
-		let userTurns = 0;
-		for (let i = boundary; i < branch.length; i++) {
-			const entry = branch[i];
-			if (entry.type === "message" && entry.message.role === "user") userTurns++;
-		}
-		return userTurns > WORKING_NOTE_STALE_TURNS;
 	}
 
 	/**

@@ -44,7 +44,7 @@ describe("AgentSession prompt characterization", () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
 
-		harness.sessionManager.appendWorkingNote("leftover from a previous operation");
+		harness.sessionManager.writeWorkingNote("leftover from a previous operation");
 		expect(harness.sessionManager.getWorkingNote()).toBe("leftover from a previous operation");
 
 		harness.setResponses([fauxAssistantMessage("hello")]);
@@ -57,7 +57,7 @@ describe("AgentSession prompt characterization", () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
 
-		harness.sessionManager.appendWorkingNote("ran: risky-command");
+		harness.sessionManager.writeWorkingNote("ran: risky-command");
 		harness.setResponses([fauxAssistantMessage("partial", { stopReason: "aborted" })]);
 		await harness.session.prompt("hi");
 

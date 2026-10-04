@@ -8,6 +8,7 @@ import { openRouterReasoningBudget } from "theoses-ai/api/openai-completions";
 import type { Api, Model, ThinkingBudgets } from "theoses-ai/compat";
 import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
 import { formatSkillsForPrompt, type Skill } from "./skills.ts";
+import { workingNoteForPrompt } from "./working-note.ts";
 
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
@@ -36,13 +37,6 @@ export interface BuildSystemPromptOptions {
 	thinkingLevel?: ThinkingLevel;
 	/** Custom thinking budgets from settings. */
 	thinkingBudgets?: ThinkingBudgets;
-}
-
-function injectWorkingNote(note: string | undefined): string {
-	if (!note) return "";
-	if (note.length <= 2000) return note;
-	const head = 1000;
-	return `${note.slice(0, head)}\n...\n${note.slice(-1000)}`;
 }
 
 const STRUCTURAL_SECTIONS = `<working_note_guidance>
@@ -138,7 +132,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const contextFiles = providedContextFiles ?? [];
 	const skills = providedSkills ?? [];
 	const workingNoteSection = workingNote
-		? `\n\n<working_note>\nEstablished by earlier turns; verify this note if it contradicts current evidence.\n${injectWorkingNote(workingNote)}\n</working_note>`
+		? `\n\n<working_note>\nEstablished by earlier turns; verify this note if it contradicts current evidence.\n${workingNoteForPrompt(workingNote)}\n</working_note>`
 		: "";
 	const artifactSection = artifactCatalog
 		? `\n\n<document_artifacts>\n${artifactCatalog}\nUse convert_doc on a document path when you need its contents.\n</document_artifacts>`

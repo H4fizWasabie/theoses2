@@ -1,17 +1,31 @@
 import { describe, expect, it } from "vitest";
+import { limitActiveContextMessages, SessionManager } from "../src/core/session-manager.ts";
+import { createWorkingNoteToolDefinition } from "../src/core/tools/working-note.ts";
 import {
-	limitActiveContextMessages,
-	SessionManager,
+	appendWorkingNote,
+	clearWorkingNote,
+	finishWorkingNoteOperation,
+	recordWorkingNoteCommand,
 	WORKING_NOTE_INJECTION_CAP,
 	WORKING_NOTE_STALE_TURNS,
 	WORKING_NOTE_WRITE_CAP,
-} from "../src/core/session-manager.ts";
-import { createWorkingNoteToolDefinition } from "../src/core/tools/working-note.ts";
+	workingNoteForPrompt,
+} from "../src/core/working-note.ts";
+
+function addUserTurns(manager: SessionManager, count: number): void {
+	for (let i = 0; i < count; i++) {
+		manager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: `turn ${i}` }],
+			timestamp: Date.now() + i,
+		});
+	}
+}
 
 describe("Theoses2 Working Note", () => {
 	it("persists the latest bounded note as a session-log entry", () => {
 		const manager = SessionManager.inMemory();
-		manager.appendWorkingNote("x".repeat(WORKING_NOTE_WRITE_CAP + 1));
+		appendWorkingNote(manager, "x".repeat(WORKING_NOTE_WRITE_CAP + 1));
 
 		expect(manager.getWorkingNote()).toHaveLength(WORKING_NOTE_WRITE_CAP);
 		expect(manager.getBranch().at(-1)?.type).toBe("working_note");
@@ -19,8 +33,8 @@ describe("Theoses2 Working Note", () => {
 
 	it("appends rather than replaces across multiple calls (issue #173)", () => {
 		const manager = SessionManager.inMemory();
-		manager.appendWorkingNote("fact one");
-		manager.appendWorkingNote("fact two");
+		appendWorkingNote(manager, "fact one");
+		appendWorkingNote(manager, "fact two");
 
 		expect(manager.getWorkingNote()).toBe("fact one\nfact two");
 	});
@@ -28,9 +42,9 @@ describe("Theoses2 Working Note", () => {
 	it("drops the oldest whole lines once the combined note exceeds the cap", () => {
 		const manager = SessionManager.inMemory();
 		const line = "x".repeat(Math.floor(WORKING_NOTE_WRITE_CAP / 2));
-		manager.appendWorkingNote(`first ${line}`);
-		manager.appendWorkingNote(`second ${line}`);
-		manager.appendWorkingNote(`third ${line}`);
+		appendWorkingNote(manager, `first ${line}`);
+		appendWorkingNote(manager, `second ${line}`);
+		appendWorkingNote(manager, `third ${line}`);
 
 		const note = manager.getWorkingNote();
 		expect(note.length).toBeLessThanOrEqual(WORKING_NOTE_WRITE_CAP);
@@ -38,22 +52,96 @@ describe("Theoses2 Working Note", () => {
 		expect(note).toContain("third");
 	});
 
-	it("clears the note once the task tracking it is complete", () => {
+	it("drops logged commands before facts the model wrote", () => {
 		const manager = SessionManager.inMemory();
-		manager.appendWorkingNote("established facts about task A");
-		expect(manager.getWorkingNote()).toBe("established facts about task A");
+		appendWorkingNote(manager, "fact: the config lives in ~/.theoses");
+		for (let i = 0; i < 40; i++) recordWorkingNoteCommand(manager, `run-step-${i} ${"x".repeat(80)}`, false);
 
-		manager.clearWorkingNote();
-
-		expect(manager.getWorkingNote()).toBe("");
-		expect(manager.getBranch().at(-1)?.type).toBe("working_note");
+		const lines = manager.getWorkingNote().split("\n");
+		expect(manager.getWorkingNote().length).toBeLessThanOrEqual(WORKING_NOTE_WRITE_CAP);
+		expect(lines[0]).toBe("fact: the config lives in ~/.theoses");
+		expect(lines.at(-1)).toContain("run-step-39");
+		expect(lines.some((line) => line.includes("run-step-0 "))).toBe(false);
 	});
 
-	it("tool calls write on note and clear on clear:true, once the task is complete", async () => {
+	it("logs a command with a failure mark, cut to its cap", () => {
+		const manager = SessionManager.inMemory();
+		recordWorkingNoteCommand(manager, "npm test", true);
+		recordWorkingNoteCommand(manager, `echo ${"y".repeat(300)}`, false);
+		recordWorkingNoteCommand(manager, "   ", false);
+
+		const [failed, long, ...rest] = manager.getWorkingNote().split("\n");
+		expect(failed).toBe("ran: npm test (failed)");
+		expect(long).toBe(`ran: echo ${"y".repeat(195)}…`);
+		expect(rest).toEqual([]);
+	});
+
+	it("keeps a multi-line command on one ran: line, so it is dropped and replaced as one", () => {
+		const manager = SessionManager.inMemory();
+		const heredoc = "python3 - <<'EOF'\nprint('hi')\nEOF";
+		recordWorkingNoteCommand(manager, heredoc, true);
+		appendWorkingNote(manager, "fact: python3 is 3.12");
+		recordWorkingNoteCommand(manager, heredoc, false);
+
+		expect(manager.getWorkingNote()).toBe("fact: python3 is 3.12\nran: python3 - <<'EOF'\\nprint('hi')\\nEOF");
+	});
+
+	it("moves a command run again to the end, with its latest result", () => {
+		const manager = SessionManager.inMemory();
+		recordWorkingNoteCommand(manager, "npm test", true);
+		appendWorkingNote(manager, "fact: the failing test is auth.test.ts");
+		recordWorkingNoteCommand(manager, "npm test", false);
+
+		expect(manager.getWorkingNote()).toBe("fact: the failing test is auth.test.ts\nran: npm test");
+	});
+
+	it("clears the note when an operation completes, and keeps it when one aborts or fails", () => {
+		const manager = SessionManager.inMemory();
+		appendWorkingNote(manager, "tracking task A");
+
+		finishWorkingNoteOperation(manager, "aborted");
+		finishWorkingNoteOperation(manager, "failed");
+		expect(manager.getWorkingNote()).toBe("tracking task A");
+
+		finishWorkingNoteOperation(manager, "completed");
+		expect(manager.getWorkingNote()).toBe("");
+	});
+
+	it("clears a note left untouched past the stale-turn threshold when an operation does not complete", () => {
+		const manager = SessionManager.inMemory();
+		appendWorkingNote(manager, "tracking task A");
+		addUserTurns(manager, WORKING_NOTE_STALE_TURNS);
+		finishWorkingNoteOperation(manager, "aborted");
+		expect(manager.getWorkingNote()).toBe("tracking task A");
+
+		addUserTurns(manager, 1);
+		finishWorkingNoteOperation(manager, "aborted");
+		expect(manager.getWorkingNote()).toBe("");
+	});
+
+	it("resets staleness once the note is written", () => {
+		const manager = SessionManager.inMemory();
+		appendWorkingNote(manager, "tracking task A");
+		addUserTurns(manager, WORKING_NOTE_STALE_TURNS + 1);
+		appendWorkingNote(manager, "tracking task B");
+
+		finishWorkingNoteOperation(manager, "failed");
+		expect(manager.getWorkingNote()).toBe("tracking task A\ntracking task B");
+	});
+
+	it("shows head and tail of a note over the injection cap", () => {
+		expect(workingNoteForPrompt("short")).toBe("short");
+		const shown = workingNoteForPrompt(`${"a".repeat(WORKING_NOTE_INJECTION_CAP)}${"b".repeat(10)}`);
+		expect(shown.startsWith("a".repeat(WORKING_NOTE_INJECTION_CAP / 2))).toBe(true);
+		expect(shown).toContain("\n...\n");
+		expect(shown.endsWith("b".repeat(10))).toBe(true);
+	});
+
+	it("tool calls write on note and clear on clear:true", async () => {
 		const manager = SessionManager.inMemory();
 		const tool = createWorkingNoteToolDefinition(
-			(note) => manager.appendWorkingNote(note),
-			() => manager.clearWorkingNote(),
+			(note) => appendWorkingNote(manager, note),
+			() => clearWorkingNote(manager),
 		);
 
 		await tool.execute("call-1", { note: "task A is in progress" }, undefined, undefined, {} as never);
@@ -71,50 +159,6 @@ describe("Theoses2 Working Note", () => {
 
 		const result = await tool.execute("call-1", {}, undefined, undefined, {} as never);
 		expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("clear") });
-	});
-
-	it("is not stale while empty, or while under the stale-turn threshold", () => {
-		const manager = SessionManager.inMemory();
-		expect(manager.isWorkingNoteStale()).toBe(false);
-
-		manager.appendWorkingNote("tracking task A");
-		for (let i = 0; i < WORKING_NOTE_STALE_TURNS; i++) {
-			manager.appendMessage({
-				role: "user",
-				content: [{ type: "text", text: `turn ${i}` }],
-				timestamp: Date.now() + i,
-			});
-		}
-		expect(manager.isWorkingNoteStale()).toBe(false);
-	});
-
-	it("goes stale once WORKING_NOTE_STALE_TURNS user turns pass without the note being touched", () => {
-		const manager = SessionManager.inMemory();
-		manager.appendWorkingNote("tracking task A");
-		for (let i = 0; i < WORKING_NOTE_STALE_TURNS + 1; i++) {
-			manager.appendMessage({
-				role: "user",
-				content: [{ type: "text", text: `turn ${i}` }],
-				timestamp: Date.now() + i,
-			});
-		}
-
-		expect(manager.isWorkingNoteStale()).toBe(true);
-	});
-
-	it("resets staleness once the note is rewritten", () => {
-		const manager = SessionManager.inMemory();
-		manager.appendWorkingNote("tracking task A");
-		for (let i = 0; i < WORKING_NOTE_STALE_TURNS + 1; i++) {
-			manager.appendMessage({
-				role: "user",
-				content: [{ type: "text", text: `turn ${i}` }],
-				timestamp: Date.now() + i,
-			});
-		}
-		manager.appendWorkingNote("tracking task B");
-
-		expect(manager.isWorkingNoteStale()).toBe(false);
 	});
 
 	it("keeps the last three user turns and their responses", () => {

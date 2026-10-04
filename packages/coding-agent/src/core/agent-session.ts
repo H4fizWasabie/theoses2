@@ -157,6 +157,12 @@ import { spillPrunedText } from "./tools/output-shaping.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { settleTurn } from "./turn-settlement.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
+import {
+	appendWorkingNote,
+	clearWorkingNote,
+	finishWorkingNoteOperation,
+	recordWorkingNoteCommand,
+} from "./working-note.ts";
 
 // ============================================================================
 // Skill Block Parsing
@@ -324,8 +330,6 @@ export interface PromptResult {
 }
 
 const REPLY_CONTEXT_CAP = 2000;
-/** Issue #173: bounds one auto-logged bash command line in the Working Note (the command, not its output — the how, not the what). */
-const BASH_AUTO_LOG_COMMAND_CAP = 200;
 const ABORT_NOTICE =
 	"[Abort Notice: The previous task was cancelled. Do not resume it unless the user explicitly asks you to.]";
 /** Issue #246: distinct from ABORT_NOTICE — this wasn't a deliberate stop, the process died mid-turn. */
@@ -545,7 +549,13 @@ export class AgentSession {
 			setMessages: (messages) => {
 				this.agent.state.messages = messages;
 			},
-			emit: (event) => this._emit(event),
+			emit: (event) => {
+				// A completed run has already invalidated the cached prefix, so rebuilding the system prompt costs no
+				// cache: the Working Note is shown again in place of the turns that held it. Before the event, since
+				// compaction_end listeners may start the next prompt.
+				if (event.type === "compaction_end" && event.result) this._rebuildSystemPromptNow();
+				this._emit(event);
+			},
 			prepareSummarizer: () => this._prepareSummarizer(),
 		});
 		this._operationLoop = createOperationLoop({
@@ -762,7 +772,16 @@ export class AgentSession {
 			return pushed.length > 0 ? pushed : await this._runStopHooks();
 		};
 
-		this.agent.afterToolCall = (context) => this._afterToolCall(context);
+		this.agent.afterToolCall = async (context) => {
+			const result = await this._afterToolCall(context);
+			// Only this session's own bash: a task sub-agent's commands are work the parent never sees. Whether the
+			// command failed is its own result, not what an extension's tool_result handler rewrote it to.
+			if (context.toolCall.name === "bash") {
+				const { command } = context.args as { command: string };
+				recordWorkingNoteCommand(this.sessionManager, command, context.isError);
+			}
+			return result;
+		};
 	}
 
 	/**
@@ -1313,21 +1332,8 @@ export class AgentSession {
 				? { message: msg.errorMessage, provider: msg.provider, model: msg.model }
 				: undefined;
 		this._lastOperationResult = { outcome, finalError, planStatus: this._taskPlanGuard.planStatus() };
-		if (outcome !== "completed") {
-			// Backstop for a note no completed operation cleared.
-			if (msg && this.sessionManager.isWorkingNoteStale()) this.sessionManager.clearWorkingNote();
-			return;
-		}
-		// Issue #173: the Working Note is a scratchpad for the operation in
-		// progress, not a cross-operation memory — the harness owns clearing
-		// it so stale context from a finished task never bleeds into an
-		// unrelated later one, instead of relying on the model to remember
-		// to call working_note({ clear: true }). Left in place on
-		// "aborted"/"failed" so the WORKING_NOTE_STALE_TURNS backstop can
-		// still make use of it.
-		if (this.sessionManager.getWorkingNote()) {
-			this.sessionManager.clearWorkingNote();
-		}
+		finishWorkingNoteOperation(this.sessionManager, outcome);
+		if (outcome !== "completed") return;
 		// Turn Settlement: only a completed operation of a non-CLI Channel Session (every header defaults
 		// to channel "cli"). CLI still reaches Durable Memory, but only through compaction distilling the
 		// turns it drops (see CONTEXT.md's Turn Settlement entry) — settlement itself never runs for it.
@@ -2504,8 +2510,8 @@ export class AgentSession {
 				)
 			: createAllToolDefinitions(this._cwd, {
 					...sharedToolOptions,
-					workingNote: (note) => this.sessionManager.appendWorkingNote(note),
-					workingNoteClear: () => this.sessionManager.clearWorkingNote(),
+					workingNote: (note) => appendWorkingNote(this.sessionManager, note),
+					workingNoteClear: () => clearWorkingNote(this.sessionManager),
 					taskPlan: {
 						get: () => this.sessionManager.getTaskPlan(),
 						set: (plan) => this.sessionManager.setTaskPlan(plan),
@@ -2727,16 +2733,11 @@ export class AgentSession {
 	 * Used by executeBash and by extensions that handle bash execution themselves.
 	 */
 	recordBashResult(command: string, result: BashResult, options?: { excludeFromContext?: boolean }): void {
-		// Issue #173: mechanically record the command in the Working Note,
-		// independent of whether the model itself calls working_note — a
-		// harness-owned safety net so the exact path/method a later tool call
-		// in this same operation needs isn't only recoverable by re-reading
-		// full history (or lost entirely once compaction drops it).
-		if (command.trim()) {
-			const loggedCommand =
-				command.length > BASH_AUTO_LOG_COMMAND_CAP ? `${command.slice(0, BASH_AUTO_LOG_COMMAND_CAP)}…` : command;
-			this.sessionManager.appendWorkingNote(`ran: ${loggedCommand}`);
-		}
+		recordWorkingNoteCommand(
+			this.sessionManager,
+			command,
+			result.cancelled || (result.exitCode !== undefined && result.exitCode !== 0),
+		);
 
 		const bashMessage: BashExecutionMessage = {
 			role: "bashExecution",
