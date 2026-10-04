@@ -12,8 +12,6 @@
  */
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentMessage } from "theoses-agent-core";
-import type { AssistantMessage } from "theoses-ai";
 import { getAgentDir } from "../config.ts";
 import { createBudgetedAgent } from "./background-agent.ts";
 import { resolveBackgroundModel } from "./background-models.ts";
@@ -151,14 +149,6 @@ export function parseReview(text: string): { verdict: "ok" | "gaps"; findings: R
 	return { verdict: value.verdict, findings };
 }
 
-function runCost(messages: AgentMessage[]): number {
-	let cost = 0;
-	for (const m of messages) {
-		if (m.role === "assistant") cost += (m as AssistantMessage).usage?.cost?.total ?? 0;
-	}
-	return cost;
-}
-
 /** Exported for tests. */
 export async function reviewOnce(input: ReviewInput): Promise<ReviewOutcome> {
 	const model = resolveBackgroundModel(input.modelRuntime, "reviewer");
@@ -188,7 +178,6 @@ export async function reviewOnce(input: ReviewInput): Promise<ReviewOutcome> {
 			isAnswer: (reply, runStats) => parseReview(reply) !== undefined || !runStats.stoppedByBudget,
 		},
 	);
-	const messages = handle.agent.state.messages;
 	const parsed = parseReview(text);
 	if (!parsed) {
 		throw new Error(stats.stoppedByBudget ? "budget ran out before a verdict" : "no parseable verdict");
@@ -201,7 +190,7 @@ export async function reviewOnce(input: ReviewInput): Promise<ReviewOutcome> {
 		nits: parsed.findings.length - mustFix.length,
 		inputTokens: stats.inputTokens,
 		outputTokens: stats.outputTokens,
-		cost: runCost(messages),
+		cost: stats.cost,
 	};
 }
 

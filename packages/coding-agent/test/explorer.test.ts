@@ -209,7 +209,7 @@ describe("explorer (issue #254)", () => {
 		const result = await runExplorer({ question: "map it", cwd: tempDir, modelRuntime: runtime });
 
 		expect(result.complete).toBe(true);
-		expect(result.answer).toContain("[truncated by harness: exceeded quick-scan cap of 30 lines]");
+		expect(result.answer).toContain("[truncated by harness: exceeded 30 lines]");
 		// 30 capped content lines + 1 truncation notice + 1 budget footer.
 		expect(result.answer.split("\n").length).toBeLessThanOrEqual(32);
 	});
@@ -246,7 +246,7 @@ describe("explorer (issue #254)", () => {
 		expect(toolCounts.slice(0, -1).every((count) => count > 0)).toBe(true);
 		expect(toolCounts.at(-1)).toBe(0);
 		expect(result.complete).toBe(false);
-		expect(result.stoppedBy).toBe("12-turn cap");
+		expect(result.stoppedBy).toEqual(["12-turn cap"]);
 		expect(result.maxTurns).toBe(12);
 		expect(result.answer).toContain("retry.ts:42");
 		expect(result.answer).toMatch(/~\d+K in, 12\/12 turns$/); // the footer never shows more turns than the cap

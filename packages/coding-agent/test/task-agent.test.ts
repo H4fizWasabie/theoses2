@@ -31,7 +31,10 @@ function assistant(
 	return {
 		role: "assistant",
 		content: toolCall
-			? [{ type: "toolCall", id: toolCall.id, name: toolCall.name, arguments: toolCall.args }]
+			? [
+					...(text ? [{ type: "text" as const, text }] : []),
+					{ type: "toolCall", id: toolCall.id, name: toolCall.name, arguments: toolCall.args },
+				]
 			: [{ type: "text", text }],
 		api: "anthropic-messages",
 		provider: "anthropic",
@@ -173,6 +176,23 @@ describe("task sub-agent", () => {
 		expect(result.answer).toMatch(/^INCOMPLETE:/);
 		expect(result.answer).toContain(`hit its ${TASK_CAPS.maxTurns}-turn cap and wrote no summary`);
 		expect(result.stoppedBy).toEqual([`${TASK_CAPS.maxTurns}-turn cap`]);
+		expect(result.turnsUsed).toBe(TASK_CAPS.maxTurns + 1);
+	});
+
+	it("does not take narration beside the last tool call for a summary when the cap cuts the task off", async () => {
+		writeFileSync(join(cwd, "a.txt"), "x\n");
+		const { runtime } = scripted((turn) =>
+			turn <= TASK_CAPS.maxTurns
+				? assistant("Let me read it again.", { id: `c${turn}`, name: "read", args: { path: "a.txt" } })
+				: assistant("Read a.txt; nothing changed."),
+		);
+
+		const result = await run(runtime);
+
+		expect(result.complete).toBe(false);
+		expect(result.answer).toMatch(/^INCOMPLETE:/);
+		expect(result.answer).toContain("Read a.txt; nothing changed.");
+		expect(result.answer).not.toContain("Let me read it again.");
 		expect(result.turnsUsed).toBe(TASK_CAPS.maxTurns + 1);
 	});
 

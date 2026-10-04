@@ -18,10 +18,9 @@
  * parallel for independent questions (spawn #3 waits for a slot instead of a 4th running).
  */
 
-import type { AgentEvent } from "theoses-agent-core";
 import type { Api, Model } from "theoses-ai";
 import { type Static, Type } from "typebox";
-import { createBudgetedAgent, endedOnToolCall } from "./background-agent.ts";
+import { createBudgetedAgent } from "./background-agent.ts";
 import { resolveBackgroundModel } from "./background-models.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -55,8 +54,8 @@ export interface ExplorerResult {
 	maxTurns: number;
 	inputTokens: number;
 	outputTokens: number;
-	/** The cap that cut the job off, e.g. "12-turn cap"; undefined when none did. */
-	stoppedBy?: string;
+	/** The caps that cut the job off, e.g. "12-turn cap"; empty when none did. */
+	stoppedBy: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -131,17 +130,6 @@ Rules:
 // Runner
 // ---------------------------------------------------------------------------
 
-function lineCount(text: string): number {
-	return text.split("\n").length;
-}
-
-function enforceAnswerCap(answer: string, tier: ExplorerTier): string {
-	const caps = TIER_CAPS[tier];
-	if (lineCount(answer) <= caps.lines) return answer;
-	const truncated = answer.split("\n").slice(0, caps.lines).join("\n");
-	return `${truncated}\n[truncated by harness: exceeded ${tier} cap of ${caps.lines} lines]`;
-}
-
 const FINALIZE_PROMPT =
 	"Stop exploring. Write the final answer now from what you have read, in the required format, with file:line pointers. Say plainly which part of the question you could not verify. Do not call any tools.";
 
@@ -203,52 +191,33 @@ async function runExplorerWithSlot(
 		maxInputTokens: caps.maxInputTokens,
 		signal: options.signal,
 		providerHooks: options.providerHooks,
+		onStatus: options.onStatus,
+		capLines: caps.lines,
 	});
 
-	const unsubscribe = handle.agent.subscribe((event: AgentEvent) => {
-		if (event.type === "tool_execution_start") {
-			options.onStatus?.(`${event.toolName}: ${summarizeArgs(event.args)}`);
-		}
+	// A cap can cut the job off mid-research and the model can end without an answer; the handle then gives it
+	// one last turn with no tools to write up what it has read (it used to return only INCOMPLETE, and did so
+	// for 22 of 34 jobs).
+	const { status, text, stats, stoppedBy } = await handle.promptToAnswer(options.question, {
+		finalizePrompt: FINALIZE_PROMPT,
 	});
-
-	let result: Awaited<ReturnType<typeof handle.promptToAnswer>>;
-	try {
-		// A cap can cut the job off mid-research and the model can end without an answer; the handle then gives it
-		// one last turn with no tools to write up what it has read (it used to return only INCOMPLETE, and did so
-		// for 22 of 34 jobs).
-		result = await handle.promptToAnswer(options.question, {
-			finalizePrompt: FINALIZE_PROMPT,
-			isAnswer: (text) => {
-				const messages = handle.agent.state.messages;
-				return !endedOnToolCall(messages) && messages[messages.length - 1]?.role === "assistant" && text.length > 0;
-			},
-		});
-	} finally {
-		unsubscribe();
-	}
-	const { stats, finalized: cutShort } = result;
-	const stoppedBy = result.stoppedBy[0];
-
-	const rawAnswer = result.text;
-	const hasAnswer = !endedOnToolCall(handle.agent.state.messages) && rawAnswer.length > 0;
-	const complete = hasAnswer && !cutShort;
 
 	let answer: string;
-	if (hasAnswer) {
-		answer = ensureBudgetFooter(enforceAnswerCap(rawAnswer, tier), tier, stats.turns, stats.inputTokens);
+	if (status !== "none") {
+		answer = ensureBudgetFooter(text, tier, stats.turns, stats.inputTokens);
 	} else {
 		const kIn = Math.round(stats.inputTokens / 1000);
 		answer = `INCOMPLETE: budget exhausted before a final answer was produced.\n~${kIn}K in, ${Math.min(stats.turns, caps.maxTurns)}/${caps.maxTurns} turns`;
 	}
-	if (cutShort) {
+	if (status !== "complete") {
 		console.error(
-			`[explore] ${hasAnswer ? "partial" : "no answer"} (${tier}): ${stats.turns} turns, ${Math.round(stats.inputTokens / 1000)}K in${stoppedBy ? `, hit ${stoppedBy}` : ", ended without an answer"}`,
+			`[explore] ${status === "partial" ? "partial" : "no answer"} (${tier}): ${stats.turns} turns, ${Math.round(stats.inputTokens / 1000)}K in${stoppedBy.length > 0 ? `, hit ${stoppedBy.join(", ")}` : ", ended without an answer"}`,
 		);
 	}
 
 	return {
 		answer,
-		complete,
+		complete: status === "complete",
 		tier,
 		turnsUsed: stats.turns,
 		maxTurns: caps.maxTurns,
@@ -256,15 +225,6 @@ async function runExplorerWithSlot(
 		outputTokens: stats.outputTokens,
 		stoppedBy,
 	};
-}
-
-function summarizeArgs(args: unknown): string {
-	try {
-		const record = args as Record<string, unknown>;
-		return JSON.stringify(record).slice(0, 120);
-	} catch {
-		return "";
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -317,7 +277,7 @@ export function createExploreToolDefinition(deps: ExploreToolDeps): ToolDefiniti
 				? ""
 				: result.answer.startsWith("INCOMPLETE:")
 					? "INCOMPLETE (explorer hit its budget) — consider a narrower re-spawn.\n"
-					: `PARTIAL (explorer stopped at its ${result.stoppedBy ?? "budget"}; this is what it had read) — consider a narrower re-spawn for the rest.\n`;
+					: `PARTIAL (explorer stopped at its ${result.stoppedBy.length > 0 ? result.stoppedBy.join(" and ") : "budget"}; this is what it had read) — consider a narrower re-spawn for the rest.\n`;
 			return {
 				content: [{ type: "text", text: `${header}${result.answer}` }],
 				details: result,
