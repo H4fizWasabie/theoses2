@@ -57,7 +57,7 @@ export async function shouldTriggerConsolidation(
 	const noul = await askJevNoul(
 		{ message: userMessageText },
 		"Does `message` signal that the user considers the current task or conversation finished (e.g. thanks, a sign-off, or explicit confirmation of completion), rather than continuing it?",
-		{ label: "consolidation-trigger" },
+		{ label: "consolidation-trigger", retries: 1 },
 	);
 	if (noul === undefined) return false; // Jev call failed: skip this turn, the turn ceiling still catches a long session eventually
 	return noul >= CONSOLIDATION_TRIGGER_THRESHOLD;
@@ -279,18 +279,34 @@ export async function applyConsolidationResult(
 	if (reused > 0) console.error(`[memory-dedup] reused ${reused} stored node(s) for facts that only restate them`);
 	if (superseded > 0) console.error(`[memory-gate] ${superseded} new fact(s) replace a less detailed stored node`);
 	const resolve = (id: string): string => idMap.get(id) ?? id;
+	// The model sometimes names a local id it never defined ("f7" with no fact f7). Such a reference is dropped,
+	// not thrown: one bad edge used to abort the pass after its facts were written, losing the episode, and the
+	// retry over the same range could fail the same way.
+	const exists = (id: string): boolean => memoryStore.getNode(id) !== undefined;
 
+	let dangling = 0;
 	for (const edge of parsed.edges) {
+		const from = resolve(edge.from);
+		const to = resolve(edge.to);
+		if (!exists(from) || !exists(to)) {
+			dangling++;
+			continue;
+		}
 		// Two facts that were merged into one stored node would otherwise become a self-edge.
-		if (resolve(edge.from) === resolve(edge.to)) continue;
-		memoryStore.addEdge(resolve(edge.from), { target: resolve(edge.to), rel: edge.rel });
+		if (from === to) continue;
+		memoryStore.addEdge(from, { target: to, rel: edge.rel });
 	}
+	const related = parsed.episode.relatedFactIds?.map(resolve);
+	const relatedNodeIds = related?.filter(exists);
+	dangling += (related?.length ?? 0) - (relatedNodeIds?.length ?? 0);
+	if (dangling > 0)
+		console.error(`[memory-consolidation] dropped ${dangling} reference(s) to a node that does not exist`);
 
 	episodicStore.recordEpisode({
 		startedAt: parsed.episode.startedAt,
 		endedAt: parsed.episode.endedAt,
 		summary: parsed.episode.summary,
-		relatedSemanticNodeIds: parsed.episode.relatedFactIds?.map(resolve),
+		relatedSemanticNodeIds: relatedNodeIds,
 	});
 }
 
