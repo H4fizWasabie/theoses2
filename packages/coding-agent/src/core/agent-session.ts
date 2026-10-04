@@ -1326,11 +1326,6 @@ export class AgentSession {
 	 * @throws Error if no model selected or no API key available (when not streaming)
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<PromptResult | undefined> {
-		// Queued while a run is active: the run waits for it (see _holdRunFor). Otherwise it starts its own run.
-		return this.isStreaming ? this._holdRunFor(this._prompt(text, options)) : this._prompt(text, options);
-	}
-
-	private async _prompt(text: string, options?: PromptOptions): Promise<PromptResult | undefined> {
 		const generation = this._queueGeneration;
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		const preflightResult = options?.preflightResult;
@@ -1354,20 +1349,18 @@ export class AgentSession {
 				);
 			}
 
-			const input = await this._intake(text, normalizeImages(options?.images), {
-				source: options?.source ?? "interactive",
-				streamingBehavior: this.isStreaming ? options?.streamingBehavior : undefined,
-				expandPromptTemplates,
-			});
-			if (!input) {
-				preflightResult?.(true);
-				return;
-			}
-			// Last prompt wins: one agent_end can cover queued follow-ups, and settlement wants the newest intent.
-			this._settlementText = options?.settlementText ?? text;
-
-			// If streaming, queue as a steer or follow-up based on option
-			if (this.isStreaming) {
+			// Intake, then queue the message if a run is active. A run that was active when it arrived waits for this
+			// step (see _holdRunFor); extension commands above are never held, since one may itself wait for idle.
+			const admit = async (): Promise<{ text: string; images: ImageContent[] | undefined } | "done"> => {
+				const input = await this._intake(text, normalizeImages(options?.images), {
+					source: options?.source ?? "interactive",
+					streamingBehavior: this.isStreaming ? options?.streamingBehavior : undefined,
+					expandPromptTemplates,
+				});
+				if (!input) return "done";
+				// Last prompt wins: one agent_end can cover queued follow-ups, and settlement wants the newest intent.
+				this._settlementText = options?.settlementText ?? text;
+				if (!this.isStreaming) return input;
 				if (!options?.streamingBehavior) {
 					throw new Error(
 						"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
@@ -1377,9 +1370,14 @@ export class AgentSession {
 				if (generation === this._queueGeneration) {
 					this._enqueue(options.streamingBehavior, text, input, options.replyContext);
 				}
+				return "done";
+			};
+			const admitted = this.isStreaming ? await this._holdRunFor(admit()) : await admit();
+			if (admitted === "done") {
 				preflightResult?.(true);
 				return;
 			}
+			const input = admitted;
 
 			const currentImages = input.images;
 			const contextualText = decoratePromptText(
