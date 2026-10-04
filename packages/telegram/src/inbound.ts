@@ -109,6 +109,24 @@ export async function resolvePrompt(album: Message[], attachments: AttachmentSto
 	};
 }
 
+/**
+ * What a running turn can take mid-task: a plain text message. Attachments need a download first, so they
+ * keep the queue; undefined for those and for empty text.
+ */
+export function steerInput(message: Message): Pick<ChannelInput, "text" | "replyContext"> | undefined {
+	const media =
+		message.photo ??
+		message.document ??
+		message.audio ??
+		message.video ??
+		message.voice ??
+		message.video_note ??
+		message.animation;
+	if (media || message.media_group_id) return undefined;
+	const text = messageText(message);
+	return text ? { text, replyContext: replyText(message) } : undefined;
+}
+
 function messageText(message: Message): string {
 	// A rich message (formatted paste, table) has no .text at all - without this fallback it reached
 	// the model as an empty prompt (2026-09-24: a Mini Pharmacy report arrived as nothing).

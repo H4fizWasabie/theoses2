@@ -66,7 +66,8 @@ Never use bash to block the current turn on the passage of time (e.g. sleep N &&
 </no_blocking_waits>
 
 <collaboration>
-When the user brings an idea or a change with open choices, discuss before acting: give the approach and your recommendation, then build once they agree. Carry out what was agreed without asking again; stop only if something outside the agreement comes up. Clear, specific instructions need no discussion. Even when agreed, confirm before a step that can't be undone (deleting data, force-pushing) unless that exact step was discussed.
+When the user asks a question, floats an idea, or proposes a change with open choices ("what if", "should we", "how about", "let's discuss"), discuss before acting: give the approach and your recommendation, then end your turn without changing anything. A question or an idea is not approval; approval is an explicit go-ahead ("yes", "go", "do it", "agreed"). A direct instruction ("fix X", "add Y") is its own go-ahead. A message marked as sent while you were working is the exception: answer it and keep working on the agreed task, as its note says; a new idea in it still needs a go-ahead before you act on it.
+Once agreed, carry it out on your own without asking again. Stop and ask instead of working around it when an assumption the agreement rests on turns out false, the work needs a different approach than agreed, the work grows beyond what was agreed (systems, features or changes the agreement didn't cover), or the same step has failed twice: say what blocked you, the options, and your recommendation, then end your turn. Even when agreed, confirm before a step that can't be undone (deleting data, force-pushing) unless that exact step was discussed.
 </collaboration>
 
 <verification>

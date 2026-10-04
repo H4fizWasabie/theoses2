@@ -149,6 +149,42 @@ describe("Turn View", () => {
 		expect(calls.at(-1)).toBe("delete #100");
 	});
 
+	const steeredMessage = { type: "message_start", message: { role: "user", content: "which branch?" } } as never;
+
+	it("sends the answer to a steered message at once, threaded to it, and then the final reply", async () => {
+		const { outbox, calls } = recordingOutbox();
+		const view = createTurnView(outbox, { replyTo: 7, toolCallDetail: false });
+		view.onEvent({ type: "message_start", message: { role: "user", content: "do it" } } as never);
+		view.onEvent(toolStart("bash"));
+		view.steered(9);
+		view.onEvent(toolEnd("bash"));
+		view.onEvent(steeredMessage);
+		view.onEvent(answer("main"));
+		view.onEvent(toolStart("bash", "t2"));
+		view.onEvent(toolEnd("bash", "t2"));
+		view.onEvent(answer("done"));
+		await view.finish({ outcome: "completed" });
+		expect(calls).toEqual([
+			"send plain #100 ->7: Running bash...",
+			"send rich #101 ->9: main",
+			"edit plain #100: Running bash...",
+			"edit rich #100: done",
+		]);
+	});
+
+	it("does not repeat a mid-task answer, or the narration before it, when the turn ends on it", async () => {
+		const { outbox, calls } = recordingOutbox();
+		const view = createTurnView(outbox, { replyTo: 7, toolCallDetail: false });
+		view.onEvent(answer("checking the tests"));
+		view.onEvent(toolStart("bash"));
+		view.steered(9);
+		view.onEvent(toolEnd("bash"));
+		view.onEvent(steeredMessage);
+		view.onEvent(answer("main"));
+		await view.finish({ outcome: "completed" });
+		expect(calls).toEqual(["send plain #100 ->7: Running bash...", "send rich #101 ->9: main", "delete #100"]);
+	});
+
 	it("delivers generated images once the reply is out", async () => {
 		const { outbox, calls } = recordingOutbox();
 		const view = createTurnView(outbox, { replyTo: 7, toolCallDetail: false });

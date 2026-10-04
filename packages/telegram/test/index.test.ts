@@ -45,6 +45,8 @@ function fakeChannelSession(
 			await stop();
 			return { wasRunning };
 		}),
+		// Refused unless a test opts in, so a message sent mid-turn takes the queue path these tests cover.
+		steer: vi.fn((_input: Pick<ChannelInput, "text" | "replyContext">) => false),
 		switchModel: vi.fn(),
 		thinkingLevel: "high",
 		thinkingLevels: ["off", "low", "high"],
@@ -302,6 +304,65 @@ describe("Telegram typing indicator", () => {
 			errorSpy.mockRestore();
 			vi.useRealTimers();
 		}
+	});
+});
+
+describe("Telegram steering", () => {
+	function steeringHarness() {
+		const harness = typingHarness();
+		harness.session.steer.mockImplementation(() => harness.session.isRunning);
+		const outbound: string[] = [];
+		harness.bot.api.config.use(async (_prev, method, payload) => {
+			const p = payload as { rich_message?: { markdown?: string }; reply_parameters?: { message_id?: number } };
+			outbound.push(`${method} ->${p.reply_parameters?.message_id}: ${p.rich_message?.markdown ?? ""}`);
+			return { ok: true, result: { message_id: 101 } } as never;
+		});
+		const setMessageReaction = vi.spyOn(harness.bot.api, "setMessageReaction").mockResolvedValue(true as never);
+		const emit = (event: unknown) => {
+			for (const listener of harness.listeners) listener(event);
+		};
+		return { ...harness, outbound, setMessageReaction, emit };
+	}
+
+	it("hands a text message to the running turn instead of queueing a new one", async () => {
+		const { bot, session, prompts, setMessageReaction } = steeringHarness();
+
+		await bot.handleUpdate(messageUpdate(1, 1, "do the task"));
+		await vi.waitFor(() => expect(session.isRunning).toBe(true));
+		await bot.handleUpdate(messageUpdate(2, 2, "which branch?"));
+
+		expect(session.steer).toHaveBeenCalledWith({ text: "which branch?", replyContext: undefined });
+		expect(setMessageReaction).toHaveBeenCalledWith(1, 2, [{ type: "emoji", emoji: "👀" }]);
+		prompts[0]?.({ outcome: "completed" });
+		await vi.waitFor(() => expect(session.isRunning).toBe(false));
+		expect(session.submit).toHaveBeenCalledTimes(1);
+	});
+
+	it("sends the answer to a steered message at once, threaded to it", async () => {
+		const { bot, session, prompts, outbound, emit } = steeringHarness();
+
+		await bot.handleUpdate(messageUpdate(1, 1, "do the task"));
+		await vi.waitFor(() => expect(session.isRunning).toBe(true));
+		await bot.handleUpdate(messageUpdate(2, 2, "which branch?"));
+		emit({ type: "message_start", message: { role: "user", content: "which branch?" } });
+		emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "main" }] } });
+
+		await vi.waitFor(() => expect(outbound).toContain("sendRichMessage ->2: main"));
+		prompts[0]?.({ outcome: "completed" });
+	});
+
+	it("queues a message once the turn has ended", async () => {
+		const { bot, session, prompts } = steeringHarness();
+
+		await bot.handleUpdate(messageUpdate(1, 1, "do the task"));
+		await vi.waitFor(() => expect(session.isRunning).toBe(true));
+		prompts[0]?.({ outcome: "completed" });
+		await vi.waitFor(() => expect(session.isRunning).toBe(false));
+		await bot.handleUpdate(messageUpdate(2, 2, "next thing"));
+
+		await vi.waitFor(() => expect(session.submit).toHaveBeenCalledTimes(2));
+		expect(session.steer).not.toHaveBeenCalled();
+		prompts[1]?.();
 	});
 });
 
