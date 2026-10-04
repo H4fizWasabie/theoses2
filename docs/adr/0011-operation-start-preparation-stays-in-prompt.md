@@ -1,0 +1,9 @@
+# Operation-start preparation stays in prompt()
+
+`AgentSession.prompt()` prepares what the model is sent when an operation starts: the decorated user message (Abort Notice, reply context, clock), the bash flush, the model and auth check, the pre-prompt compaction check, the Active Context Window, pruning of finished turns' tool output, the system-prompt refresh with its cache hold, `nextTurn` messages and `before_agent_start`. An architecture review on 2026-10-04 proposed an "operation start" module that both start paths would call, citing about 18 commits on `prompt()` and that `sendCustomMessage(triggerTurn: true)` skips most of the preparation. We decided not to do it.
+
+The steps are already their own modules, each with its own tests: `decoratePromptText`, `limitActiveContextMessages`, `pruneFinishedTurnOutputs` (`context-pruning.ts`), the session system prompt (`session-system-prompt.ts`) and the Operation Loop's `beforePrompt`. What remains inline is their order, the auth check and two debug logs, so a module would move the ordering without hiding a decision: it fails the deletion test. The churn has also moved out rather than in: the context features landed around 2026-09-19, and the later changes to `prompt()` (#501, #505) took logic out of it into the Operation Loop and intake.
+
+The `triggerTurn` gap is known and accepted. That path refreshes the system prompt and starts the run, but skips the bash flush, the auth check, pre-prompt compaction, the window, pruning, `nextTurn` messages and `before_agent_start`. Only two example extensions use it (`plan-mode`, `file-trigger`); no deployed extension or channel does (checked on the VPS on 2026-10-04).
+
+Revisit when a deployed extension or channel uses `triggerTurn: true`, or when a third path that starts operations appears. Then make both paths call one private preparation step in `AgentSession` before considering a module.
