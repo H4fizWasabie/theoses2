@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.119] - 2026-10-04
+
 - fix: the Turn Settlement Jev checks (task-boundary detection and the consolidation trigger) send one fresh request after a timeout. Jev answers in well under 2 seconds (p50 300 ms, max 1.4 s over 20 calls from production) or stalls: about 8% of those calls hit the 5-second cap in production over 7 days, and a longer wait would not have helped. `JevCallOptions.retries` sets it; only a timeout is retried, and the other callers are unchanged.
 
 - fix: memory consolidation no longer fails a whole pass when the model names a fact it never defined. An edge whose end, or an episode's related fact, resolves to no stored node (a local id like `f7` with no fact `f7`) is dropped and counted in one log line. Before, `addEdge` threw on an unknown `from`, which aborted the pass after its facts were written: the episode was never recorded, the range stayed unpromoted, and the retry over it could fail the same way (12 failed promotions in production over 30 days). An unknown `to` was written as an edge to nothing.
