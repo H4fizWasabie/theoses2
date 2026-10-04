@@ -4,6 +4,7 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { evalCases, SMOKE_CASE_ID } from "./case-registry.ts";
 
 /** What the harness records per run beyond tokens and cost (theoses-harness.ts, measureToolUse). Absent in older records. */
 export type RunMetadata = {
@@ -48,29 +49,22 @@ export type TaskSummary = {
 
 export type SuiteSummary = { suite: string; runs: number; passed: number; tasks: TaskSummary[] };
 
-/** Harness names are `coding-<task>`, `coding-hard-<task>`, `coding-recovery-<task>` (coding-suite.ts), `coding-replay-<task>` (coding-replay.eval.ts) and `plan-off-<task>` / `plan-on-<task>` (coding-plan-ab.eval.ts) and `task-off-<task>` / `task-on-<task>` (coding-task-ab.eval.ts) and `prompt-off-<task>` / `prompt-on-<task>` (coding-prompt-ab.eval.ts). */
+// Every id a harness name can end with: the registered coding cases (test/case-registry.test.ts keeps them equal to
+// the task lists) and the smoke eval's one case.
+const TASK_IDS = [...evalCases.map((item) => item.id), SMOKE_CASE_ID];
+
+/**
+ * Harness names are `<suite>-<task id>`: `coding-hard-sibling-sort-bug`, `hint-on-sibling-sort-bug`,
+ * `snippet-off-replay-auto-resume-timer-leak`. The suite is the name without the longest known task id it ends with; a
+ * name that ends with none (`cache-prefix`, a batching arm) is its own suite.
+ */
 export function suiteOf(harness: string): string {
-	for (const prefix of [
-		"coding-hard",
-		"coding-recovery",
-		"coding-replay",
-		"plan-off",
-		"plan-on",
-		"task-off",
-		"task-on",
-		"prompt-off",
-		"prompt-on",
-		"hint-off",
-		"hint-on",
-		"snippet-off",
-		"snippet-on",
-		"diagnose",
-		"smoke",
-		"coding",
-	]) {
-		if (harness.startsWith(`${prefix}-`)) return prefix;
+	let suite = harness;
+	for (const id of TASK_IDS) {
+		const rest = harness.slice(0, -(id.length + 1));
+		if (rest && harness.endsWith(`-${id}`) && rest.length < suite.length) suite = rest;
 	}
-	return harness;
+	return suite;
 }
 
 export function isCorrect(record: RunRecord): boolean {
