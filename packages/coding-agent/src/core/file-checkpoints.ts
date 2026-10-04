@@ -5,7 +5,9 @@
  * Original bytes go to `<session dir>/checkpoints/<sha256>` (content-addressed, so an unchanged file costs
  * nothing twice, and shared by the sessions in that directory so a fork or clone still finds them); a
  * `file_checkpoint` custom entry in the session log records which path and hash belong to which turn.
- * Nothing lives in memory, so checkpoints survive a restart and follow the session's branches.
+ * Nothing lives in memory, so checkpoints survive a restart and follow the session's branches. They are the one
+ * record of file history: rewinds (`rewindPoints`, `planFileRewind`) and the Task Plan review diff
+ * (`originalsSince`) both read them.
  *
  * Covers what `fileChangesOf` can see: `edit`, `write`, and shell commands whose targets can be read off
  * (redirects, sed -i, cp, mv, rm, tee). A command that changes files in a way that cannot be traced (a
@@ -14,6 +16,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { stripClockAnnotation } from "./clock.ts";
 import type { SessionEntry } from "./session-manager.ts";
 import { fileChangesOf } from "./tool-runs.ts";
 import { resolveToCwd } from "./tools/path-utils.ts";
@@ -193,6 +196,78 @@ export function planFileRewind(branch: SessionEntry[], targetEntryId: string): R
 
 function count(n: number, noun: string): string {
 	return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
+/** A user turn on the current branch that changed files: a point a rewind can go back to. */
+export interface RewindPoint {
+	entryId: string;
+	text: string;
+}
+
+function userText(content: string | Array<{ type: string; text?: string }>): string {
+	const text =
+		typeof content === "string"
+			? content
+			: content.map((part) => (part.type === "text" ? (part.text ?? "") : "[image]")).join(" ");
+	return stripClockAnnotation(text);
+}
+
+/** The user turns on `branch` (root to leaf) that changed files, newest first. Turns that changed nothing have nothing to rewind. */
+export function rewindPoints(branch: SessionEntry[], limit = Number.POSITIVE_INFINITY): RewindPoint[] {
+	const points: RewindPoint[] = [];
+	let turnChangedFiles = false;
+	for (let i = branch.length - 1; i >= 0 && points.length < limit; i--) {
+		const entry = branch[i];
+		if (checkpointOf(entry)) {
+			turnChangedFiles = true;
+		} else if (entry.type === "message" && entry.message.role === "user") {
+			if (turnChangedFiles) points.push({ entryId: entry.id, text: userText(entry.message.content) });
+			turnChangedFiles = false;
+		}
+	}
+	return points;
+}
+
+/** The files changed since a point in time, each with its content from before: a Task Plan diff's "before" side. */
+export interface Originals {
+	/** `before` is null when the file did not exist. */
+	files: Array<{ path: string; before: string | null }>;
+	/** Files whose original was not saved (too large, not a regular file, or swept). */
+	skipped: Array<{ path: string; reason: string }>;
+	/** Shell commands whose file changes could not be traced. */
+	untraced: string[];
+}
+
+/**
+ * What the files changed since `since` (an ISO time) looked like before, from the checkpoints of the turn that was
+ * running then and every turn after it. The earliest checkpoint per path wins, as for a rewind, so changes made
+ * earlier in that turn are included. Persisted sessions only: a session that saves no checkpoints has no originals.
+ */
+export function originalsSince(branch: SessionEntry[], checkpointDirectory: string, since: string): Originals {
+	const sinceMs = new Date(since).getTime();
+	let turn: SessionEntry | undefined;
+	for (const entry of branch) {
+		if (new Date(entry.timestamp).getTime() > sinceMs) break;
+		if (entry.type === "message" && entry.message.role === "user") turn = entry;
+	}
+	const originals: Originals = { files: [], skipped: [], untraced: [] };
+	if (!turn) return originals;
+	const plan = planFileRewind(branch, turn.id);
+	originals.skipped.push(...plan.skipped);
+	originals.untraced.push(...plan.untraced);
+	for (const { path, hash } of plan.restore) {
+		if (hash === null) {
+			originals.files.push({ path, before: null });
+			continue;
+		}
+		try {
+			originals.files.push({ path, before: readFileSync(join(checkpointDirectory, hash), "utf8") });
+		} catch (error) {
+			if (!isMissing(error)) throw error;
+			originals.skipped.push({ path, reason: "the original is no longer saved (older than 30 days)" });
+		}
+	}
+	return originals;
 }
 
 /** Plain-text summary of what a rewind would do, for a confirmation prompt. */

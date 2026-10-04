@@ -2,24 +2,26 @@
  * Session-side Task Plan support (issue #382), installed by agent-session.ts on the main agent only
  * (sub-agents report to it; its plan covers their work). The plan is optional: nothing here blocks a
  * file change or holds a run open for a plan.
- *   - beforeToolCall: while a plan is open, each file is snapshotted before its first change so the
- *     reviewer can see a diff even outside git;
- *   - beforeStop: claim check, then one independent review of a plan the model finished;
+ *   - beforeStop: claim check, then one independent review of a plan the model finished, with a diff of
+ *     what changed since the plan was created, read back from the file checkpoints (so it survives a
+ *     restart and works outside git);
  *   - planStatus: the one-line plan status the channel appends to the final reply.
  */
 import { readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative } from "node:path";
-import type { AgentMessage, BeforeToolCallResult } from "theoses-agent-core";
+import type { AgentMessage } from "theoses-agent-core";
 import { claimCheck, FINAL_REPLY_NOTE } from "./claim-check.ts";
+import type { Originals } from "./file-checkpoints.ts";
 import { createCustomMessage } from "./messages.ts";
 import { formatFindings, logReview, PLAN_REVIEW_CUSTOM_TYPE, type ReviewOutcome } from "./plan-reviewer.ts";
-import { formatPlanStatus, isPlanOpen, needsReview, type TaskPlan, verifyOutput } from "./task-plan.ts";
+import { formatPlanStatus, needsReview, type TaskPlan, verifyOutput } from "./task-plan.ts";
 import { fileChangesOf, firstLine, textOf } from "./tool-runs.ts";
 import { resolveToCwd } from "./tools/path-utils.ts";
 import { readRunEvidence } from "./verification-evidence.ts";
 
 /** Files bigger than this are listed in the diff by name only. */
 const MAX_SNAPSHOT_BYTES = 1_000_000;
+const TOO_LARGE = `[file larger than ${MAX_SNAPSHOT_BYTES} bytes]`;
 
 export interface TaskPlanGuardDeps {
 	cwd: string;
@@ -35,25 +37,23 @@ export interface TaskPlanGuardDeps {
 		locations: string[];
 	}) => Promise<ReviewOutcome | { skipped: string }>;
 	generatePatch: (path: string, before: string, after: string) => string;
+	/** The files changed since an ISO time, with their content from before (the session's file checkpoints). */
+	originalsSince: (since: string) => Originals;
 }
 
 function readSnapshot(path: string): string | null {
 	try {
-		if (statSync(path).size > MAX_SNAPSHOT_BYTES) return `[file larger than ${MAX_SNAPSHOT_BYTES} bytes]`;
+		if (statSync(path).size > MAX_SNAPSHOT_BYTES) return TOO_LARGE;
 		return readFileSync(path, "utf8");
 	} catch {
 		return null;
 	}
 }
 
+const NO_ORIGINALS: Originals = { files: [], skipped: [], untraced: [] };
+
 export class TaskPlanGuard {
 	private readonly deps: TaskPlanGuardDeps;
-	// ponytail: snapshots live in memory, so a restart mid-plan loses the "before" side and the reviewer sees files as new; persist them if that matters.
-	private snapshots = new Map<string, string | null>();
-	private untracedCommands: string[] = [];
-	/** Directories outside cwd that this plan changed, so the reviewer looks there (2026-09-28). */
-	private outsideDirs = new Set<string>();
-	private snapshotPlan: string | undefined;
 	private planAtOperationStart: string | undefined;
 	private pendingReviewOutcome: { goal: string; items: number; mustFix: number } | undefined;
 
@@ -61,57 +61,62 @@ export class TaskPlanGuard {
 		this.deps = deps;
 	}
 
-	/** While a plan is open, snapshots the files a tool call is about to change. Never blocks. */
-	beforeToolCall(toolName: string, args: Record<string, unknown>): BeforeToolCallResult | undefined {
-		if (!this.deps.enabled()) return undefined;
-		const changes = fileChangesOf(toolName, args, this.deps.cwd, [...this.snapshots.keys()]);
-		if (!changes) return undefined;
-		const { paths, dirs, untraced } = changes;
-
-		// ponytail: changes made before the model opens a plan are not snapshotted, so the reviewer's diff
-		// starts at plan creation; snapshot every change and key by plan if that gap matters.
+	/** What changed since the current plan was created, from the file checkpoints. */
+	private originals(): Originals {
 		const plan = this.deps.getPlan();
-		if (!plan || !isPlanOpen(plan)) return undefined;
-
-		if (this.snapshotPlan !== plan.createdAt) {
-			this.snapshotPlan = plan.createdAt;
-			this.snapshots = new Map();
-			this.untracedCommands = [];
-			this.outsideDirs = new Set();
-		}
-		for (const path of paths) {
-			const absolute = resolveToCwd(path, this.deps.cwd);
-			if (!this.snapshots.has(absolute)) this.snapshots.set(absolute, readSnapshot(absolute));
-			if (this.isOutside(absolute)) this.outsideDirs.add(dirname(absolute));
-		}
-		for (const dir of dirs) {
-			const absolute = resolveToCwd(dir, this.deps.cwd);
-			if (this.isOutside(absolute)) this.outsideDirs.add(absolute);
-		}
-		if (untraced) this.untracedCommands.push(firstLine(untraced, 300));
-		return undefined;
+		return plan ? this.deps.originalsSince(plan.createdAt) : NO_ORIGINALS;
 	}
 
-	/** Diff of every snapshotted file against its current contents, plus untraceable commands. */
+	/** Diff of every file changed since the plan was created against its current contents, plus untraceable commands. */
 	diff(): string {
+		const { files, skipped, untraced } = this.originals();
 		const parts: string[] = [];
-		for (const [path, before] of this.snapshots) {
+		const tooLarge: string[] = [];
+		for (const { path, before } of files) {
 			const after = readSnapshot(path);
+			// Either side past the limit cannot be compared, so the file is named rather than silently dropped.
+			if (after === TOO_LARGE || (before !== null && Buffer.byteLength(before) > MAX_SNAPSHOT_BYTES)) {
+				tooLarge.push(this.shown(path));
+				continue;
+			}
 			if (after === before) continue;
-			const shown = this.isOutside(path) ? path : relative(this.deps.cwd, path) || path;
-			parts.push(this.deps.generatePatch(shown, before ?? "", after ?? ""));
+			parts.push(this.deps.generatePatch(this.shown(path), before ?? "", after ?? ""));
 		}
-		if (this.untracedCommands.length > 0) {
+		if (tooLarge.length > 0) {
+			parts.push(`Files changed but larger than ${MAX_SNAPSHOT_BYTES} bytes, so no diff:\n${tooLarge.join("\n")}`);
+		}
+		if (skipped.length > 0) {
 			parts.push(
-				`Commands that changed files in ways the harness could not trace:\n${this.untracedCommands.map((c) => `$ ${c}`).join("\n")}`,
+				`Files changed whose original was not saved, so no diff:\n${skipped.map((s) => `${this.shown(s.path)} (${s.reason})`).join("\n")}`,
+			);
+		}
+		if (untraced.length > 0) {
+			parts.push(
+				`Commands that changed files in ways the harness could not trace:\n${untraced.map((c) => `$ ${firstLine(c, 300)}`).join("\n")}`,
 			);
 		}
 		return parts.join("\n");
 	}
 
-	/** Directories outside cwd this plan changed, sorted. */
+	/** Directories outside cwd this plan changed, sorted, so the reviewer looks there (2026-09-28). */
 	locations(): string[] {
-		return [...this.outsideDirs].sort();
+		const { files, skipped, untraced } = this.originals();
+		const dirs = new Set<string>();
+		for (const { path } of [...files, ...skipped]) {
+			if (this.isOutside(path)) dirs.add(dirname(path));
+		}
+		// An untraced command has no target paths, only the directories it changed files in.
+		for (const command of untraced) {
+			for (const dir of fileChangesOf("bash", { command }, this.deps.cwd)?.dirs ?? []) {
+				const absolute = resolveToCwd(dir, this.deps.cwd);
+				if (this.isOutside(absolute)) dirs.add(absolute);
+			}
+		}
+		return [...dirs].sort();
+	}
+
+	private shown(path: string): string {
+		return this.isOutside(path) ? path : relative(this.deps.cwd, path) || path;
 	}
 
 	private isOutside(path: string): boolean {

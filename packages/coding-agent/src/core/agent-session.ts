@@ -111,9 +111,12 @@ import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import {
 	applyFileRewind,
 	FileCheckpoints,
+	originalsSince,
 	planFileRewind,
 	type RewindPlan,
+	type RewindPoint,
 	type RewindResult,
+	rewindPoints,
 	sweepCheckpoints,
 } from "./file-checkpoints.ts";
 import { createMemoryPromotion, type MemoryPromotion } from "./memory-promotion.ts";
@@ -574,6 +577,11 @@ export class AgentSession {
 					signal: this.agent.signal,
 				}),
 			generatePatch: generateUnifiedPatch,
+			// A session that saves no checkpoints (--no-session) has no originals, so its plan review gets no diff.
+			originalsSince: (since) =>
+				this.sessionManager.isPersisted()
+					? originalsSince(this.sessionManager.getBranch(), this.sessionManager.getCheckpointDirectory(), since)
+					: { files: [], skipped: [], untraced: [] },
 		});
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._baseToolsOverride = config.baseToolsOverride;
@@ -705,14 +713,12 @@ export class AgentSession {
 	}
 
 	/**
-	 * The gate every tool call passes before it runs: task plan guard, owner command hooks, extension `tool_call`
-	 * handlers, then the file checkpoint. The main agent uses it, and so does a `task` sub-agent, so delegating
-	 * work does not step around any of them.
+	 * The gate every tool call passes before it runs: owner command hooks, extension `tool_call` handlers, then the
+	 * file checkpoint. The main agent uses it, and so does a `task` sub-agent, so delegating work does not step
+	 * around any of them.
 	 */
 	private async _gateToolCall({ toolCall, args }: BeforeToolCallContext): Promise<BeforeToolCallResult | undefined> {
 		const input = args as Record<string, unknown>;
-		const planGate = this._taskPlanGuard.beforeToolCall(toolCall.name, input);
-		if (planGate) return planGate;
 		// The owner's command hooks run first: one can block the call or rewrite its input, and the extensions
 		// and the checkpoint below see the rewritten input.
 		const hookBlock = await runPreToolUse(this.settingsManager.getCommandHooks(), this._hookContext(), {
@@ -1249,6 +1255,11 @@ export class AgentSession {
 	/** What putting the files back to how they were before the user message `userEntryId` would do (file-checkpoints.ts). */
 	previewFileRewind(userEntryId: string): RewindPlan {
 		return planFileRewind(this.sessionManager.getBranch(), userEntryId);
+	}
+
+	/** The user turns on the current branch that changed files, newest first: what `rewindFiles` can go back to. */
+	rewindPoints(limit?: number): RewindPoint[] {
+		return rewindPoints(this.sessionManager.getBranch(), limit);
 	}
 
 	/** Puts the files changed since the user message `userEntryId` back to how they were before it. Leaves the conversation alone. */
