@@ -71,11 +71,19 @@ export class TaskPlanGuard {
 	diff(): string {
 		const { files, skipped, untraced } = this.originals();
 		const parts: string[] = [];
+		const tooLarge: string[] = [];
 		for (const { path, before } of files) {
 			const after = readSnapshot(path);
-			const shownBefore = before !== null && before.length > MAX_SNAPSHOT_BYTES ? TOO_LARGE : before;
-			if (after === shownBefore) continue;
-			parts.push(this.deps.generatePatch(this.shown(path), shownBefore ?? "", after ?? ""));
+			// Either side past the limit cannot be compared, so the file is named rather than silently dropped.
+			if (after === TOO_LARGE || (before !== null && Buffer.byteLength(before) > MAX_SNAPSHOT_BYTES)) {
+				tooLarge.push(this.shown(path));
+				continue;
+			}
+			if (after === before) continue;
+			parts.push(this.deps.generatePatch(this.shown(path), before ?? "", after ?? ""));
+		}
+		if (tooLarge.length > 0) {
+			parts.push(`Files changed but larger than ${MAX_SNAPSHOT_BYTES} bytes, so no diff:\n${tooLarge.join("\n")}`);
 		}
 		if (skipped.length > 0) {
 			parts.push(

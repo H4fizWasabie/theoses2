@@ -447,6 +447,15 @@ describe("TaskPlanGuard", () => {
 		expect(g.diff()).toContain("+after-second");
 	});
 
+	it("names a changed file too large to diff, even when both sides are past the limit", () => {
+		const file = join(dir, "big.log");
+		const g = guard();
+		plan = created();
+		originals.files.push({ path: file, before: "é".repeat(600_000) });
+		writeFileSync(file, "x".repeat(1_100_000));
+		expect(g.diff()).toContain("so no diff:\nbig.log");
+	});
+
 	it("lists files whose original was not saved, and untraced commands, instead of diffing them", () => {
 		const g = guard();
 		plan = created();
