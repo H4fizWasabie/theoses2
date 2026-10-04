@@ -152,6 +152,8 @@ node scripts/summarize-runs.ts .eval/<run> --floor coding=0.85 --floor coding-ha
 
 The first baseline (GLM 5.3 flash, thinking `max`, task plan off): easy 15/15, hard 26/33. gpt-6-luna was tried as the production model on 2026-09-30 (hard 25/26, replay 16/16 with the sibling hint on) and dropped for GLM 5.3 flash: about 40% slower and dearer per run for a gain on one task. The CI workflow tracks GLM; pass the `model` input to measure another model.
 
+CI pins the model to the providers production routes it to (GLM 5.3 flash: GMICloud then Novita at fp8, no fallback), from `models.production.json`; the workflow's `providers: open` input lets OpenRouter choose instead. Runs before 2026-10-04 were not pinned. Update the file when production's pin changes.
+
 ## Keeping the suite from going stale
 
 - **Rotation** keeps every non-core case in play (above); `plan-evals --horizon` shows any case it fails to reach.

@@ -1,6 +1,6 @@
 name: Evals
 
-# Model-backed coding evals against the production model (GLM 5.3 flash at thinking max; gpt-6-luna was tried on 2026-09-30 and dropped, see issue #426). Costs real money, so it runs
+# Model-backed coding evals against the production model (GLM 5.3 flash, routed to production's providers; floors at thinking max; gpt-6-luna was tried on 2026-09-30 and dropped, see issue #426). Costs real money, so it runs
 # on demand, once a week, and on pushes to main that change what the model is told (the system prompt) or what it can
 # call (the tools). Never on pull requests: a public repo must not hand a paid key to PR code, so a prompt or tool
 # change is measured right after it lands, and the floors below fail the job if it made the agent worse.
@@ -21,7 +21,7 @@ on:
         type: choice
         options: ["1", "2", "3"]
       thinking:
-        description: "Thinking level. Production runs max."
+        description: "Thinking level. Production runs high; the floors below were measured at max."
         default: "max"
         type: choice
         options: ["max", "xhigh", "high", "medium", "low"]
@@ -34,6 +34,11 @@ on:
         description: "OpenRouter model id. Leave the default to measure the production model."
         default: "z-ai/glm-5.3-flash"
         type: string
+      providers:
+        description: "production = route the model to the providers production pins it to (packages/evals/models.production.json); open = let OpenRouter choose"
+        default: "production"
+        type: choice
+        options: ["production", "open"]
       suite:
         description: "coding = the easy, hard, edit-recovery and real-fix replay sets; plan-ab = the hard set with the task plan off vs on (3 repetitions each); task-ab = the same with the task sub-agent tool off vs on; prompt-ab = the same with and without the working-discipline paragraph in the system prompt; hint-ab = the same with and without the edit sibling hint; snippet-ab = the hard, recovery and replay sets with and without the edit result snippet (also compares tool calls); diagnose = the two tasks the production model always fails, for use with `model`"
         default: "coding"
@@ -61,6 +66,7 @@ jobs:
       SUITE: ${{ inputs.suite || 'coding' }}
       PASSES: ${{ inputs.passes || '1' }}
       MODEL: ${{ inputs.model || 'z-ai/glm-5.3-flash' }}
+      PROVIDERS: ${{ inputs.providers || 'production' }}
       EVAL_THINKING_LEVEL: ${{ inputs.thinking || 'max' }}
       EVAL_SIBLING_HINT: ${{ inputs.sibling_hint == 'off' && 'off' || '' }}
     steps:
@@ -86,6 +92,17 @@ jobs:
 
       - name: Generate the model catalog
         run: npm --prefix packages/ai run generate-models
+
+      # Production pins GLM 5.3 flash to GMICloud then Novita at fp8 with no fallback (the VPS models.json, kept in
+      # order by the cost-watch extension, which evals do not load). Without the pin OpenRouter may serve the eval from
+      # a provider production never uses. models.production.json mirrors that override; update it when production's
+      # pin changes. The model runtime reads models.json from the agent directory.
+      - name: Pin the production providers
+        if: env.PROVIDERS == 'production'
+        run: |
+          mkdir -p "$RUNNER_TEMP/agent"
+          cp packages/evals/models.production.json "$RUNNER_TEMP/agent/models.json"
+          echo "THEOSES_CODING_AGENT_DIR=$RUNNER_TEMP/agent" >> "$GITHUB_ENV"
 
       - name: Run the coding evals
         # A wrong answer fails its test; the floors below decide whether the job fails, so keep going here.
