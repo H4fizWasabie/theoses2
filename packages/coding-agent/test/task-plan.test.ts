@@ -1,8 +1,9 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { AgentMessage } from "theoses-agent-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Originals } from "../src/core/file-checkpoints.ts";
 import * as planReviewer from "../src/core/plan-reviewer.ts";
 import { buildPrompt, PLAN_REVIEW_CUSTOM_TYPE, parseReview, type ReviewOutcome } from "../src/core/plan-reviewer.ts";
 import {
@@ -384,6 +385,19 @@ describe("TaskPlanGuard", () => {
 	let run: AgentMessage[];
 	let reviews: { diff: string; verifyOutput: string | undefined; locations: string[] }[];
 	let reviewResult: ReviewOutcome | { skipped: string };
+	/** What the file checkpoints hold since the plan was created (file-checkpoints.test.ts covers reading them). */
+	let originals: Originals;
+
+	/** Records a file's content before its first change, as a checkpoint would; a later change keeps the first. */
+	function changing(path: string): void {
+		const absolute = resolve(dir, path);
+		if (originals.files.some((file) => file.path === absolute)) return;
+		let before: string | null = null;
+		try {
+			before = readFileSync(absolute, "utf8");
+		} catch {}
+		originals.files.push({ path: absolute, before });
+	}
 
 	function guard(enabled = true): TaskPlanGuard {
 		return new TaskPlanGuard({
@@ -399,6 +413,7 @@ describe("TaskPlanGuard", () => {
 				return reviewResult;
 			},
 			generatePatch: generateUnifiedPatch,
+			originalsSince: () => originals,
 		});
 	}
 
@@ -409,6 +424,7 @@ describe("TaskPlanGuard", () => {
 		plan = undefined;
 		run = [];
 		reviews = [];
+		originals = { files: [], skipped: [], untraced: [] };
 		reviewResult = { model: "luna", verdict: "ok", mustFix: [], nits: 0, inputTokens: 0, outputTokens: 0, cost: 0 };
 	});
 
@@ -417,33 +433,31 @@ describe("TaskPlanGuard", () => {
 		rmSync(dir, { recursive: true, force: true });
 	});
 
-	it("never blocks a file change, with or without a plan", () => {
-		const g = guard();
-		expect(g.beforeToolCall("edit", { path: "run.sh" })).toBeUndefined();
-		expect(g.beforeToolCall("bash", { command: "sed -i '105d' run.sh" })).toBeUndefined();
-		plan = created();
-		expect(g.beforeToolCall("edit", { path: "run.sh" })).toBeUndefined();
-		plan = { ...plan, items: plan.items.map((i) => ({ ...i, status: "done" as const })) };
-		expect(g.beforeToolCall("write", { path: "new.ts" })).toBeUndefined();
-	});
-
-	it("snapshots files only while a plan is open", () => {
+	it("diffs nothing without a plan, and each changed file from its first original with one", () => {
 		const file = join(dir, "run.sh");
 		writeFileSync(file, "before\n");
 		const g = guard();
-		g.beforeToolCall("edit", { path: "run.sh" });
-		writeFileSync(file, "after-no-plan\n");
+		changing("run.sh");
+		writeFileSync(file, "after-first\n");
 		expect(g.diff()).toBe("");
 		plan = created();
-		g.beforeToolCall("edit", { path: "run.sh" });
-		writeFileSync(file, "after-plan\n");
-		expect(g.diff()).toContain("-after-no-plan");
-		expect(g.diff()).toContain("+after-plan");
+		changing("run.sh");
+		writeFileSync(file, "after-second\n");
+		expect(g.diff()).toContain("-before");
+		expect(g.diff()).toContain("+after-second");
+	});
+
+	it("lists files whose original was not saved, and untraced commands, instead of diffing them", () => {
+		const g = guard();
+		plan = created();
+		originals.skipped.push({ path: join(dir, "big.bin"), reason: "larger than 10485760 bytes" });
+		originals.untraced.push("python3 gen.py");
+		expect(g.diff()).toContain("big.bin (larger than 10485760 bytes)");
+		expect(g.diff()).toContain("$ python3 gen.py");
 	});
 
 	it("does nothing when disabled", async () => {
 		const g = guard(false);
-		expect(g.beforeToolCall("edit", { path: "run.sh" })).toBeUndefined();
 		plan = created();
 		run = [user("go"), ...tool("edit", { path: "run.sh" }, "ok"), reply("Done.")];
 		expect(await g.beforeStop()).toEqual([]);
@@ -473,7 +487,7 @@ describe("TaskPlanGuard", () => {
 		const g = guard();
 		plan = created();
 		g.startOperation();
-		expect(g.beforeToolCall("edit", { path: "run.sh" })).toBeUndefined();
+		changing("run.sh");
 		writeFileSync(file, "gate 1\n");
 		plan = { ...plan, items: plan.items.map((i) => ({ ...i, status: "done" as const })) };
 		run = [
@@ -546,10 +560,10 @@ describe("TaskPlanGuard", () => {
 			const g = guard();
 			plan = created({ verify_command: `bash ${script}` });
 			g.startOperation();
-			g.beforeToolCall("edit", { path: script });
+			changing(script);
 			writeFileSync(script, "zoompan\n");
-			g.beforeToolCall("bash", { command: `cd ${workspace} && python3 - <<'EOF'\nopen('addvoice.sh','w')\nEOF` });
-			g.beforeToolCall("edit", { path: "run.sh" });
+			originals.untraced.push(`cd ${workspace} && python3 - <<'EOF'\nopen('addvoice.sh','w')\nEOF`);
+			changing("run.sh");
 			plan = { ...plan, items: plan.items.map((i) => ({ ...i, status: "done" as const })) };
 			run = [
 				user("go"),

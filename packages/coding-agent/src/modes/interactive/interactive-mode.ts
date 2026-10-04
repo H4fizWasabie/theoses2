@@ -4926,15 +4926,16 @@ export class InteractiveMode {
 			this.showStatus("Stop the current run before rewinding");
 			return;
 		}
-		const userMessages = this.session.getUserMessagesForForking();
-		if (userMessages.length === 0) {
-			this.showStatus("No messages to rewind to");
+		// Only turns on this branch that changed files: an earlier message that changed nothing has nothing to rewind.
+		const points = this.session.rewindPoints().reverse();
+		if (points.length === 0) {
+			this.showStatus("No file changes to rewind");
 			return;
 		}
 
 		this.showSelector((done) => {
 			const selector = new UserMessageSelectorComponent(
-				userMessages.map((m) => ({ id: m.entryId, text: m.text })),
+				points.map((point) => ({ id: point.entryId, text: point.text })),
 				async (entryId) => {
 					done();
 					await this.rewindTo(entryId);
@@ -4943,7 +4944,7 @@ export class InteractiveMode {
 					done();
 					this.ui.requestRender();
 				},
-				userMessages[userMessages.length - 1]?.entryId,
+				points[points.length - 1]?.entryId,
 				{
 					title: "Rewind to Message",
 					description: "Select a user message to put files back to how they were before it",

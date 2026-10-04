@@ -1,9 +1,8 @@
 import type { ThinkingLevel } from "theoses-agent-core";
 import type { Api, Model } from "theoses-ai";
 import type { AgentSessionEvent, PromptOptions, PromptResult } from "./agent-session.ts";
-import { stripClockAnnotation } from "./clock.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
-import { describeRewindPlan, FILE_CHECKPOINT_ENTRY_TYPE, type RewindResult } from "./file-checkpoints.ts";
+import { describeRewindPlan, type RewindPoint, type RewindResult } from "./file-checkpoints.ts";
 import { findExactModelReferenceMatch } from "./model-resolver.ts";
 import { createAgentSession } from "./sdk.ts";
 import { SessionManager } from "./session-manager.ts";
@@ -46,11 +45,7 @@ export interface ChannelSession {
 	rewind(entryId: string): RewindResult;
 }
 
-export interface RewindPoint {
-	entryId: string;
-	/** The user message's text, for choosing between points. */
-	text: string;
-}
+export type { RewindPoint };
 
 export interface ChannelInput {
 	text: string;
@@ -58,14 +53,6 @@ export interface ChannelInput {
 	replyContext?: string;
 	/** See PromptOptions.settlementText. */
 	settlementText?: string;
-}
-
-function userText(content: string | Array<{ type: string; text?: string }>): string {
-	const text =
-		typeof content === "string"
-			? content
-			: content.map((part) => (part.type === "text" ? (part.text ?? "") : "[image]")).join(" ");
-	return stripClockAnnotation(text);
 }
 
 /** The owner-facing line for a turn that still failed after its retries (#211), or undefined if it didn't. */
@@ -213,19 +200,7 @@ export function createChannelSessions(options: ChannelSessionsOptions) {
 				return sessionManager.storeArtifact(label, fileName, data);
 			},
 			rewindPoints(limit = 10) {
-				const points: RewindPoint[] = [];
-				let turnChangedFiles = false;
-				const branch = sessionManager.getBranch();
-				for (let i = branch.length - 1; i >= 0 && points.length < limit; i--) {
-					const entry = branch[i];
-					if (entry.type === "custom" && entry.customType === FILE_CHECKPOINT_ENTRY_TYPE) {
-						turnChangedFiles = true;
-					} else if (entry.type === "message" && entry.message.role === "user") {
-						if (turnChangedFiles) points.push({ entryId: entry.id, text: userText(entry.message.content) });
-						turnChangedFiles = false;
-					}
-				}
-				return points;
+				return session.rewindPoints(limit);
 			},
 			previewRewind(entryId) {
 				return describeRewindPlan(session.previewFileRewind(entryId));

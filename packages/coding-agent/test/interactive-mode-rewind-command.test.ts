@@ -5,7 +5,7 @@ import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 type RewindContext = {
 	session: {
 		isStreaming: boolean;
-		getUserMessagesForForking: () => Array<{ entryId: string; text: string }>;
+		rewindPoints: () => Array<{ entryId: string; text: string }>;
 		previewFileRewind: (entryId: string) => RewindPlan;
 		rewindFiles: (entryId: string) => RewindResult;
 	};
@@ -40,7 +40,7 @@ function context(choose: number | "cancel", overrides: Partial<RewindContext["se
 	const ctx: RewindContext = {
 		session: {
 			isStreaming: false,
-			getUserMessagesForForking: () => [{ entryId: "u1", text: "hello" }],
+			rewindPoints: () => [{ entryId: "u1", text: "hello" }],
 			previewFileRewind: () => plan,
 			rewindFiles: spies.rewindFiles,
 			...overrides,
@@ -122,11 +122,11 @@ describe("InteractiveMode /rewind", () => {
 		expect(spies.showStatus).toHaveBeenCalledWith("Stop the current run before rewinding");
 	});
 
-	it("says so when there is no message to rewind to", () => {
-		const { ctx, spies } = context(0, { getUserMessagesForForking: () => [] });
+	it("says so when no turn on this branch changed files", () => {
+		const { ctx, spies } = context(0, { rewindPoints: () => [] });
 
 		prototype.showRewindSelector.call(ctx);
 
-		expect(spies.showStatus).toHaveBeenCalledWith("No messages to rewind to");
+		expect(spies.showStatus).toHaveBeenCalledWith("No file changes to rewind");
 	});
 });

@@ -18,7 +18,9 @@ import {
 	FILE_CHECKPOINT_ENTRY_TYPE,
 	FileCheckpoints,
 	MAX_CHECKPOINT_BYTES,
+	originalsSince,
 	planFileRewind,
+	rewindPoints,
 	sweepCheckpoints,
 } from "../src/core/file-checkpoints.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
@@ -204,6 +206,45 @@ describe("file checkpoints", () => {
 
 		expect(result.failed).toHaveLength(1);
 		expect(result.restored).toHaveLength(1);
+	});
+
+	it("offers only turns on the current branch that changed files, newest first", () => {
+		turn("first", [["a.txt", "v1"]]);
+		const endOfFirst = session.getLeafId() as string;
+		turn("second");
+		turn("third", [["b.txt", "w1"]]);
+
+		expect(rewindPoints(session.getBranch()).map((point) => point.text)).toEqual(["third", "first"]);
+		expect(rewindPoints(session.getBranch(), 1).map((point) => point.text)).toEqual(["third"]);
+
+		session.branch(endOfFirst);
+		turn("alternative", [["c.txt", "x1"]]);
+		expect(rewindPoints(session.getBranch()).map((point) => point.text)).toEqual(["alternative", "first"]);
+	});
+
+	it("reads back what files changed since a time looked like before, from the turn running then on", async () => {
+		const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+		writeFileSync(file("a.txt"), "v0");
+		turn("before the plan", [["a.txt", "v1"]]);
+		await tick();
+		turn("plan created in this turn", [["a.txt", "v2"]]);
+		const planCreatedAt = new Date().toISOString();
+		await tick();
+		turn("after", [
+			["a.txt", "v3"],
+			["new.txt", "n1"],
+		]);
+		await tick();
+		const checkpointDirectory = session.getCheckpointDirectory();
+
+		const originals = originalsSince(session.getBranch(), checkpointDirectory, planCreatedAt);
+
+		// The plan's turn had already changed a.txt when the plan was created; its original from that turn counts.
+		expect(originals.files).toEqual([
+			{ path: file("a.txt"), before: "v1" },
+			{ path: file("new.txt"), before: null },
+		]);
+		expect(originalsSince(session.getBranch(), checkpointDirectory, "1970-01-01T00:00:00.000Z").files).toEqual([]);
 	});
 });
 
