@@ -22,6 +22,7 @@ import type { AgentMessage } from "theoses-agent-core";
 import { type ImageContent, type Message, type TextContent, type Usage, uuidv7 } from "theoses-ai";
 import { APP_NAME, getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
+import { FILE_CHECKPOINT_ENTRY_TYPE, type FileCheckpoint } from "./file-checkpoints.ts";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -31,10 +32,19 @@ import {
 } from "./messages.ts";
 import { type SessionLookupKey, sessionLookupKey } from "./session-cwd.ts";
 import { externalizeImages, hydrateImages } from "./session-images.ts";
-import { TASK_BOUNDARY_CUSTOM_TYPE, type TaskBoundaryData } from "./task-boundary-detector.ts";
+import {
+	TASK_BOUNDARY_CUSTOM_TYPE,
+	TASK_DESCRIPTOR_CUSTOM_TYPE,
+	type TaskBoundaryData,
+} from "./task-boundary-detector.ts";
 import { TASK_PLAN_ENTRY_TYPE, type TaskPlan } from "./task-plan.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
+
+/** A log at least this large continues in a new log at its next compaction (`SessionManager.rotate`, #519). */
+export const SESSION_ROTATE_BYTES = 16 * 1024 * 1024;
+/** The last entry of a rotated log; `data.to` is the log the session continues in. */
+export const SESSION_ROTATED_ENTRY_TYPE = "session_rotated";
 
 export interface ChannelSessionKey {
 	channel: string;
@@ -736,6 +746,12 @@ function sessionKeyMatches(header: SessionHeader, key: SessionLookupKey): boolea
 }
 
 /** Exported for testing */
+/** Newest activity first. A rotated log starts with copies of its parent's last messages, so the two tie on activity
+ * until the next message; the newer log wins the tie. */
+function byRecency(a: SessionInfo, b: SessionInfo): number {
+	return b.modified.getTime() - a.modified.getTime() || b.created.getTime() - a.created.getTime();
+}
+
 export function findMostRecentSession(sessionDir: string, cwd?: string, key?: SessionLookupKey): string | null {
 	const resolvedSessionDir = normalizePath(sessionDir);
 	const resolvedCwd = cwd ? resolvePath(cwd) : undefined;
@@ -1203,6 +1219,10 @@ export class SessionManager {
 	 * current task. A plan from before the latest task boundary belongs to an earlier task: returning it let
 	 * an open plan from one task reject every later task's `create` (2026-10-04). */
 	getTaskPlan(): TaskPlan | undefined {
+		return this._findTaskPlanEntry()?.data as TaskPlan | undefined;
+	}
+
+	private _findTaskPlanEntry(): CustomEntry | undefined {
 		// Walks back from the leaf and stops at the first plan entry: read on every file-changing tool call.
 		// The boundary entry is written after its turn's reply, so the task starts at its anchor message,
 		// not at the boundary entry itself.
@@ -1210,7 +1230,7 @@ export class SessionManager {
 		let entry = this.leafId ? this.byId.get(this.leafId) : undefined;
 		while (entry) {
 			if (entry.type === "custom") {
-				if (entry.customType === TASK_PLAN_ENTRY_TYPE) return entry.data as TaskPlan;
+				if (entry.customType === TASK_PLAN_ENTRY_TYPE) return entry;
 				if (entry.customType === TASK_BOUNDARY_CUSTOM_TYPE && taskStartId === undefined) {
 					taskStartId = (entry.data as TaskBoundaryData).beforeEntryId;
 				}
@@ -1469,7 +1489,164 @@ export class SessionManager {
 		};
 		this._appendEntry(entry);
 		this._pruneHistoricalThinkingSignatures(firstKeptEntryId);
+		if (this.persist && this.sessionFile && existsSync(this.sessionFile)) {
+			if (statSync(this.sessionFile).size >= SESSION_ROTATE_BYTES) {
+				try {
+					this.rotate();
+				} catch (error) {
+					// The compaction is saved; the session goes on in the old log and rotation is tried at the next one.
+					console.error(`[session] rotating ${this.sessionFile} failed: ${(error as Error).message}`);
+				}
+			}
+		}
 		return entry.id;
+	}
+
+	/**
+	 * Continues the session in a new log holding only what is still live (#519), so a months-long Channel Session
+	 * is loaded, held and rewritten at the size of its recent history rather than its whole life. Carried: the
+	 * active context (latest compaction, its kept tail, everything after), the latest entry of each kind of state
+	 * a getter reads (model, thinking level, working note, task plan, task boundary and its anchor, task descriptor,
+	 * session name, last operation outcome), messages Durable Memory has not consolidated yet, live artifacts,
+	 * labels, and the checkpoints and promoted ranges of the carried turns. Entries keep their ids and relative order, so every getter answers as before; rewind reaches
+	 * back only as far as the carried turns. The new log gets a new id and names the old one as `parentSession`;
+	 * the old one ends with a `session_rotated` entry and is never written again. Returns the new log's path.
+	 */
+	rotate(): string | undefined {
+		if (!this.persist || !this.sessionFile || !this.flushed) return undefined;
+		const previous = {
+			fileEntries: this.fileEntries,
+			sessionId: this.sessionId,
+			sessionFile: this.sessionFile,
+			leafId: this.leafId,
+		};
+		const all = this.getEntries();
+		const branch = this.getBranch();
+		const keep = new Set<SessionEntry>(buildContextEntries(all, this.leafId, this.byId));
+		const add = (entry: SessionEntry | undefined) => {
+			if (entry) keep.add(entry);
+		};
+		const isCustom = (entry: SessionEntry, customType: string) =>
+			entry.type === "custom" && entry.customType === customType;
+		add(branch.findLast((e) => e.type === "model_change"));
+		add(branch.findLast((e) => e.type === "thinking_level_change"));
+		add(branch.findLast((e) => e.type === "message" && e.message.role === "assistant"));
+		add(branch.findLast((e) => e.type === "working_note"));
+		add(branch.findLast((e) => e.type === "operation_finished"));
+		add(branch.findLast((e) => isCustom(e, TASK_DESCRIPTOR_CUSTOM_TYPE)));
+		const boundary = branch.findLast((e) => isCustom(e, TASK_BOUNDARY_CUSTOM_TYPE)) as CustomEntry | undefined;
+		if (boundary) {
+			add(boundary);
+			add(this.byId.get((boundary.data as TaskBoundaryData).beforeEntryId));
+		}
+		add(this._findTaskPlanEntry());
+		add(all.findLast((e) => e.type === "session_info")); // getSessionName reads every entry, not just the branch
+		// Messages no promoted range covers are still waiting for Durable Memory (a pass pending, or one that failed):
+		// they are carried too, so settlement still reaches them. Before the kept tail they stay out of the model's context.
+		const position = new Map(branch.map((entry, index) => [entry.id, index]));
+		const ranges: Array<[number, number]> = [];
+		const promoted = new Array<boolean>(branch.length).fill(false);
+		for (const range of branch) {
+			if (range.type !== "promoted_range") continue;
+			const first = position.get(range.firstEntryId);
+			const last = position.get(range.lastEntryId);
+			if (first === undefined || last === undefined) continue;
+			ranges.push([first, last]);
+			for (let index = first; index <= last; index++) promoted[index] = true;
+		}
+		branch.forEach((entry, index) => {
+			if (entry.type === "message" && !promoted[index]) keep.add(entry);
+		});
+		const artifactPaths = new Set<string>();
+		for (const entry of [...branch].reverse()) {
+			if (entry.type !== "artifact" || artifactPaths.has(entry.path) || !existsSync(entry.path)) continue;
+			artifactPaths.add(entry.path);
+			keep.add(entry);
+		}
+		const keptIds = new Set([...keep].map((entry) => entry.id));
+		for (const entry of branch) {
+			if (
+				isCustom(entry, FILE_CHECKPOINT_ENTRY_TYPE) &&
+				keptIds.has(((entry as CustomEntry).data as FileCheckpoint).turnId)
+			)
+				keep.add(entry);
+		}
+
+		const order = new Map(all.map((entry, index) => [entry.id, index]));
+		const carried = [...keep].sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+		this.loadImages(carried); // the new log saves them under its own artifact directory
+		let parentId: string | null = null;
+		const entries: SessionEntry[] = carried.map((entry) => {
+			const copy = { ...entry, parentId };
+			parentId = entry.id;
+			return copy;
+		});
+		const ids = new Set(entries.map((entry) => entry.id));
+		const timestamp = new Date().toISOString();
+		const chain = <T extends SessionEntry>(entry: Omit<T, "id" | "parentId" | "timestamp">): T => {
+			const id = generateId(ids);
+			ids.add(id);
+			const chained = { ...entry, id, parentId, timestamp } as T;
+			parentId = id;
+			entries.push(chained);
+			return chained;
+		};
+		// A promoted range only counts when both its ends are in the log, so each is narrowed to the carried messages
+		// it covered; otherwise settlement would consolidate the carried tail into memory a second time.
+		for (const [first, last] of ranges) {
+			const covered = carried.filter((entry) => {
+				const at = position.get(entry.id);
+				return entry.type === "message" && at !== undefined && at >= first && at <= last;
+			});
+			if (covered.length === 0) continue;
+			chain<PromotedRangeEntry>({
+				type: "promoted_range",
+				firstEntryId: covered[0].id,
+				lastEntryId: covered[covered.length - 1].id,
+			});
+		}
+		for (const [targetId, label] of this.labelsById) {
+			if (keptIds.has(targetId)) chain<LabelEntry>({ type: "label", targetId, label });
+		}
+
+		const oldHeader = this.getHeader();
+		const sessionId = createSessionId();
+		const sessionFile = join(dirname(previous.sessionFile), `${timestamp.replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
+		const header: SessionHeader = {
+			type: "session",
+			version: CURRENT_SESSION_VERSION,
+			id: sessionId,
+			timestamp,
+			cwd: oldHeader?.cwd ?? this.cwd,
+			parentSession: previous.sessionFile,
+			channel: oldHeader?.channel,
+			channelSessionId: oldHeader?.channelSessionId,
+		};
+		// The marker goes first, so the new log is the more recently modified one, which is what CLI resume looks for.
+		const marker: CustomEntry = {
+			type: "custom",
+			customType: SESSION_ROTATED_ENTRY_TYPE,
+			id: generateId(this.byId),
+			parentId: this.leafId,
+			timestamp,
+			data: { to: sessionFile },
+		};
+		appendFileSync(previous.sessionFile, `${JSON.stringify(marker)}\n`);
+		this.fileEntries = [header, ...entries];
+		this.sessionId = sessionId;
+		this.sessionFile = sessionFile;
+		this._buildIndex();
+		try {
+			this._rewriteFile();
+		} catch (error) {
+			this.fileEntries = previous.fileEntries;
+			this.sessionId = previous.sessionId;
+			this.sessionFile = previous.sessionFile;
+			this._buildIndex();
+			this.leafId = previous.leafId;
+			throw error;
+		}
+		return sessionFile;
 	}
 
 	/**
@@ -2084,7 +2261,7 @@ export class SessionManager {
 						sessionCwdMatches(session.cwd, resolvedCwd)) &&
 				(!filterCwd || sessionCwdMatches(session.cwd, resolvedCwd)),
 		);
-		sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+		sessions.sort(byRecency);
 		return sessions;
 	}
 
@@ -2117,7 +2294,7 @@ export class SessionManager {
 		const channel = typeof onProgressOrChannel === "string" ? onProgressOrChannel : channelArg;
 		if (customSessionDir) {
 			const sessions = await listSessionsFromDir(customSessionDir, progress, 0, undefined, channel);
-			sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+			sessions.sort(byRecency);
 			return sessions;
 		}
 
@@ -2165,7 +2342,7 @@ export class SessionManager {
 				}
 			}
 
-			sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+			sessions.sort(byRecency);
 			return sessions;
 		} catch {
 			return [];
