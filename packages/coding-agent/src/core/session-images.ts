@@ -133,7 +133,7 @@ export function externalizeImages<T>(entry: T, artifactDir: () => string): T {
  * missing or unreadable becomes a text note, so one lost image never makes the session unloadable.
  * Returns how many images could not be restored.
  */
-export function hydrateImages(entries: unknown[], artifactDir: string): number {
+export function hydrateImages(entries: readonly unknown[], artifactDir: string): number {
 	let missing = 0;
 	const hydrate = (content: unknown[]): void => {
 		for (let index = 0; index < content.length; index++) {

@@ -1043,13 +1043,13 @@ export class SessionManager {
 
 			const header = this.fileEntries.find((e) => e.type === "session") as SessionHeader | undefined;
 			this.sessionId = header?.id ?? createSessionId();
-			this._hydrateImages();
 
 			if (migrateToCurrentVersion(this.fileEntries)) {
 				this._rewriteFile();
 			}
 
 			this._buildIndex();
+			this.loadImages(buildContextEntries(this.getEntries(), this.leafId, this.byId));
 			this._loadedWithUnclosedTurn = this._computeUnclosedTurn();
 			this.flushed = true;
 		} else {
@@ -1120,11 +1120,16 @@ export class SessionManager {
 		}
 	}
 
-	/** Restores image bytes that the log holds as references. The files sit next to the session's own log. */
-	private _hydrateImages(): void {
+	/**
+	 * Restores image bytes that the log holds as references, in place. The files sit next to the session's own log.
+	 * Opening a session restores only the active context: a months-long Channel Session references hundreds of images
+	 * the model will never see again (#519). Anything that reads entries outside the context and needs the bytes
+	 * (export, copying entries into a new session) calls this first; an entry already restored is skipped.
+	 */
+	loadImages(entries: readonly SessionEntry[] = this.getEntries()): void {
 		const inSessionDir = join(this.sessionDir, "artifacts", this.sessionId);
 		const beside = this.sessionFile ? join(dirname(this.sessionFile), "artifacts", this.sessionId) : inSessionDir;
-		const missing = hydrateImages(this.fileEntries, existsSync(inSessionDir) ? inSessionDir : beside);
+		const missing = hydrateImages(entries, existsSync(inSessionDir) ? inSessionDir : beside);
 		if (missing > 0)
 			console.error(`[session] ${missing} image(s) referenced by ${this.sessionFile} could not be restored`);
 	}
@@ -1653,7 +1658,10 @@ export class SessionManager {
 	 * Uses tree traversal from current leaf.
 	 */
 	buildContextEntries(): SessionEntry[] {
-		return buildContextEntries(this.getEntries(), this.leafId, this.byId);
+		const entries = buildContextEntries(this.getEntries(), this.leafId, this.byId);
+		// a moved leaf (branch, tree navigation) can bring entries into context whose images were never restored
+		this.loadImages(entries);
+		return entries;
 	}
 
 	/**
@@ -1661,6 +1669,7 @@ export class SessionManager {
 	 * Uses tree traversal from current leaf.
 	 */
 	buildSessionContext(): SessionContext {
+		this.buildContextEntries(); // restores the images of entries a moved leaf brought into context
 		return buildSessionContext(this.getEntries(), this.leafId, this.byId);
 	}
 
@@ -1795,6 +1804,8 @@ export class SessionManager {
 		if (path.length === 0) {
 			throw new Error(`Entry ${leafId} not found`);
 		}
+		// The copy gets a new id and so a new artifact directory: references into this session's would dangle.
+		this.loadImages(path);
 
 		// Filter out LabelEntry from path - we'll recreate them from the resolved map.
 		// Because labels are real tree entries, later entries can be children of labels;

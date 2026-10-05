@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, uti
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { exportSessionToJsonl } from "../src/core/session-export.ts";
 import {
 	EXTERNAL_IMAGE_MIN_CHARS,
 	externalizeImages,
@@ -302,6 +303,43 @@ describe("session images", () => {
 			const raw = readFileSync(branchFile as string, "utf8");
 			expect(raw).not.toContain(data);
 			expect(JSON.stringify(SessionManager.open(branchFile as string).getEntries())).toContain(data);
+		});
+
+		/** An image in the first turn, then a compaction that keeps only the second turn. */
+		function compactedImageSession(data: string) {
+			const { manager } = makeSession();
+			manager.appendMessage({
+				role: "user",
+				content: [{ type: "image", data, mimeType: "image/png" }],
+				timestamp: 1,
+			} as never);
+			const oldLeaf = manager.appendMessage(assistant("a photo"));
+			const kept = manager.appendMessage({ role: "user", content: "next", timestamp: 2 } as never);
+			manager.appendMessage(assistant("ok"));
+			manager.appendCompaction("summary", kept, 100);
+			return { file: manager.getSessionFile() as string, oldLeaf };
+		}
+
+		it("restores only the active context's images on open, and the rest once a moved leaf needs them", () => {
+			const data = image(6000, 3);
+			const { file, oldLeaf } = compactedImageSession(data);
+
+			const reopened = SessionManager.open(file);
+			expect(JSON.stringify(reopened.getEntries())).not.toContain(data);
+
+			reopened.branch(oldLeaf);
+			expect(JSON.stringify(reopened.buildSessionContext().messages)).toContain(data);
+		});
+
+		it("carries an image behind the compaction into a branched session and an export", () => {
+			const data = image(6000, 2);
+			const { file, oldLeaf } = compactedImageSession(data);
+
+			const exported = exportSessionToJsonl(SessionManager.open(file), join(root, "export.jsonl"));
+			expect(readFileSync(exported, "utf8")).toContain(data);
+
+			const branchFile = SessionManager.open(file).createBranchedSession(oldLeaf) as string;
+			expect(JSON.stringify(SessionManager.open(branchFile).getEntries())).toContain(data);
 		});
 
 		it("does not touch the disk for a session that is not persisted", () => {
