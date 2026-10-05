@@ -1132,7 +1132,10 @@ export class AgentSession {
 		);
 		this._disconnectFromAgent();
 		this._eventListeners = [];
-		cleanupSessionResources(this.sessionId);
+		// The provider's resources (a Codex WebSocket) are keyed by the id the agent sends, fixed when it was created.
+		// The session manager's id can change under a live session (log rotation, an in-place branch), so that one
+		// would miss them.
+		cleanupSessionResources(this.agent.sessionId ?? this.sessionId);
 	}
 
 	// =========================================================================

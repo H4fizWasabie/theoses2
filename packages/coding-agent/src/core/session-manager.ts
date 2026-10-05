@@ -12,6 +12,7 @@ import {
 	renameSync,
 	rmSync,
 	statSync,
+	utimesSync,
 	writeFileSync,
 } from "fs";
 import { readdir, stat } from "fs/promises";
@@ -1622,7 +1623,6 @@ export class SessionManager {
 			channel: oldHeader?.channel,
 			channelSessionId: oldHeader?.channelSessionId,
 		};
-		// The marker goes first, so the new log is the more recently modified one, which is what CLI resume looks for.
 		const marker: CustomEntry = {
 			type: "custom",
 			customType: SESSION_ROTATED_ENTRY_TYPE,
@@ -1631,7 +1631,6 @@ export class SessionManager {
 			timestamp,
 			data: { to: sessionFile },
 		};
-		appendFileSync(previous.sessionFile, `${JSON.stringify(marker)}\n`);
 		this.fileEntries = [header, ...entries];
 		this.sessionId = sessionId;
 		this.sessionFile = sessionFile;
@@ -1646,6 +1645,11 @@ export class SessionManager {
 			this.leafId = previous.leafId;
 			throw error;
 		}
+		// Marked only once the new log is on disk, so a failed rotation leaves the old log untouched. The marker
+		// makes the old log the more recently modified one; CLI resume picks by mtime, so the new log is touched after.
+		appendFileSync(previous.sessionFile, `${JSON.stringify(marker)}\n`);
+		const now = new Date();
+		utimesSync(sessionFile, now, now);
 		return sessionFile;
 	}
 

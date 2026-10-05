@@ -1,10 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { registerSessionResourceCleanup } from "theoses-ai";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FILE_CHECKPOINT_ENTRY_TYPE, type FileCheckpoint } from "../src/core/file-checkpoints.ts";
 import { selectConsolidationWindow } from "../src/core/memory-promotion.ts";
+import { createAgentSession } from "../src/core/sdk.ts";
 import { SESSION_ROTATE_BYTES, SESSION_ROTATED_ENTRY_TYPE, SessionManager } from "../src/core/session-manager.ts";
+import { SettingsManager } from "../src/core/settings-manager.ts";
 import { TASK_BOUNDARY_CUSTOM_TYPE, TASK_DESCRIPTOR_CUSTOM_TYPE } from "../src/core/task-boundary-detector.ts";
 import type { TaskPlan } from "../src/core/task-plan.ts";
 
@@ -198,6 +201,48 @@ describe("session log rotation", () => {
 		expect(existsSync(oldFile)).toBe(true);
 		expect(statSync(newFile).size).toBeLessThan(10_000);
 		expect(manager.getEntry(compactionId)?.type).toBe("compaction");
+	});
+
+	it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+		"leaves the old log untouched and in use when the new log cannot be written",
+		() => {
+			const { manager } = longSession();
+			const oldFile = manager.getSessionFile() as string;
+			const before = readFileSync(oldFile, "utf8");
+			chmodSync(sessionDir, 0o555); // the old log stays writable; a new file in the directory cannot be created
+			try {
+				expect(() => manager.rotate()).toThrow();
+			} finally {
+				chmodSync(sessionDir, 0o755);
+			}
+
+			expect(readFileSync(oldFile, "utf8")).toBe(before);
+			expect(manager.getSessionFile()).toBe(oldFile);
+			manager.appendMessage(user("still the old log"));
+			expect(readFileSync(oldFile, "utf8")).toContain("still the old log");
+		},
+	);
+
+	it("releases the provider resources under the id the agent was created with", async () => {
+		const released: Array<string | undefined> = [];
+		const unregister = registerSessionResourceCleanup((id) => released.push(id));
+		try {
+			const { manager } = longSession();
+			const { session } = await createAgentSession({
+				cwd: root,
+				agentDir: join(root, "agent"),
+				sessionManager: manager,
+				settingsManager: SettingsManager.inMemory(),
+			});
+			const opened = manager.getSessionId();
+			manager.rotate();
+
+			session.dispose();
+
+			expect(released).toEqual([opened]);
+		} finally {
+			unregister();
+		}
 	});
 
 	it("does nothing for a session that is not persisted", () => {
