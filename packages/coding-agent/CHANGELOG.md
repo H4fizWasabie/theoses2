@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [1.0.121] - 2026-10-05
+
+- feat: a session log rotates at 16 MB (#519). A long-lived Channel Session's log only grew: production's Telegram log reached 84 MB, all of it parsed at every bot start, held in memory for the life of the process, and rewritten whole when a compaction pruned reasoning signatures. At a compaction that leaves the log at 16 MB or more, `SessionManager.rotate()` continues in a new log (new id, `parentSession` = the old path) holding the active context, the latest entry of each kind of state a getter reads, messages Durable Memory has not consolidated yet, live artifacts, labels, and the checkpoints and narrowed promoted ranges of the carried turns; every getter answers as before. The old log ends with a `session_rotated` entry and is never written again. Session lists break a last-activity tie on creation time, so a fresh rotated log wins over its parent. Rewind reaches back only as far as the carried turns. Replayed on the production log: 84 MB to 2.1 MB, open 775 ms to 14 ms.
+
+- fix: opening a session restores only the active context's images. Every image a log referenced was read back into memory as base64, including ones from turns compacted long ago (production: 384 image blocks, 149 MB of files, none in the active context). `SessionManager.loadImages` now restores on demand: the active context at open, entries a moved leaf brings into context, and whatever a branched session or an HTML/JSONL export copies out.
+
+- fix: `AgentSession.dispose` releases provider resources (the Codex WebSocket) under the id the agent sends, fixed at creation, rather than the session manager's current id, which rotation or an in-place branch can change.
+
 ## [1.0.120] - 2026-10-04
 
 - fix: a Task Plan no longer outlives its task. `SessionManager.getTaskPlan` walked the whole branch, so a plan left open in one task stayed current across every later Task Boundary and rejected the next task's `create` with "A plan is already open" (production 2026-10-04: an open plan from 10-01 survived nine boundaries). The lookup now stops at the latest boundary's anchor message (`beforeEntryId`), not at the boundary entry, which is written after its turn's reply; a plan created in the new task's first turn is still found. The `task_plan` tool and the stop guard both read through it.
