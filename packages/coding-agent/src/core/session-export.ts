@@ -28,8 +28,11 @@ export function exportSessionToJsonl(
 	};
 	const lines = [JSON.stringify(header)];
 
+	// the export lands outside the session's artifact directory, so it carries image bytes, not references
+	const branch = sessionManager.getBranch();
+	sessionManager.loadImages(branch);
 	let parentId: string | null = null;
-	for (const entry of sessionManager.getBranch()) {
+	for (const entry of branch) {
 		lines.push(JSON.stringify({ ...entry, parentId }));
 		parentId = entry.id;
 	}

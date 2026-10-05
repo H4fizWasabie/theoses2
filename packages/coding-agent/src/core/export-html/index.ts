@@ -249,6 +249,7 @@ export async function exportSessionToHtml(
 	}
 
 	const entries = sm.getEntries();
+	sm.loadImages(entries);
 
 	// Pre-render custom tools if a tool renderer is provided
 	let renderedTools: Record<string, RenderedToolHtml> | undefined;
