@@ -1,9 +1,9 @@
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { type AssistantMessage, type RetryPolicy, retryAssistantCall } from "theoses-ai";
-import type { Context, SimpleStreamOptions } from "theoses-ai/compat";
+import { type Context, isRetryableAssistantError, type SimpleStreamOptions } from "theoses-ai/compat";
 import { getAgentDir } from "../config.ts";
-import { resolveBackgroundModel } from "./background-models.ts";
+import { type BackgroundModelName, resolveBackgroundModel } from "./background-models.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 
 export interface BackgroundCallOptions {
@@ -23,12 +23,26 @@ export interface BackgroundCallOptions {
  * would miss them; `consolidation-usage.jsonl` (one `{timestamp, cost, model, caller}` line per call) is
  * where it totals them. The served-provider journal line comes from `modelRuntime.completeSimple`
  * itself. Prompt wording, and what counts as a usable answer, stay with each caller.
+ *
+ * A transient error that outlasts the retries (most often a 429 from the consolidation model's single
+ * upstream: 18 lost passes in the week to 2026-10-06) gets one more pass on the fallback model, a
+ * different provider, instead of dropping the window.
  */
 export async function backgroundCall(
 	modelRuntime: ModelRuntime,
 	options: BackgroundCallOptions,
 ): Promise<AssistantMessage> {
-	const model = resolveBackgroundModel(modelRuntime, "consolidation");
+	const response = await callModel(modelRuntime, "consolidation", options);
+	if (!isRetryableAssistantError(response)) return response;
+	return callModel(modelRuntime, "fallback", options);
+}
+
+async function callModel(
+	modelRuntime: ModelRuntime,
+	name: BackgroundModelName,
+	options: BackgroundCallOptions,
+): Promise<AssistantMessage> {
+	const model = resolveBackgroundModel(modelRuntime, name);
 	const context: Context = {
 		messages: [{ role: "user", content: [{ type: "text", text: options.prompt }], timestamp: Date.now() }],
 	};

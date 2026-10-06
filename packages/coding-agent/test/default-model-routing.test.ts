@@ -76,3 +76,15 @@ describe("reviewer routing", () => {
 		expect(model.maxTokens).toBe(8000);
 	});
 });
+
+describe("background fallback routing", () => {
+	it("defaults to GPT-6 Luna pinned to OpenAI's flex tier", () => {
+		const { runtime, getModel } = runtimeWithModel();
+
+		const model = resolveBackgroundModel(runtime, "fallback");
+
+		expect(getModel).toHaveBeenCalledWith("openrouter", "openai/gpt-6-luna");
+		expect(routingOf(model)).toEqual({ order: ["openai/flex"], allow_fallbacks: false });
+		expect(model.maxTokens).toBe(32000);
+	});
+});
