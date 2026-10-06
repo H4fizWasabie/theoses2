@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.0.122] - 2026-10-06
+
+- fix: a background call (memory consolidation, the task-boundary summary) whose model stays rate-limited through its retries falls back to GPT-6 Luna pinned to OpenAI's flex tier instead of dropping the pass. Production lost 18 consolidation passes to 429s from the single Ling 3.0 Flash VL upstream between 2026-09-29 and 2026-10-06. The fallback is a new background model name, `fallback` (`openai/gpt-6-luna`, `order: ["openai/flex"]`, no OpenRouter fallbacks), overridable through `backgroundModels.fallback` in settings.json. Non-transient errors and aborts are returned unchanged.
+
 ## [1.0.121] - 2026-10-05
 
 - feat: a session log rotates at 16 MB (#519). A long-lived Channel Session's log only grew: production's Telegram log reached 84 MB, all of it parsed at every bot start, held in memory for the life of the process, and rewritten whole when a compaction pruned reasoning signatures. At a compaction that leaves the log at 16 MB or more, `SessionManager.rotate()` continues in a new log (new id, `parentSession` = the old path) holding the active context, the latest entry of each kind of state a getter reads, messages Durable Memory has not consolidated yet, live artifacts, labels, and the checkpoints and narrowed promoted ranges of the carried turns; every getter answers as before. The old log ends with a `session_rotated` entry and is never written again. Session lists break a last-activity tie on creation time, so a fresh rotated log wins over its parent. Rewind reaches back only as far as the carried turns. Replayed on the production log: 84 MB to 2.1 MB, open 775 ms to 14 ms.
