@@ -7,7 +7,7 @@ import type { Api, Model } from "theoses-ai";
  * swapping a model or provider is a settings edit plus a restart, not a release.
  */
 
-export type BackgroundModelName = "consolidation" | "explorer" | "research" | "reviewer";
+export type BackgroundModelName = "consolidation" | "fallback" | "explorer" | "research" | "reviewer";
 
 export interface BackgroundModelSetting {
 	/** OpenRouter model id, e.g. "inclusionai/ling-3.0-flash-vl". */
@@ -95,9 +95,12 @@ const DEFAULTS: ResolvedBackgroundModelSetting = {
 /**
  * The explorer and research run on Novita at bf16 (as in production); the task-plan reviewer (issue #382)
  * deliberately uses a different model family from the worker, whose blind spots it would otherwise share.
- * GPT-6 Luna is the one the ICM workspaces already run on.
+ * GPT-6 Luna is the one the ICM workspaces already run on. The fallback catches consolidation calls whose
+ * provider stays rate-limited through the retries (background-call.ts); it is GPT-6 Luna pinned to OpenAI's
+ * half-price flex tier (abah 2026-10-06). `order` also takes an endpoints API `tag` such as "openai/flex".
  */
 const NAME_DEFAULTS: Partial<Record<BackgroundModelName, ResolvedBackgroundModelSetting>> = {
+	fallback: { model: "openai/gpt-6-luna", providers: ["openai/flex"], quantizations: [] },
 	explorer: { model: DEFAULTS.model, providers: ["Novita"], quantizations: ["bf16"] },
 	research: { model: DEFAULTS.model, providers: ["Novita"], quantizations: ["bf16"] },
 	reviewer: { model: "openai/gpt-6-luna", providers: ["OpenAI"], quantizations: [] },
@@ -113,6 +116,7 @@ const NAME_DEFAULTS: Partial<Record<BackgroundModelName, ResolvedBackgroundModel
  */
 const MAX_TOKENS: Record<BackgroundModelName, number> = {
 	consolidation: 32000,
+	fallback: 32000,
 	explorer: 8000,
 	research: 16000,
 	reviewer: 8000,
@@ -120,6 +124,7 @@ const MAX_TOKENS: Record<BackgroundModelName, number> = {
 
 const LABELS: Record<BackgroundModelName, string> = {
 	consolidation: "Consolidation",
+	fallback: "Background fallback",
 	explorer: "Explorer",
 	research: "Research",
 	reviewer: "Reviewer",

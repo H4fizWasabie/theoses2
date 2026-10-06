@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
 
 vi.mock("../src/core/background-models.ts", () => ({
-	resolveBackgroundModel: () => ({ id: "deepseek-v4", maxTokens: 4096 }),
+	resolveBackgroundModel: (_runtime: unknown, name: string) =>
+		name === "fallback" ? { id: "openai/gpt-6-luna", maxTokens: 32000 } : { id: "deepseek-v4", maxTokens: 4096 },
 }));
 
 import { backgroundCall } from "../src/core/background-call.ts";
@@ -71,5 +72,47 @@ describe("backgroundCall", () => {
 		expect(lines.map((line) => JSON.parse(line))).toEqual([
 			expect.objectContaining({ cost: 0.002, model: "deepseek/deepseek-v4", caller: "task-boundary" }),
 		]);
+	});
+
+	it("hands a transient error that outlasts the retries to the fallback model", async () => {
+		const rateLimited = reply({ stopReason: "error", errorMessage: "429 rate-limited upstream" });
+		const completeSimple = vi
+			.fn()
+			.mockResolvedValueOnce(rateLimited)
+			.mockResolvedValueOnce(rateLimited)
+			.mockResolvedValueOnce(reply({ responseModel: "openai/gpt-6-luna" }));
+		const modelRuntime = { completeSimple } as unknown as ModelRuntime;
+
+		const response = await backgroundCall(modelRuntime, {
+			caller: "consolidation",
+			prompt: "consolidate",
+			sessionId: "telegram:1",
+			retry: { enabled: true, maxRetries: 1, baseDelayMs: 1 },
+		});
+
+		expect(response.stopReason).toBe("stop");
+		expect(completeSimple.mock.calls.map(([model]) => model.id)).toEqual([
+			"deepseek-v4",
+			"deepseek-v4",
+			"openai/gpt-6-luna",
+		]);
+		expect(completeSimple.mock.calls[2][2].maxTokens).toBe(32000);
+	});
+
+	it("does not fall back on a non-transient error", async () => {
+		const completeSimple = vi
+			.fn()
+			.mockResolvedValue(reply({ stopReason: "error", errorMessage: "400 invalid request" }));
+		const modelRuntime = { completeSimple } as unknown as ModelRuntime;
+
+		const response = await backgroundCall(modelRuntime, {
+			caller: "consolidation",
+			prompt: "consolidate",
+			sessionId: "telegram:1",
+			retry: { enabled: true, maxRetries: 1, baseDelayMs: 1 },
+		});
+
+		expect(response.stopReason).toBe("error");
+		expect(completeSimple).toHaveBeenCalledTimes(1);
 	});
 });
