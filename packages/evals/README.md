@@ -152,7 +152,22 @@ node scripts/summarize-runs.ts .eval/<run> --floor coding=0.85 --floor coding-ha
 
 The first baseline (GLM 5.3 flash, thinking `max`, task plan off): easy 15/15, hard 26/33. gpt-6-luna was tried as the production model on 2026-09-30 (hard 25/26, replay 16/16 with the sibling hint on) and dropped for GLM 5.3 flash: about 40% slower and dearer per run for a gain on one task. The CI workflow tracks GLM; pass the `model` input to measure another model.
 
-CI pins the model to the providers production routes it to (GLM 5.3 flash: GMICloud then Novita at fp8, no fallback), from `models.production.json`; the workflow's `providers: open` input lets OpenRouter choose instead. Runs before 2026-10-04 were not pinned. Update the file when production's pin changes.
+The 2026-10-12 bake-off on the coding set (24 cases, thinking `max`), with each model's estimated cost per run:
+
+| Model | Passes | Correct | Median latency | Estimated cost per run |
+|---|---|---|---|---|
+| z-ai/glm-5.3-flash | 1 | 22/24 | 43s | $0.0018 |
+| deepseek/deepseek-v4.1-flash | 3 | 68/71 | 30s | $0.0024 |
+| openai/gpt-6-luna (standard tier) | 1 | 24/24 | 34s | $0.0043 |
+
+DeepSeek's estimate uses the catalog price ($0.15 per M input), but Morph, the first provider in its pin, charges $0.042, so its real cost is lower. Luna on OpenAI's flex tier could not be measured that day: 21 of 25 runs failed with "Flex processing is temporarily unavailable".
+
+CI pins each model to the providers production routes it to, from `models.production.json`, with no fallback outside the list:
+- GLM 5.3 flash: GMICloud, then Novita, at fp8.
+- DeepSeek v4.1 flash: Morph, then DeepInfra.
+- GPT-6 Luna: OpenAI's flex tier, then its standard tier.
+
+The workflow's `providers: open` input lets OpenRouter choose instead. Runs before 2026-10-04 were not pinned. Update the file when production's pin changes.
 
 ## Keeping the suite from going stale
 
