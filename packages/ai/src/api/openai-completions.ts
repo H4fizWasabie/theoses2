@@ -39,6 +39,8 @@ import type {
 } from "../types.ts";
 import {
 	appendAssistantMessageDiagnostic,
+	createAssistantMessageDiagnostic,
+	extractDiagnosticError,
 	isStopWithHiddenOutput,
 	STOP_WITHOUT_TOOL_CALL_DIAGNOSTIC,
 	summarizeStreamChunk,
@@ -309,6 +311,8 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 
 		const maxStreamDurationMs = options?.maxStreamDurationMs ?? DEFAULT_STREAM_DURATION_MS;
 		const streamDurationSignal = AbortSignal.timeout(maxStreamDurationMs);
+		// Elapsed ms when response headers arrived; tells a failure before headers from one mid-stream.
+		let headersAtMs: number | undefined;
 
 		try {
 			const apiKey = getClientApiKey(model.provider, options?.apiKey, options?.headers);
@@ -344,6 +348,7 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 					signal: options?.signal,
 				},
 			);
+			headersAtMs = Date.now() - output.timestamp;
 			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 			stream.push({ type: "start", partial: output });
 
@@ -725,6 +730,19 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 				if (rawMetadata && !output.errorMessage.includes(String(rawMetadata))) {
 					output.errorMessage += `\n${rawMetadata}`;
 				}
+			}
+			// The message alone cannot say what threw: a bare "The operation was aborted" in the 2026-10-05
+			// weekly eval had no stack or cause to trace. Keep both, plus timing, for errors the caller did not ask for.
+			if (output.stopReason === "error") {
+				const cause = (error as { cause?: unknown } | undefined)?.cause;
+				appendAssistantMessageDiagnostic(
+					output,
+					createAssistantMessageDiagnostic("provider_transport_failure", error, {
+						elapsedMs: Date.now() - output.timestamp,
+						headersAtMs,
+						...(cause !== undefined ? { cause: extractDiagnosticError(cause) } : {}),
+					}),
+				);
 			}
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 			stream.end();
