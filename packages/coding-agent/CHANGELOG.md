@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.0.123] - 2026-10-12
+
+- fix: a failed OpenRouter (or other openai-completions) model call records what threw it (#527). The 2026-10-05 weekly eval lost 4 tasks to a bare "The operation was aborted" about 15s into a call, with no stack or cause to trace. A failure the caller did not ask for now adds a `provider_request_failure` diagnostic to the reply: the error's name, message, code, stack and cause, `elapsedMs`, `headersAtMs` (when a successful response started streaming) and `status` (set for an HTTP error response). Caller aborts add nothing.
+- fix: Moonshot's Kimi K3 keeps its official price (no cache-write charge) when models.dev reports `cache_write` at the cache-miss rate (#528).
+
 ## [1.0.122] - 2026-10-06
 
 - fix: a background call (memory consolidation, the task-boundary summary) whose model stays rate-limited through its retries falls back to GPT-6 Luna pinned to OpenAI's flex tier instead of dropping the pass. Production lost 18 consolidation passes to 429s from the single Ling 3.0 Flash VL upstream between 2026-09-29 and 2026-10-06. The fallback is a new background model name, `fallback` (`openai/gpt-6-luna`, `order: ["openai/flex"]`, no OpenRouter fallbacks), overridable through `backgroundModels.fallback` in settings.json. Non-transient errors and aborts are returned unchanged.
