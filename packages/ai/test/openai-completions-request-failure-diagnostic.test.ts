@@ -35,7 +35,7 @@ const dropMidStream: FetchFunction = async () => {
 	return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
 };
 
-describe("openai-completions transport failure diagnostic", () => {
+describe("openai-completions request failure diagnostic", () => {
 	it("records the error, its cause and when headers arrived", async () => {
 		const message = await streamSimple(model, context, {
 			apiKey: "test-key",
@@ -44,7 +44,7 @@ describe("openai-completions transport failure diagnostic", () => {
 		}).result();
 
 		expect(message.stopReason).toBe("error");
-		const diagnostic = message.diagnostics?.find((d) => d.type === "provider_transport_failure");
+		const diagnostic = message.diagnostics?.find((d) => d.type === "provider_request_failure");
 		expect(diagnostic?.error).toMatchObject({ name: "TypeError", message: "terminated" });
 		expect(diagnostic?.error?.stack).toContain("terminated");
 		expect(diagnostic?.details).toMatchObject({

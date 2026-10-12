@@ -733,11 +733,12 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 			}
 			// The message alone cannot say what threw: a bare "The operation was aborted" in the 2026-10-05
 			// weekly eval had no stack or cause to trace. Keep both, plus timing, for errors the caller did not ask for.
+			// Covers every such error (HTTP status, transport, stream parsing), so the type names the request, not the transport.
 			if (output.stopReason === "error") {
 				const cause = (error as { cause?: unknown } | undefined)?.cause;
 				appendAssistantMessageDiagnostic(
 					output,
-					createAssistantMessageDiagnostic("provider_transport_failure", error, {
+					createAssistantMessageDiagnostic("provider_request_failure", error, {
 						elapsedMs: Date.now() - output.timestamp,
 						headersAtMs,
 						...(cause !== undefined ? { cause: extractDiagnosticError(cause) } : {}),
