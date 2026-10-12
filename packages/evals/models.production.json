@@ -23,7 +23,7 @@
 				"openai/gpt-6-luna": {
 					"compat": {
 						"openRouterRouting": {
-							"only": ["openai/flex"],
+							"only": ["openai"],
 							"allow_fallbacks": false
 						}
 					},
