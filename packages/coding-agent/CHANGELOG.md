@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.0.124] - 2026-10-13
+
+- fix: the background rate-limit fallback tries GPT-6 Luna on OpenAI's flex tier, then its standard tier (`order: ["openai/flex", "openai"]`), instead of flex only (#531). Flex was unavailable for 21 of 25 eval runs on 2026-10-12, so a Ling rate limit during a flex outage dropped the pass the fallback exists to save.
+- fix: the system prompt's verification guidance says to change code at its source, not in build output or a deployed copy; to check the outcome asked for, not an exit code or HTTP status; and to verify a change that loads at process start in a fresh process (`theoses -p --no-session -ne -e <extension> "<probe>"`) instead of restarting itself (#531, issue #530).
+- feat: `scripts/git-state-hook.mjs`, a `PostToolUse` command hook that tells the agent the branch, commit, distance from upstream, nearest tag and uncommitted changes of the repo a bash, edit or write call worked in: once per repo per session, then only when the branch or commit changes. Enable it under `hooks.PostToolUse` in settings.json (#531).
+
 ## [1.0.123] - 2026-10-12
 
 - fix: a failed OpenRouter (or other openai-completions) model call records what threw it (#527). The 2026-10-05 weekly eval lost 4 tasks to a bare "The operation was aborted" about 15s into a call, with no stack or cause to trace. A failure the caller did not ask for now adds a `provider_request_failure` diagnostic to the reply: the error's name, message, code, stack and cause, `elapsedMs`, `headersAtMs` (when a successful response started streaming) and `status` (set for an HTTP error response). Caller aborts add nothing.
