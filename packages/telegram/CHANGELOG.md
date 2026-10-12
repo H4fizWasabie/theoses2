@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.0.124] - 2026-10-13
+
+- fix: a turn cut off by a service restart is resumed once when the bot starts again, threaded to the message it was answering, and told to check the change and report (#531). Theoses restarting its own service used to kill the turn before it replied. A resumed turn that is cut off again gets a short notice instead of a second resume. The running turn is recorded in `telegram-running-turn.json` in the agent dir.
+
 ## [1.0.118] - 2026-10-04
 
 - feat: a text message sent while a turn is running is steered into that turn instead of queued behind it, so the owner can redirect a task or ask about it mid-run. It gets a 👀 reaction, the turn reads it after its current tool call, and the answer is sent at once as a reply to it instead of being replaced by the final reply. Attachments, albums and commands still queue; `/stop` also drops a steered message the turn hasn't read.
