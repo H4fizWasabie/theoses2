@@ -11,6 +11,23 @@
 						}
 					},
 					"maxTokens": 65536
+				},
+				"deepseek/deepseek-v4.1-flash": {
+					"compat": {
+						"openRouterRouting": {
+							"order": ["Morph", "DeepInfra"],
+							"allow_fallbacks": false
+						}
+					}
+				},
+				"openai/gpt-6-luna": {
+					"compat": {
+						"openRouterRouting": {
+							"only": ["openai/flex"],
+							"allow_fallbacks": false
+						}
+					},
+					"thinkingLevelMap": { "xhigh": "xhigh", "max": "max" }
 				}
 			}
 		}
