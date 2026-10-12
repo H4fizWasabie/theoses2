@@ -311,7 +311,8 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 
 		const maxStreamDurationMs = options?.maxStreamDurationMs ?? DEFAULT_STREAM_DURATION_MS;
 		const streamDurationSignal = AbortSignal.timeout(maxStreamDurationMs);
-		// Elapsed ms when response headers arrived; tells a failure before headers from one mid-stream.
+		// Elapsed ms when a successful response's headers arrived; tells a failure before the stream from one mid-stream.
+		// An HTTP error response throws before this is set; the diagnostic's `status` marks that case.
 		let headersAtMs: number | undefined;
 
 		try {
@@ -741,6 +742,7 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 					createAssistantMessageDiagnostic("provider_request_failure", error, {
 						elapsedMs: Date.now() - output.timestamp,
 						headersAtMs,
+						status: normalizeProviderError(error).status,
 						...(cause !== undefined ? { cause: extractDiagnosticError(cause) } : {}),
 					}),
 				);

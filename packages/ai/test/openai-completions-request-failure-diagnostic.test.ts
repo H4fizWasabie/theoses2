@@ -52,6 +52,24 @@ describe("openai-completions request failure diagnostic", () => {
 		});
 		expect(typeof diagnostic?.details?.headersAtMs).toBe("number");
 		expect(typeof diagnostic?.details?.elapsedMs).toBe("number");
+		expect(diagnostic?.details?.status).toBeUndefined();
+	});
+
+	it("marks an HTTP error response with its status", async () => {
+		const serverError: FetchFunction = async () =>
+			new Response(JSON.stringify({ error: { message: "upstream overloaded" } }), {
+				status: 503,
+				headers: { "content-type": "application/json" },
+			});
+		const message = await streamSimple(model, context, {
+			apiKey: "test-key",
+			fetch: serverError,
+			maxRetries: 0,
+		}).result();
+
+		const diagnostic = message.diagnostics?.find((d) => d.type === "provider_request_failure");
+		expect(diagnostic?.details).toMatchObject({ status: 503 });
+		expect(diagnostic?.details?.headersAtMs).toBeUndefined();
 	});
 
 	it("records nothing when the caller aborts", async () => {
