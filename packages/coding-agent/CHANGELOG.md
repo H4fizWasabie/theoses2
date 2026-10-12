@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.0.125] - 2026-10-13
+
+- fix: the git state hook (`scripts/git-state-hook.mjs`) finds the repos a bash command reaches through `git -C` or a `cd` after its first command, not only a leading `cd`, following relative `cd` chains; each repo a command touches is reported on its own line (#534).
+
 ## [1.0.124] - 2026-10-13
 
 - fix: the background rate-limit fallback tries GPT-6 Luna on OpenAI's flex tier, then its standard tier (`order: ["openai/flex", "openai"]`), instead of flex only (#531). Flex was unavailable for 21 of 25 eval runs on 2026-10-12, so a Ling rate limit during a flex outage dropped the pass the fallback exists to save.
