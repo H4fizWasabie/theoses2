@@ -96,11 +96,13 @@ const DEFAULTS: ResolvedBackgroundModelSetting = {
  * The explorer and research run on Novita at bf16 (as in production); the task-plan reviewer (issue #382)
  * deliberately uses a different model family from the worker, whose blind spots it would otherwise share.
  * GPT-6 Luna is the one the ICM workspaces already run on. The fallback catches consolidation calls whose
- * provider stays rate-limited through the retries (background-call.ts); it is GPT-6 Luna pinned to OpenAI's
- * half-price flex tier (abah 2026-10-06). `order` also takes an endpoints API `tag` such as "openai/flex".
+ * provider stays rate-limited through the retries (background-call.ts); it is GPT-6 Luna on OpenAI's
+ * half-price flex tier (abah 2026-10-06), then the standard tier: flex was unavailable for 21 of 25 eval
+ * runs on 2026-10-12, and a fallback with no way out drops the pass it exists to save (issue #530).
+ * `order` also takes an endpoints API `tag` such as "openai/flex".
  */
 const NAME_DEFAULTS: Partial<Record<BackgroundModelName, ResolvedBackgroundModelSetting>> = {
-	fallback: { model: "openai/gpt-6-luna", providers: ["openai/flex"], quantizations: [] },
+	fallback: { model: "openai/gpt-6-luna", providers: ["openai/flex", "openai"], quantizations: [] },
 	explorer: { model: DEFAULTS.model, providers: ["Novita"], quantizations: ["bf16"] },
 	research: { model: DEFAULTS.model, providers: ["Novita"], quantizations: ["bf16"] },
 	reviewer: { model: "openai/gpt-6-luna", providers: ["OpenAI"], quantizations: [] },

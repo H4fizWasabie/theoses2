@@ -1,14 +1,21 @@
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Update } from "grammy/types";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The bot's whole view of the agent is one Channel Session per chat; each test installs its fake here.
-const registry = vi.hoisted(() => ({ session: undefined as unknown, gate: undefined as Promise<void> | undefined }));
+const registry = vi.hoisted(() => ({
+	session: undefined as unknown,
+	gate: undefined as Promise<void> | undefined,
+	agentDir: "",
+}));
 
 vi.mock("theoses-coding-agent", async (importOriginal) => ({
 	describeFinalError: (await importOriginal<{ describeFinalError: typeof describeFinalError }>()).describeFinalError,
 	describeRewindResult: (await importOriginal<{ describeRewindResult: unknown }>()).describeRewindResult,
 	configureHttpDispatcher: vi.fn(),
-	getAgentDir: vi.fn(() => "/tmp/telegram-test-agent-dir"),
+	getAgentDir: vi.fn(() => registry.agentDir),
 	createChannelSessions: vi.fn(() => ({
 		open: async () => {
 			await registry.gate;
@@ -19,6 +26,14 @@ vi.mock("theoses-coding-agent", async (importOriginal) => ({
 
 import type { AgentSessionEvent, ChannelInput, describeFinalError, PromptResult } from "theoses-coding-agent";
 import { createTelegramBot } from "../src/index.ts";
+
+// Each test gets its own agent dir: a turn a test leaves running would otherwise be resumed by the next test's bot.
+beforeEach(() => {
+	registry.agentDir = mkdtempSync(join(tmpdir(), "telegram-test-agent-"));
+});
+afterEach(() => {
+	rmSync(registry.agentDir, { recursive: true, force: true });
+});
 
 /** A fake Channel Session whose turns run `turn`; `isRunning` is true while one does. */
 function fakeChannelSession(
@@ -702,5 +717,87 @@ describe("Telegram /rewind", () => {
 		expect(session.rewind).not.toHaveBeenCalled();
 		release?.();
 		await turn;
+	});
+});
+
+describe("Telegram turn cut off by a restart (issue #530)", () => {
+	const markerPath = () => join(registry.agentDir, "telegram-running-turn.json");
+	const leaveMarker = (restartResume: boolean) =>
+		writeFileSync(markerPath(), JSON.stringify({ chat: "1", chatId: 1, replyTo: 7, restartResume }));
+
+	/** A bot whose every Telegram API call is recorded instead of sent, from before its first call. */
+	function startBot() {
+		const bot = createTelegramBot({ token: "test-token", ownerChatId: "1", cwd: "/tmp/telegram-test" });
+		bot.botInfo = { id: 99, is_bot: true, first_name: "Test", username: "t" } as never;
+		const calls: Array<{ method: string; payload: Record<string, unknown> }> = [];
+		bot.api.config.use(async (_prev, method, payload) => {
+			calls.push({ method, payload: payload as Record<string, unknown> });
+			return { ok: true, result: method === "sendChatAction" ? true : { message_id: 100 } } as never;
+		});
+		return { bot, calls };
+	}
+
+	it("marks a turn while it runs and clears the mark when it finishes", async () => {
+		let release: (() => void) | undefined;
+		const session = fakeChannelSession(
+			() =>
+				new Promise((resolve) => {
+					release = () => resolve({ outcome: "completed" });
+				}),
+		);
+		const { bot } = startBot();
+
+		const turn = bot.handleUpdate(messageUpdate(1, 1, "restart the service"));
+		await vi.waitFor(() => expect(session.isRunning).toBe(true));
+		expect(existsSync(markerPath())).toBe(true);
+
+		release?.();
+		await turn;
+		await vi.waitFor(() => expect(existsSync(markerPath())).toBe(false));
+	});
+
+	it("resumes the cut-off turn once on startup, threaded to the message it was answering", async () => {
+		leaveMarker(false);
+		const session = fakeChannelSession(async (_input, onEvent) => {
+			onEvent?.({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "Back up; the change is live." }],
+					stopReason: "stop",
+				},
+			} as never);
+			return { outcome: "completed" };
+		});
+		const { calls } = startBot();
+
+		await vi.waitFor(() => expect(session.submit).toHaveBeenCalledTimes(1));
+		const input = session.submit.mock.calls[0]?.[0];
+		expect(input?.text).toContain("restarted while your previous turn was still running");
+		expect(input?.settlementText).toBe("");
+		await vi.waitFor(() =>
+			expect(calls).toContainEqual(
+				expect.objectContaining({ payload: expect.objectContaining({ reply_parameters: { message_id: 7 } }) }),
+			),
+		);
+		await vi.waitFor(() => expect(existsSync(markerPath())).toBe(false));
+	});
+
+	it("does not resume a resumed turn that was cut off again, and says so", async () => {
+		leaveMarker(true);
+		const session = fakeChannelSession(async () => ({ outcome: "completed" }));
+		const { calls } = startBot();
+
+		await vi.waitFor(() =>
+			expect(calls).toContainEqual({
+				method: "sendMessage",
+				payload: expect.objectContaining({
+					text: expect.stringContaining("not resumed a second time"),
+					reply_parameters: { message_id: 7 },
+				}),
+			}),
+		);
+		expect(session.submit).not.toHaveBeenCalled();
+		expect(existsSync(markerPath())).toBe(false);
 	});
 });

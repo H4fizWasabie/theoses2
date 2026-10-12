@@ -146,6 +146,9 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain("<no_blocking_waits>");
 			expect(prompt).toContain("<collaboration>");
 			expect(prompt).toContain("<verification>");
+			// Issue #530: edits to build output were overwritten, and status-only checks passed changes that failed.
+			expect(prompt).toContain("not in a copy something else produces or deploys");
+			expect(prompt).toContain("not a stand-in such as an exit code or an HTTP status");
 			expect(prompt).not.toContain("<destructive_action_caution>");
 			expect(prompt).toContain("<remember_guidance>");
 			expect(prompt).toContain("<working_note_guidance>");

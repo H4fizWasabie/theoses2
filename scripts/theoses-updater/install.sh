@@ -25,6 +25,14 @@ chmod +x /opt/theoses-updater/update.sh /opt/theoses-updater/rollback.sh /opt/th
 
 mkdir -p /opt/theoses2-releases
 
+# `theoses` on PATH, following the current release, so the agent can test a change in a fresh process
+# (`theoses -p --no-session ...`) instead of restarting the service it runs in (issue #530).
+cat > /usr/local/bin/theoses <<'EOF'
+#!/usr/bin/env bash
+exec node /opt/theoses2-releases/current/packages/coding-agent/dist/cli.js "$@"
+EOF
+chmod +x /usr/local/bin/theoses
+
 cp "${script_dir}/theoses-updater.service" "${script_dir}/theoses-updater.timer" /etc/systemd/system/
 
 systemctl daemon-reload
