@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Bot, type Context, InputFile } from "grammy";
 import type { Message } from "grammy/types";
@@ -44,6 +44,59 @@ const AUTO_RESUME_INPUT: ChannelInput = {
 	text: "[automatic resume] Your previous turn stopped on a provider error before finishing. Continue the task from where you left off.",
 	settlementText: "",
 };
+
+/**
+ * The prompt for a turn the service restart cut off. Theoses restarts its own service to load a change
+ * (`systemctl restart theoses2-telegram`), which kills the turn before it can reply; the owner then had to
+ * ask "Is it done theo?" (issue #530). Its settlementText is "", as for AUTO_RESUME_INPUT.
+ */
+const RESTART_RESUME_INPUT: ChannelInput = {
+	text: "[automatic resume] The Theoses service restarted while your previous turn was still running, so that turn ended without a reply. If the restart was part of your task, check that the change took effect now that the service is back. Then report the outcome.",
+	settlementText: "",
+};
+
+/** The turn that was running, written when it starts and removed when it finishes; left behind, the process died mid-turn. */
+interface RunningTurnMarker {
+	chat: string;
+	chatId: number;
+	replyTo: number;
+	/** The turn was itself a restart resume, which gets no second one: a turn that restarts every time would loop. */
+	restartResume: boolean;
+}
+
+const runningTurnPath = (): string => join(getAgentDir(), "telegram-running-turn.json");
+
+function markTurnRunning(marker: RunningTurnMarker): void {
+	try {
+		writeFileSync(runningTurnPath(), `${JSON.stringify(marker)}\n`);
+	} catch (error) {
+		console.error("Failed to record the running telegram turn:", error);
+	}
+}
+
+function clearRunningTurn(): void {
+	try {
+		rmSync(runningTurnPath(), { force: true });
+	} catch (error) {
+		console.error("Failed to clear the running telegram turn:", error);
+	}
+}
+
+/** The turn a previous process left running, if any; removed so it is handled once. */
+function takeInterruptedTurn(): RunningTurnMarker | undefined {
+	let raw: string;
+	try {
+		raw = readFileSync(runningTurnPath(), "utf-8");
+	} catch {
+		return undefined;
+	}
+	clearRunningTurn();
+	try {
+		return JSON.parse(raw) as RunningTurnMarker;
+	} catch {
+		return undefined;
+	}
+}
 
 /**
  * Bot API 10.1 (June 2026) added sendRichMessage/InputRichMessage, with native pipe-table
@@ -213,6 +266,11 @@ export interface TelegramBotOptions {
 interface TurnRequest {
 	album: Message[];
 	albumComplete?: Promise<void>;
+	/**
+	 * Set for the turn that follows a restart, which answers no new message: "resume" continues the cut-off
+	 * turn; "again" only tells the owner, because the cut-off turn was itself a restart resume.
+	 */
+	restart?: "resume" | "again";
 }
 
 function stopReply(decision: StopDecision): string {
@@ -317,7 +375,15 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 			if (signal.aborted) return undefined;
 			const session = await channelSessions.open(chat);
 
-			const inbound = resume ? undefined : readInbound(request.album[0]);
+			if (request.restart === "again") {
+				await bot.api.sendMessage(
+					id,
+					"The service restarted again during the resumed turn, so it was not resumed a second time. Ask me to check the task.",
+					{ reply_parameters: { message_id: replyTo } },
+				);
+				return undefined;
+			}
+			const inbound = resume || request.restart ? undefined : readInbound(request.album[0]);
 			if (inbound?.kind === "model") {
 				let reply: string;
 				if (inbound.ref) {
@@ -346,27 +412,41 @@ export function createTelegramBot(options: TelegramBotOptions = {}): Bot {
 
 			const input = resume
 				? AUTO_RESUME_INPUT
-				: await resolvePrompt(request.album, {
-						download: (fileId) => downloadFile(bot, token, fileId),
-						storeArtifact: (label, fileName, data) => session.storeArtifact(label, fileName, data),
-					});
+				: request.restart
+					? RESTART_RESUME_INPUT
+					: await resolvePrompt(request.album, {
+							download: (fileId) => downloadFile(bot, token, fileId),
+							storeArtifact: (label, fileName, data) => session.storeArtifact(label, fileName, data),
+						});
 			const view = createTurnView(
 				grammyOutbox(bot, id, () => refreshTyping(chat, id)),
 				{ replyTo, toolCallDetail: toolCallDetailEnabled },
 			);
 			const turn = { session, view };
 			activeTurns.set(chat, turn);
+			markTurnRunning({ chat, chatId: id, replyTo, restartResume: request.restart !== undefined });
 			return {
 				session,
 				input,
 				onEvent: view.onEvent,
 				finish: (result, opts) => {
+					clearRunningTurn();
 					if (activeTurns.get(chat) === turn) activeTurns.delete(chat);
 					return view.finish(result, opts);
 				},
 			};
 		});
 	};
+
+	// A turn left running by the previous process was cut off by a restart: resume it once, threaded to the
+	// message it was answering, so the owner gets the outcome instead of silence.
+	const interrupted = takeInterruptedTurn();
+	if (interrupted?.chat === ownerChatId) {
+		queueTurn(interrupted.chat, interrupted.chatId, interrupted.replyTo, {
+			album: [],
+			restart: interrupted.restartResume ? "again" : "resume",
+		});
+	}
 
 	/**
 	 * Hands a plain text message to the chat's running turn, which reads it after its current tool calls, as
