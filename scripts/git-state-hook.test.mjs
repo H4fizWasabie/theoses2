@@ -63,6 +63,36 @@ test("speaks again when the branch changes", async (t) => {
 	assert.match(text, /is on branch fix\/thing at [0-9a-f]+, no upstream, nearest tag v1\.0\.0/);
 });
 
+test("finds the repo of a git -C and of a cd that is not the first command", async (t) => {
+	const { root, clone, stateDir } = await fixture(t);
+
+	const viaGitC = runHook(stateDir, { toolName: "bash", cwd: root, toolInput: { command: `git -C ${clone} log -1` } });
+	assert.match(viaGitC, new RegExp(`${clone} is on branch main`));
+
+	git(clone, "checkout", "-q", "-b", "next");
+	const viaMidCd = runHook(stateDir, {
+		toolName: "bash",
+		cwd: "/",
+		toolInput: { command: `ls /tmp && cd ${root} && cd clone && git status` },
+	});
+	assert.match(viaMidCd, /is on branch next/);
+});
+
+test("reports every repo one command touches, each on its own line", async (t) => {
+	const { origin, clone, stateDir } = await fixture(t);
+
+	const text = runHook(stateDir, {
+		toolName: "bash",
+		cwd: "/",
+		toolInput: { command: `git -C ${origin} status; (cd ${clone} && git status)` },
+	});
+
+	const lines = text.split("\n");
+	assert.equal(lines.length, 2);
+	assert.match(lines[0], new RegExp(`${origin} is on branch main`));
+	assert.match(lines[1], new RegExp(`${clone} is on branch main`));
+});
+
 test("says nothing outside a git repo", async (t) => {
 	const { root, stateDir } = await fixture(t);
 	assert.equal(runHook(stateDir, { toolName: "bash", cwd: root, toolInput: { command: "ls" } }), undefined);
