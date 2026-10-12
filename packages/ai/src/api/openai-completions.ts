@@ -39,6 +39,8 @@ import type {
 } from "../types.ts";
 import {
 	appendAssistantMessageDiagnostic,
+	createAssistantMessageDiagnostic,
+	extractDiagnosticError,
 	isStopWithHiddenOutput,
 	STOP_WITHOUT_TOOL_CALL_DIAGNOSTIC,
 	summarizeStreamChunk,
@@ -309,6 +311,9 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 
 		const maxStreamDurationMs = options?.maxStreamDurationMs ?? DEFAULT_STREAM_DURATION_MS;
 		const streamDurationSignal = AbortSignal.timeout(maxStreamDurationMs);
+		// Elapsed ms when a successful response's headers arrived; tells a failure before the stream from one mid-stream.
+		// An HTTP error response throws before this is set; the diagnostic's `status` marks that case.
+		let headersAtMs: number | undefined;
 
 		try {
 			const apiKey = getClientApiKey(model.provider, options?.apiKey, options?.headers);
@@ -344,6 +349,7 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 					signal: options?.signal,
 				},
 			);
+			headersAtMs = Date.now() - output.timestamp;
 			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 			stream.push({ type: "start", partial: output });
 
@@ -725,6 +731,21 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 				if (rawMetadata && !output.errorMessage.includes(String(rawMetadata))) {
 					output.errorMessage += `\n${rawMetadata}`;
 				}
+			}
+			// The message alone cannot say what threw: a bare "The operation was aborted" in the 2026-10-05
+			// weekly eval had no stack or cause to trace. Keep both, plus timing, for errors the caller did not ask for.
+			// Covers every such error (HTTP status, transport, stream parsing), so the type names the request, not the transport.
+			if (output.stopReason === "error") {
+				const cause = (error as { cause?: unknown } | undefined)?.cause;
+				appendAssistantMessageDiagnostic(
+					output,
+					createAssistantMessageDiagnostic("provider_request_failure", error, {
+						elapsedMs: Date.now() - output.timestamp,
+						headersAtMs,
+						status: normalizeProviderError(error).status,
+						...(cause !== undefined ? { cause: extractDiagnosticError(cause) } : {}),
+					}),
+				);
 			}
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 			stream.end();
