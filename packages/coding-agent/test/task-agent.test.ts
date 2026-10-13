@@ -111,6 +111,8 @@ describe("task sub-agent", () => {
 		expect(result.complete).toBe(true);
 		expect(result.answer).toContain("Changed nothing. Checked big.txt: fine.");
 		expect(result.answer).not.toContain("SECRET-FILE-CONTENT");
+		// Issue #536: both turns' spend, for the tool result that reports it to session stats.
+		expect(result.usage).toMatchObject({ input: 2000, output: 100, totalTokens: 2100 });
 	});
 
 	it("starts from the brief alone, with no recursion into other sub-agent tools", async () => {

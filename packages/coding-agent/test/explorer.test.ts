@@ -358,6 +358,8 @@ describe("explorer (issue #254)", () => {
 		const result = await definition.execute("id-1", { question: "where is X?" }, undefined, undefined, {} as never);
 		expect(result.content[0]).toMatchObject({ type: "text" });
 		expect((result.content[0] as { text: string }).text).toContain("answer");
+		// Issue #536: the explorer's spend rides on the tool result, where session stats count it.
+		expect(result.usage).toMatchObject({ input: 1000, output: 50, totalTokens: 1050 });
 	});
 
 	// Issue #260: the explorer's sub-agent previously bypassed the extension provider hooks

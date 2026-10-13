@@ -18,7 +18,7 @@
  * parallel for independent questions (spawn #3 waits for a slot instead of a 4th running).
  */
 
-import type { Api, Model } from "theoses-ai";
+import type { Api, Model, Usage } from "theoses-ai";
 import { type Static, Type } from "typebox";
 import { createBudgetedAgent } from "./background-agent.ts";
 import { resolveBackgroundModel } from "./background-models.ts";
@@ -54,6 +54,8 @@ export interface ExplorerResult {
 	maxTurns: number;
 	inputTokens: number;
 	outputTokens: number;
+	/** The explorer's model usage, reported on the tool result so session stats count it. */
+	usage: Usage;
 	/** The caps that cut the job off, e.g. "12-turn cap"; empty when none did. */
 	stoppedBy: string[];
 }
@@ -223,6 +225,7 @@ async function runExplorerWithSlot(
 		maxTurns: caps.maxTurns,
 		inputTokens: stats.inputTokens,
 		outputTokens: stats.outputTokens,
+		usage: stats.usage,
 		stoppedBy,
 	};
 }
@@ -281,6 +284,7 @@ export function createExploreToolDefinition(deps: ExploreToolDeps): ToolDefiniti
 			return {
 				content: [{ type: "text", text: `${header}${result.answer}` }],
 				details: result,
+				usage: result.usage,
 			};
 		},
 	};
