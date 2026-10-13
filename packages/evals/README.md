@@ -162,6 +162,16 @@ The 2026-10-12 bake-off on the coding set (24 cases, thinking `max`), with each 
 
 DeepSeek's estimate uses the catalog price ($0.15 per M input), but Morph, the first provider in its pin, charges $0.042, so its real cost is lower. Luna on OpenAI's flex tier could not be measured that day: 21 of 25 runs failed with "Flex processing is temporarily unavailable".
 
+The 2026-10-13 rerun gave each model 3 passes of the coding set (25 cases, 75 runs, thinking `max`, production's providers and 300s stream limit). A run that hit the 300s task timeout counts as wrong. Cost is repriced at the first pinned provider's rate (Luna: flex to standard) plus the explorer's spend, which the eval's own figure left out before #538:
+
+| Model | Correct | Every pass | Timeouts | Median latency (replay) | Cost per run |
+|---|---|---|---|---|---|
+| deepseek/deepseek-v4.1-flash | 70/75 | 22/25 | 1 | 23s (67s) | $0.0023 |
+| openai/gpt-6-luna | 68/75 | 21/25 | 6, all replay | 45s (221s) | $0.0011 to $0.0020 |
+| z-ai/glm-5.3-flash | 66/75 | 20/25 | 2 | 43s (94s) | $0.0024 |
+
+DeepSeek missed `misleading-error-shallow-merge` every pass (so did GLM). Luna answered 68 of the 69 runs it finished correctly but was too slow on real fixes: `promotion-current-turn` timed out in all 3 passes. Luna called `explore` 0.7 times per run, the others almost never. DeepSeek is the pick for the main model: the most correct, 1.5 to 3 times faster on real fixes, and the same cost as GLM; its price moves with the provider and the official API's peak hours. One case is about 1.4 points, so the correctness gaps are within a few cases.
+
 CI pins each model to the providers production routes it to, from `models.production.json`, with no fallback outside the list:
 - GLM 5.3 flash: GMICloud, then Novita, at fp8.
 - DeepSeek v4.1 flash: Morph, then DeepInfra.
