@@ -164,6 +164,8 @@ describe("researcher", () => {
 			tavilyCalls: 0,
 			stoppedBy: [`${RESEARCH_CAPS.maxTurns}-turn cap`],
 		});
+		// Issue #536: the job's model spend rides on the tool result, where session stats count it.
+		expect(result.usage).toMatchObject({ input: turns * 1000, output: turns * 50 });
 	});
 
 	it("blocks until the job finishes and returns the report, also saved to a file", async () => {

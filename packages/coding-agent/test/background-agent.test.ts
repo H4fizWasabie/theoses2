@@ -72,7 +72,14 @@ describe("createBudgetedAgent", () => {
 
 		const stats = await handle.prompt("question");
 
-		expect(stats).toEqual({ turns: 1, inputTokens: 1000, outputTokens: 50, cost: 0, stoppedByBudget: false });
+		expect(stats).toEqual({
+			turns: 1,
+			inputTokens: 1000,
+			outputTokens: 50,
+			cost: 0,
+			usage: assistant("").usage,
+			stoppedByBudget: false,
+		});
 		expect(lastAssistantText(handle.agent.state.messages)).toBe("the answer");
 		expect(endedOnToolCall(handle.agent.state.messages)).toBe(false);
 	});
@@ -141,7 +148,17 @@ describe("createBudgetedAgent", () => {
 	});
 
 	it("accumulates turns/tokens across repeat prompt() calls on the same handle", async () => {
-		const { runtime } = fakeRuntime(assistant("first"), assistant("second"));
+		const cached = assistant("second", {
+			usage: {
+				input: 100,
+				output: 50,
+				cacheRead: 900,
+				cacheWrite: 0,
+				totalTokens: 1050,
+				cost: { input: 0.1, output: 0.2, cacheRead: 0.01, cacheWrite: 0, total: 0.31 },
+			},
+		});
+		const { runtime } = fakeRuntime(assistant("first"), cached);
 		const handle = createBudgetedAgent({
 			systemPrompt: "test",
 			model,
@@ -154,7 +171,21 @@ describe("createBudgetedAgent", () => {
 		await handle.prompt("first question");
 		const stats = await handle.prompt("finalize");
 
-		expect(stats).toEqual({ turns: 2, inputTokens: 2000, outputTokens: 100, cost: 0, stoppedByBudget: false });
+		expect(stats).toEqual({
+			turns: 2,
+			inputTokens: 2000,
+			outputTokens: 100,
+			cost: 0.31,
+			usage: {
+				input: 1100,
+				output: 100,
+				cacheRead: 900,
+				cacheWrite: 0,
+				totalTokens: 2100,
+				cost: { input: 0.1, output: 0.2, cacheRead: 0.01, cacheWrite: 0, total: 0.31 },
+			},
+			stoppedByBudget: false,
+		});
 		expect(lastAssistantText(handle.agent.state.messages)).toBe("second");
 	});
 
@@ -201,7 +232,7 @@ describe("createBudgetedAgent", () => {
 
 			expect(result.finalized).toBe(true);
 			expect(result.text).toBe("Summary: final");
-			expect(result.stats).toEqual({
+			expect(result.stats).toMatchObject({
 				turns: 2,
 				inputTokens: 2000,
 				outputTokens: 100,

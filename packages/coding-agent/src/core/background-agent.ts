@@ -21,7 +21,7 @@ import {
 	type AgentTool,
 	type ThinkingLevel,
 } from "theoses-agent-core";
-import type { Api, AssistantMessage, Model, ModelsRequestTransforms } from "theoses-ai";
+import type { Api, AssistantMessage, Model, ModelsRequestTransforms, Usage } from "theoses-ai";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { ProviderHooks } from "./provider-hooks.ts";
 import { logServedProvider } from "./served-provider-log.ts";
@@ -98,6 +98,8 @@ export interface BudgetedAgentTurnStats {
 	outputTokens: number;
 	/** Total cost of the run's assistant messages, from their reported usage. */
 	cost: number;
+	/** The run's assistant-message usage summed, for the tool result that reports it to session stats (issue #536). */
+	usage: Usage;
 	/** True once maxTurns or maxInputTokens was hit. */
 	stoppedByBudget: boolean;
 }
@@ -153,6 +155,14 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 	let inputTokens = 0;
 	let outputTokens = 0;
 	let cost = 0;
+	const total: Usage = {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 0,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
 	let stoppedByBudget = false;
 	const hooks = options.providerHooks;
 
@@ -196,6 +206,16 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 				inputTokens += (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
 				outputTokens += usage.output ?? 0;
 				cost += usage.cost?.total ?? 0;
+				total.input += usage.input ?? 0;
+				total.output += usage.output ?? 0;
+				total.cacheRead += usage.cacheRead ?? 0;
+				total.cacheWrite += usage.cacheWrite ?? 0;
+				total.totalTokens += usage.totalTokens ?? 0;
+				total.cost.input += usage.cost?.input ?? 0;
+				total.cost.output += usage.cost?.output ?? 0;
+				total.cost.cacheRead += usage.cost?.cacheRead ?? 0;
+				total.cost.cacheWrite += usage.cost?.cacheWrite ?? 0;
+				total.cost.total += usage.cost?.total ?? 0;
 			}
 		} else if (event.type === "tool_execution_start") {
 			options.onStatus?.(`${event.toolName}: ${summarizeArgs(event.args)}`);
@@ -208,7 +228,7 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 
 	const prompt = async (text: string): Promise<BudgetedAgentTurnStats> => {
 		await agent.prompt(text);
-		return { turns, inputTokens, outputTokens, cost, stoppedByBudget };
+		return { turns, inputTokens, outputTokens, cost, usage: structuredClone(total), stoppedByBudget };
 	};
 
 	const answerOf = (stats: BudgetedAgentTurnStats, isAnswer: PromptToAnswerOptions["isAnswer"]) => {

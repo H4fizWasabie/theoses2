@@ -12,7 +12,7 @@
  */
 
 import type { AgentOptions, ThinkingLevel } from "theoses-agent-core";
-import type { Api, Model } from "theoses-ai";
+import type { Api, Model, Usage } from "theoses-ai";
 import { type Static, Type } from "typebox";
 import { createBudgetedAgent } from "./background-agent.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
@@ -44,6 +44,8 @@ export interface TaskResult {
 	turnsUsed: number;
 	inputTokens: number;
 	outputTokens: number;
+	/** The sub-agent's model usage, reported on the tool result so session stats count it. */
+	usage: Usage;
 	/** The budget limits the run reached, e.g. "30-turn cap"; empty when none. */
 	stoppedBy: string[];
 }
@@ -142,6 +144,7 @@ export async function runTask(options: RunTaskOptions): Promise<TaskResult> {
 		turnsUsed: stats.turns,
 		inputTokens: stats.inputTokens,
 		outputTokens: stats.outputTokens,
+		usage: stats.usage,
 		stoppedBy,
 	};
 }
@@ -197,7 +200,7 @@ export function createTaskToolDefinition(deps: TaskToolDeps): ToolDefinition<typ
 				toolOptions: deps.toolOptions,
 				onStatus: (status) => onUpdate?.({ content: [{ type: "text", text: status }], details: undefined }),
 			});
-			return { content: [{ type: "text", text: result.answer }], details: result };
+			return { content: [{ type: "text", text: result.answer }], details: result, usage: result.usage };
 		},
 	};
 }

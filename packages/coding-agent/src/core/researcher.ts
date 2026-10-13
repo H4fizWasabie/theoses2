@@ -14,6 +14,7 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Usage } from "theoses-ai";
 import { type Static, Type } from "typebox";
 import { getAgentDir } from "../config.ts";
 import { createBudgetedAgent } from "./background-agent.ts";
@@ -85,6 +86,8 @@ export interface ResearchResult {
 	tavilyCalls: number;
 	/** The limits the job reached, e.g. "30-turn cap"; empty when none. */
 	stoppedBy: string[];
+	/** The researcher's model usage, reported on the tool result so session stats count it. Tavily calls are not in it. */
+	usage: Usage;
 }
 
 export interface RunResearchOptions {
@@ -146,6 +149,7 @@ export async function runResearch(options: RunResearchOptions): Promise<Research
 		inputTokens: stats.inputTokens,
 		tavilyCalls: budget.used,
 		stoppedBy,
+		usage: stats.usage,
 	};
 	console.error(
 		`[research] ${status === "none" ? "no report" : status}: ${result.turnsUsed} turns, ${Math.round(result.inputTokens / 1000)}K in, ${result.tavilyCalls} searches${stoppedBy.length > 0 ? `, hit ${stoppedBy.join(", ")}` : ""}`,
@@ -184,6 +188,7 @@ export function createResearchToolDefinition(deps: ResearchToolDeps): ToolDefini
 	const reply = (text: string, details?: Omit<ResearchResult, "report">) => ({
 		content: [{ type: "text" as const, text }],
 		details,
+		usage: details?.usage,
 	});
 	return {
 		name: "research",
