@@ -58,11 +58,15 @@ jobs:
     # Forks have no secret; skip there instead of failing.
     if: github.repository == 'H4fizWasabie/theoses2'
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    # 3 passes of a slow model (GPT-6 Luna on OpenAI's flex tier) took 132 minutes on 2026-10-13.
+    timeout-minutes: 300
     permissions:
       contents: read
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      # Production's limit on one response stream (the VPS theoses.env). The 60s default cut slow flex responses
+      # off and retried them, so 11 of Luna's replay runs timed out on 2026-10-13 where production would finish.
+      THEOSES_MAX_STREAM_DURATION_MS: "300000"
       SUITE: ${{ inputs.suite || 'coding' }}
       PASSES: ${{ inputs.passes || '1' }}
       MODEL: ${{ inputs.model || 'z-ai/glm-5.3-flash' }}
