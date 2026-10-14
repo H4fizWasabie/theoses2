@@ -1,3 +1,12 @@
 [mcp_servers.graft]
 command = "graft"
 args = ["mcp"]
+
+[mcp_servers.graft.tools.graft_find_all]
+approval_mode = "approve"
+
+[mcp_servers.graft.tools.graft_trace_calls]
+approval_mode = "approve"
+
+[mcp_servers.graft.tools.graft_find_code]
+approval_mode = "approve"
