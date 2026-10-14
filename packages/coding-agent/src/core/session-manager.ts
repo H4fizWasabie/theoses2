@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import {
 	appendFileSync,
 	closeSync,
+	copyFileSync,
 	createReadStream,
 	existsSync,
 	fsyncSync,
@@ -32,7 +33,7 @@ import {
 	createCustomMessage,
 } from "./messages.ts";
 import { type SessionLookupKey, sessionLookupKey } from "./session-cwd.ts";
-import { externalizeImages, hydrateImages } from "./session-images.ts";
+import { copySessionImages, externalizeImages, hydrateImages } from "./session-images.ts";
 import {
 	TASK_BOUNDARY_CUSTOM_TYPE,
 	TASK_DESCRIPTOR_CUSTOM_TYPE,
@@ -566,6 +567,34 @@ function getDefaultSessionDirPath(cwd: string, agentDir: string = getDefaultAgen
 	const resolvedAgentDir = resolvePath(agentDir);
 	const safePath = `--${resolvedCwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
 	return join(resolvedAgentDir, "sessions", safePath);
+}
+
+/**
+ * Where a session log that is being copied keeps its saved images: beside the log, else under the default sessions
+ * directory for its cwd (a log written with `--session` somewhere else). Image references are relative to it. Beside
+ * comes first: an older copy of the session elsewhere can leave a stale directory under the default one.
+ */
+function sourceArtifactDir(sessionFile: string, header: SessionHeader): string {
+	const beside = join(dirname(sessionFile), "artifacts", header.id);
+	if (existsSync(beside) || !header.cwd) return beside;
+	return join(getDefaultSessionDirPath(header.cwd), "artifacts", header.id);
+}
+
+/**
+ * Copies a session log to `destinationFile`, keeping its id, and its saved images with it: the log's image references
+ * are relative to its own artifact directory, which a plain file copy leaves behind.
+ */
+export function copySessionLog(sourceFile: string, destinationFile: string): void {
+	let header: SessionHeader | null = null;
+	try {
+		header = readSessionHeader(sourceFile);
+	} catch {
+		// an oversized header: opening the copy still reads it, only its images stay behind
+	}
+	copyFileSync(sourceFile, destinationFile);
+	if (header) {
+		copySessionImages(sourceArtifactDir(sourceFile, header), join(dirname(destinationFile), "artifacts", header.id));
+	}
 }
 
 export function getDefaultSessionDir(cwd: string, agentDir: string = getDefaultAgentDir()): string {
@@ -2230,11 +2259,24 @@ export class SessionManager {
 		};
 		writeFileSync(newSessionFile, `${JSON.stringify(newHeader)}\n`, { flag: "wx" });
 
-		// Copy all non-header entries from source
+		// Copy all non-header entries from source. Their image references are relative to the source's artifact
+		// directory, so each entry's images are restored from there and saved again beside the fork. One entry at a
+		// time, on a copy: the whole tree of a long session can reference hundreds of images.
+		const sourceArtifacts = sourceArtifactDir(resolvedSourcePath, sourceHeader);
+		const forkArtifactDir = () => {
+			const directory = join(dir, "artifacts", newSessionId);
+			mkdirSync(directory, { recursive: true, mode: 0o700 });
+			return directory;
+		};
+		let missing = 0;
 		for (const entry of sourceEntries) {
-			if (entry.type !== "session") {
-				appendFileSync(newSessionFile, `${JSON.stringify(entry)}\n`);
-			}
+			if (entry.type === "session") continue;
+			const copy = structuredClone(entry);
+			missing += hydrateImages([copy], sourceArtifacts);
+			appendFileSync(newSessionFile, `${JSON.stringify(externalizeImages(copy, forkArtifactDir))}\n`);
+		}
+		if (missing > 0) {
+			console.error(`[session] ${missing} image(s) referenced by ${resolvedSourcePath} could not be restored`);
 		}
 
 		return new SessionManager(resolvedTargetCwd, dir, newSessionFile, true);

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "theoses-ai/compat";
@@ -255,6 +255,24 @@ describe("AgentSessionRuntime characterization", () => {
 			{ type: "session_shutdown", reason: "resume", targetSessionFile: originalSessionFile },
 			{ type: "session_start", reason: "resume", previousSessionFile: secondSessionFile },
 		]);
+	});
+
+	it("imports a session log from another sessions directory with its images", async () => {
+		const { runtime, tempDir } = await createRuntimeForTest(() => {});
+		const data = Buffer.alloc(6000, 5).toString("base64");
+		const source = SessionManager.create(tempDir, join(tempDir, "elsewhere"));
+		source.appendMessage({ role: "user", content: [{ type: "image", data, mimeType: "image/png" }], timestamp: 1 });
+		source.appendMessage(fauxAssistantMessage("a photo"));
+
+		const result = await runtime.importFromJsonl(source.getSessionFile()!);
+
+		expect(result.cancelled).toBe(false);
+		expect(JSON.stringify(runtime.session.sessionManager.getEntries())).toContain(data);
+		if (process.platform !== "win32") {
+			const artifacts = join(runtime.session.sessionManager.getSessionDir(), "artifacts", source.getSessionId());
+			expect(statSync(artifacts).mode & 0o777).toBe(0o700);
+			expect(statSync(join(artifacts, "images")).mode & 0o777).toBe(0o700);
+		}
 	});
 
 	it("honors session_before_switch cancellation for new and resume", async () => {

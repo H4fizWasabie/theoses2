@@ -11,7 +11,7 @@ import {
 	imageFileName,
 	saveImageFile,
 } from "../src/core/session-images.ts";
-import { SessionManager } from "../src/core/session-manager.ts";
+import { getDefaultSessionDir, SessionManager } from "../src/core/session-manager.ts";
 
 /** Canonical base64 of `bytes` filler bytes, so a save-then-load round trip returns the identical string. */
 const image = (bytes = 4000, fill = 7) => Buffer.alloc(bytes, fill).toString("base64");
@@ -287,7 +287,7 @@ describe("session images", () => {
 			expect(JSON.stringify(entry)).toContain(data);
 		});
 
-		it("survives a copy of the log into a new session (fork), saving the images beside the new log", () => {
+		it("survives a branch into a new session, saving the images beside the new log", () => {
 			const { manager } = makeSession();
 			const data = image(6000, 4);
 			manager.appendMessage({
@@ -303,6 +303,67 @@ describe("session images", () => {
 			const raw = readFileSync(branchFile as string, "utf8");
 			expect(raw).not.toContain(data);
 			expect(JSON.stringify(SessionManager.open(branchFile as string).getEntries())).toContain(data);
+		});
+
+		it("survives a fork into another project's sessions, saving the images beside the forked log", () => {
+			const { manager } = makeSession();
+			const data = image(6000, 1);
+			manager.appendMessage({
+				role: "user",
+				content: [{ type: "image", data, mimeType: "image/png" }],
+				timestamp: 1,
+			} as never);
+			manager.appendMessage(assistant("ok"));
+			const otherCwd = join(root, "other");
+			const otherSessions = join(root, "other-sessions");
+			mkdirSync(otherCwd);
+
+			const forkFile = SessionManager.forkFrom(
+				manager.getSessionFile() as string,
+				otherCwd,
+				otherSessions,
+			).getSessionFile();
+
+			expect(readFileSync(forkFile as string, "utf8")).not.toContain(data);
+			expect(JSON.stringify(SessionManager.open(forkFile as string).getEntries())).toContain(data);
+		});
+
+		/** A persisted session with one saved image, for the fork tests. */
+		function sessionWithImage(data: string) {
+			const { manager } = makeSession();
+			manager.appendMessage({
+				role: "user",
+				content: [{ type: "image", data, mimeType: "image/png" }],
+				timestamp: 1,
+			} as never);
+			manager.appendMessage(assistant("ok"));
+			return { file: manager.getSessionFile() as string, id: manager.getSessionId() };
+		}
+
+		it("forks a log whose header has no cwd, with its images", () => {
+			const data = image(6000, 2);
+			const { file } = sessionWithImage(data);
+			const [header, ...rest] = readFileSync(file, "utf8").split("\n");
+			const { cwd: _cwd, ...noCwd } = JSON.parse(header);
+			writeFileSync(file, [JSON.stringify(noCwd), ...rest].join("\n"));
+
+			const forkFile = SessionManager.forkFrom(file, root, join(root, "forks")).getSessionFile();
+
+			expect(JSON.stringify(SessionManager.open(forkFile as string).getEntries())).toContain(data);
+		});
+
+		it("forks from the images beside the log, not an older copy in the default sessions directory", () => {
+			const data = image(6000, 3);
+			const { file, id } = sessionWithImage(data);
+			const stale = join(getDefaultSessionDir(root), "artifacts", id, "images");
+			mkdirSync(stale, { recursive: true });
+			try {
+				const forkFile = SessionManager.forkFrom(file, root, join(root, "forks")).getSessionFile();
+
+				expect(JSON.stringify(SessionManager.open(forkFile as string).getEntries())).toContain(data);
+			} finally {
+				rmSync(getDefaultSessionDir(root), { recursive: true, force: true });
+			}
 		});
 
 		/** An image in the first turn, then a compaction that keeps only the second turn. */
