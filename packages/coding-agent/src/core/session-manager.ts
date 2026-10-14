@@ -44,7 +44,9 @@ import { TASK_PLAN_ENTRY_TYPE, type TaskPlan } from "./task-plan.ts";
 export const CURRENT_SESSION_VERSION = 3;
 
 /** A log at least this large continues in a new log at its next compaction (`SessionManager.rotate`, #519). */
-export const SESSION_ROTATE_BYTES = 16 * 1024 * 1024;
+// ponytail: raised from 16 MB as a stopgap. Rotation carries history with gaps, so /rewind, Plan Review's diff,
+// recall_turns and session stats answer wrongly after it; back to 16 MB once rotation keeps a contiguous tail.
+export const SESSION_ROTATE_BYTES = 64 * 1024 * 1024;
 /** The last entry of a rotated log; `data.to` is the log the session continues in. */
 export const SESSION_ROTATED_ENTRY_TYPE = "session_rotated";
 
