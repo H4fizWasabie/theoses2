@@ -9,8 +9,8 @@ import { exportFromFile } from "../src/core/export-html/index.ts";
 import { backfillFromSessionLog } from "../src/core/memory-consolidation.ts";
 import { FileMemoryStore } from "../src/core/memory-store.ts";
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
-import { findSessionById, sessionIdMatches } from "../src/core/session-discovery.ts";
-import { findMostRecentSession, SessionManager } from "../src/core/session-manager.ts";
+import { findMostRecentSession, findSessionById, sessionIdMatches } from "../src/core/session-discovery.ts";
+import { predecessorBranches, SessionManager } from "../src/core/session-manager.ts";
 
 describe("session discovery after Log Rotation", () => {
 	let root: string;
@@ -35,7 +35,7 @@ describe("session discovery after Log Rotation", () => {
 
 	it("lists only the current log of a healthy chain, using its metadata", async () => {
 		const { manager, a, b, c } = chain();
-		const archived = [a, b].map((path) => readFileSync(path, "utf8"));
+		const original = [a, b].map((path) => readFileSync(path, "utf8"));
 		const key = manager.getChannelSessionKey();
 		for (const sessions of [
 			await SessionManager.list(root, root, undefined, key),
@@ -44,12 +44,12 @@ describe("session discovery after Log Rotation", () => {
 			expect(sessions.map((session) => session.path)).toEqual([c]);
 			expect(sessions[0]).toMatchObject({ id: manager.getSessionId(), name: "current name", messageCount: 3 });
 		}
-		expect([a, b].map((path) => readFileSync(path, "utf8"))).toEqual(archived);
+		expect([a, b].map((path) => readFileSync(path, "utf8"))).toEqual(original);
 	});
 
 	it("resumes old paths at the current log and appends there without changing predecessors", () => {
 		const { a, b, c, manager } = chain();
-		const archived = [a, b].map((path) => readFileSync(path, "utf8"));
+		const original = [a, b].map((path) => readFileSync(path, "utf8"));
 		for (const path of [a, b]) {
 			const resumed = SessionManager.open(path);
 			expect(resumed.getSessionFile()).toBe(c);
@@ -58,7 +58,7 @@ describe("session discovery after Log Rotation", () => {
 			resumed.appendMessage({ role: "user", content: `resumed ${path}`, timestamp: 4 });
 			expect(readFileSync(c, "utf8")).toContain(`resumed ${path}`);
 		}
-		expect([a, b].map((path) => readFileSync(path, "utf8"))).toEqual(archived);
+		expect([a, b].map((path) => readFileSync(path, "utf8"))).toEqual(original);
 		const switched = SessionManager.inMemory(root);
 		switched.setSessionFile(a);
 		expect(switched.getSessionFile()).toBe(c);
@@ -95,15 +95,27 @@ describe("session discovery after Log Rotation", () => {
 		expect(sessionIdMatches(manager.getSessionId(), c)).toBe(true);
 	});
 
+	it("ends the walk back through earlier logs at a damaged link, as ID matching does", () => {
+		const { bId, b, c } = chain();
+		expect([...predecessorBranches(c)]).toHaveLength(2);
+		// B's marker still names C, but C's header no longer continues B's Channel Session.
+		const lines = readFileSync(c, "utf8").trim().split("\n");
+		lines[0] = JSON.stringify({ ...JSON.parse(lines[0]), channelSessionId: "intruder" });
+		writeFileSync(c, `${lines.join("\n")}\n`);
+		expect(readFileSync(b, "utf8")).toContain(c);
+		expect(sessionIdMatches(bId, c)).toBe(false);
+		expect([...predecessorBranches(c)]).toEqual([]);
+	});
+
 	it("refuses a stale handle's append after another handle closes its log by rotation", () => {
 		const manager = SessionManager.create(root, root, { channel: "dashboard", channelSessionId: "owner" });
 		manager.appendMessage({ role: "user", content: "before", timestamp: 1 });
 		const a = manager.getSessionFile()!;
 		const stale = SessionManager.open(a);
 		manager.rotate();
-		const archived = readFileSync(a, "utf8");
+		const original = readFileSync(a, "utf8");
 		expect(() => stale.appendMessage({ role: "user", content: "stale write", timestamp: 2 })).toThrow(/closed/);
-		expect(readFileSync(a, "utf8")).toBe(archived);
+		expect(readFileSync(a, "utf8")).toBe(original);
 		expect(JSON.stringify(stale.getEntries())).not.toContain("stale write");
 	});
 
@@ -142,24 +154,24 @@ describe("session discovery after Log Rotation", () => {
 		},
 	);
 
-	it("reads an archived log exactly without writable repair or redirection, and forks it independently", () => {
+	it("reads an original log exactly without writable repair or redirection, and forks it independently", () => {
 		const { a, aId } = chain();
-		const archived = readFileSync(a, "utf8");
+		const original = readFileSync(a, "utf8");
 		const read = SessionManager.read(a);
 		expect(read.getSessionId()).toBe(aId);
 		expect(JSON.stringify(read.getEntries())).toContain("history in A");
 		expect(JSON.stringify(read.getEntries())).not.toContain("history in B");
 		read.appendMessage({ role: "user", content: "in memory only", timestamp: 6 });
-		expect(readFileSync(a, "utf8")).toBe(archived);
+		expect(readFileSync(a, "utf8")).toBe(original);
 		const fork = SessionManager.forkFrom(a, root, root);
 		expect(JSON.stringify(fork.getEntries())).not.toContain("history in B");
 		expect(SessionManager.open(fork.getSessionFile()!).getSessionId()).toBe(fork.getSessionId());
-		expect(readFileSync(a, "utf8")).toBe(archived);
+		expect(readFileSync(a, "utf8")).toBe(original);
 	});
 
-	it("branches at an archived entry without switching to its successor", () => {
+	it("branches at an original entry without switching to its successor", () => {
 		const { a } = chain();
-		const archived = readFileSync(a, "utf8");
+		const original = readFileSync(a, "utf8");
 		const source = SessionManager.read(a);
 		const entry = source.getEntries().find((entry) => entry.type === "message")!;
 		const forkPath = source.createBranchedSession(entry.id, root)!;
@@ -167,25 +179,25 @@ describe("session discovery after Log Rotation", () => {
 		expect(source.getHeader()?.parentSession).toBe(a);
 		expect(SessionManager.open(forkPath).getSessionId()).toBe(source.getSessionId());
 		expect(JSON.stringify(source.getEntries())).not.toContain("history in B");
-		expect(readFileSync(a, "utf8")).toBe(archived);
+		expect(readFileSync(a, "utf8")).toBe(original);
 	});
 
-	it("branches at an archive's final record without inheriting its closing marker", () => {
+	it("branches at a closed log's final record without inheriting its closing marker", () => {
 		const manager = SessionManager.create(root, root, { channel: "dashboard", channelSessionId: "owner" });
 		manager.appendMessage({ role: "user", content: "original turn", timestamp: 1 });
 		manager.appendMessage(fauxAssistantMessage("original reply"));
 		const a = manager.getSessionFile()!;
 		manager.rotate();
-		const archived = readFileSync(a, "utf8");
+		const original = readFileSync(a, "utf8");
 		const snapshot = SessionManager.read(a);
 		const forkPath = snapshot.createBranchedSession(snapshot.getLeafId()!, root)!;
 		expect(SessionManager.open(forkPath).getSessionId()).toBe(snapshot.getSessionId());
 		snapshot.appendMessage({ role: "user", content: "fork only", timestamp: 2 });
 		expect(readFileSync(forkPath, "utf8")).toContain("fork only");
-		expect(readFileSync(a, "utf8")).toBe(archived);
+		expect(readFileSync(a, "utf8")).toBe(original);
 	});
 
-	it.each(["stale handle", "archive snapshot"])(
+	it.each(["stale handle", "read-only snapshot"])(
 		"preserves artifact bytes when a %s attempts to overwrite them",
 		(kind) => {
 			const manager = SessionManager.create(root, root, { channel: "dashboard", channelSessionId: "owner" });
@@ -195,19 +207,19 @@ describe("session discovery after Log Rotation", () => {
 			const a = manager.getSessionFile()!;
 			const stale = SessionManager.open(a);
 			manager.rotate();
-			const archived = readFileSync(a, "utf8");
+			const original = readFileSync(a, "utf8");
 			const writer = kind === "stale handle" ? stale : SessionManager.read(a);
 			expect(() => writer.storeArtifact("report", "report.pdf", Buffer.from("replacement bytes"))).toThrow();
 			expect(readFileSync(artifact.path, "utf8")).toBe("original bytes");
-			expect(readFileSync(a, "utf8")).toBe(archived);
+			expect(readFileSync(a, "utf8")).toBe(original);
 		},
 	);
 
-	it("exports the exact archive without repairing its source", async () => {
+	it("exports the closed log exactly, without repairing its source", async () => {
 		const { a, aId } = chain();
-		const archived = readFileSync(a, "utf8").trimEnd();
-		writeFileSync(a, archived);
-		const output = await exportFromFile(a, join(root, "archive.html"));
+		const original = readFileSync(a, "utf8").trimEnd();
+		writeFileSync(a, original);
+		const output = await exportFromFile(a, join(root, "closed.html"));
 		const encoded = readFileSync(output, "utf8").match(
 			/<script id="session-data" type="application\/json">([^<]+)<\/script>/,
 		)![1];
@@ -215,12 +227,12 @@ describe("session discovery after Log Rotation", () => {
 		expect(JSON.parse(data).header.id).toBe(aId);
 		expect(data).toContain("history in A");
 		expect(data).not.toContain("history in B");
-		expect(readFileSync(a, "utf8")).toBe(archived);
+		expect(readFileSync(a, "utf8")).toBe(original);
 	});
 
-	it("backfills the specified archive's messages rather than the current log", async () => {
+	it("backfills the specified closed log's messages rather than the current log", async () => {
 		const { a } = chain();
-		const archived = readFileSync(a, "utf8");
+		const original = readFileSync(a, "utf8");
 		const completeSimple = vi.fn(async (_model: Model<Api>, _context: Context) => fauxAssistantMessage("{}"));
 		const faux = registerFauxProvider();
 		const modelRuntime = { getModel: () => faux.getModel(), completeSimple } as unknown as ModelRuntime;
@@ -236,7 +248,7 @@ describe("session discovery after Log Rotation", () => {
 			const input = JSON.stringify(completeSimple.mock.calls[0][1]);
 			expect(input).toContain("history in A");
 			expect(input).not.toContain("history in B");
-			expect(readFileSync(a, "utf8")).toBe(archived);
+			expect(readFileSync(a, "utf8")).toBe(original);
 		} finally {
 			episodicStore.close();
 			faux.unregister();

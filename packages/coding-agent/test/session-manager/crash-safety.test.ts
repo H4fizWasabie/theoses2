@@ -2,7 +2,8 @@ import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync } from "fs
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadEntriesFromFile, SessionManager } from "../../src/core/session-manager.ts";
+import { loadEntriesFromFile } from "../../src/core/session-discovery.ts";
+import { SessionManager } from "../../src/core/session-manager.ts";
 
 describe("SessionManager survives a crash mid-write", () => {
 	let tempDir: string;

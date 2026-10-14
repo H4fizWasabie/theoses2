@@ -13,7 +13,8 @@ import {
 } from "../src/core/file-checkpoints.ts";
 import { selectConsolidationWindow } from "../src/core/memory-promotion.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
-import { SESSION_ROTATE_BYTES, SESSION_ROTATED_ENTRY_TYPE, SessionManager } from "../src/core/session-manager.ts";
+import { SESSION_ROTATED_ENTRY_TYPE } from "../src/core/session-discovery.ts";
+import { SESSION_ROTATE_BYTES, SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import { TASK_BOUNDARY_CUSTOM_TYPE, TASK_DESCRIPTOR_CUSTOM_TYPE } from "../src/core/task-boundary-detector.ts";
 import { currentTaskPlan, TASK_PLAN_ENTRY_TYPE, type TaskPlan } from "../src/core/task-plan.ts";

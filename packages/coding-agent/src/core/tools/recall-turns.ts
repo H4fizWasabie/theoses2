@@ -79,10 +79,7 @@ export function createRecallTurnsToolDefinition(): ToolDefinition<typeof recallT
 			// ponytail: reads every earlier log on each call; stop at enough matches if rotation chains grow long.
 			const { sessionManager } = ctx;
 			const byId = new Map<string, SessionEntry>();
-			for (const branch of [
-				sessionManager.getBranch(),
-				...predecessorBranches(sessionManager.getSessionFile(), sessionManager.getHeader()),
-			]) {
+			for (const branch of [sessionManager.getBranch(), ...predecessorBranches(sessionManager.getSessionFile())]) {
 				for (const entry of branch) if (!byId.has(entry.id)) byId.set(entry.id, entry);
 			}
 			const records = extractTurnRecords([...byId.values()]);

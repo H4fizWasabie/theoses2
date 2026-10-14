@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getDefaultSessionDir, SessionManager } from "../../src/core/session-manager.ts";
+import { getDefaultSessionDir } from "../../src/core/session-discovery.ts";
+import { SessionManager } from "../../src/core/session-manager.ts";
 
 describe("SessionManager.create forwards agentDir when sessionDir is omitted", () => {
 	let tempDir: string;

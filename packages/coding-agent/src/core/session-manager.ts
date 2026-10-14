@@ -34,6 +34,7 @@ import {
 	getDefaultSessionDir,
 	getDefaultSessionDirPath,
 	getSessionHeaderCwd,
+	isRotationMarker,
 	listAllSessions,
 	listSessions,
 	loadEntriesFromFile,
@@ -42,16 +43,8 @@ import {
 	SESSION_ROTATED_ENTRY_TYPE,
 	SessionHeaderScanLimitError,
 	type SessionListProgress,
+	sessionLogsBack,
 } from "./session-discovery.ts";
-
-export {
-	findMostRecentSession,
-	getDefaultSessionDir,
-	loadEntriesFromFile,
-	SESSION_ROTATED_ENTRY_TYPE,
-	type SessionListProgress,
-} from "./session-discovery.ts";
-
 import { copySessionImages, externalizeImages, hydrateImages } from "./session-images.ts";
 import { TASK_BOUNDARY_CUSTOM_TYPE, type TaskBoundaryData } from "./task-boundary-detector.ts";
 import { currentTaskPlan, TASK_PLAN_ENTRY_TYPE } from "./task-plan.ts";
@@ -656,32 +649,19 @@ function terminateTornLine(filePath: string): void {
 }
 
 /**
- * The branch each earlier log of a rotated session ended on, newest log first, each read only when iterated to.
- * A log's predecessor is its `parentSession` only when that log ends with a `session_rotated` marker naming it:
- * forks and branches name a parent too, and that parent's turns belong to another session. The branches overlap
- * where a rotation carried entries forward, with the same ids.
+ * The branch each closed log of a rotated session ended on, newest log first, each read only when iterated to. The
+ * branches overlap where a rotation carried entries forward, with the same ids.
  */
-export function* predecessorBranches(
-	sessionFile: string | undefined,
-	header: SessionHeader | null,
-): Generator<SessionEntry[]> {
-	let file = sessionFile;
-	let parent = header?.parentSession;
-	while (file && parent) {
-		const entries = loadEntriesFromFile(parent);
-		const marker = entries.at(-1);
-		if (
-			marker?.type !== "custom" ||
-			marker.customType !== SESSION_ROTATED_ENTRY_TYPE ||
-			resolve((marker.data as SessionRotatedData).to) !== resolve(file)
-		)
-			return;
+export function* predecessorBranches(sessionFile: string | undefined): Generator<SessionEntry[]> {
+	if (!sessionFile) return;
+	const logs = sessionLogsBack(sessionFile);
+	logs.next(); // the session's own log
+	for (const log of logs) {
+		const entries = loadEntriesFromFile(log);
 		yield buildSessionPath(
 			entries.filter((entry): entry is SessionEntry => entry.type !== "session"),
-			marker.id,
+			entries.at(-1)?.id,
 		);
-		file = parent;
-		parent = (entries[0] as SessionHeader).parentSession;
 	}
 }
 
@@ -710,7 +690,7 @@ export class SessionManager {
 	private labelTimestampsById: Map<string, string> = new Map();
 	private leafId: string | null = null;
 	private _loadedWithUnclosedTurn = false;
-	private _archiveSnapshot = false;
+	private _readOnlySnapshot = false;
 	private _writableLog?: { path: string; size: number };
 
 	/** Rotation grows the closed log; our own appends need not reparse arbitrarily large last messages. */
@@ -1045,7 +1025,7 @@ export class SessionManager {
 	}
 
 	storeArtifact(label: string, fileName: string, data: Uint8Array): string {
-		if (this._archiveSnapshot) throw new Error("Cannot write artifacts to an archive snapshot");
+		if (this._readOnlySnapshot) throw new Error("Cannot write artifacts to a read-only snapshot");
 		this._assertWritable();
 		if (data.byteLength === 0) throw new Error("Artifact cannot be empty");
 		const path = join(this.getArtifactDirectory(), basename(fileName));
@@ -1701,8 +1681,7 @@ export class SessionManager {
 		const pathWithoutLabels: SessionEntry[] = [];
 		let pathParentId: string | null = null;
 		for (const entry of path) {
-			if (entry.type === "label" || (entry.type === "custom" && entry.customType === SESSION_ROTATED_ENTRY_TYPE))
-				continue;
+			if (entry.type === "label" || isRotationMarker(entry)) continue;
 			pathWithoutLabels.push({ ...entry, parentId: pathParentId });
 			pathParentId = entry.id;
 		}
@@ -1754,7 +1733,7 @@ export class SessionManager {
 			this.fileEntries = [header, ...pathWithoutLabels, ...labelEntries];
 			this.sessionId = newSessionId;
 			this.sessionFile = newSessionFile;
-			this._archiveSnapshot = false;
+			this._readOnlySnapshot = false;
 			this._buildIndex();
 
 			// Only write the file now if it contains an assistant message.
@@ -1868,7 +1847,7 @@ export class SessionManager {
 			entries,
 			getDefaultSessionDirPath(cwd),
 		);
-		snapshot._archiveSnapshot = true;
+		snapshot._readOnlySnapshot = true;
 		return snapshot;
 	}
 
@@ -1975,12 +1954,7 @@ export class SessionManager {
 		for (const entry of sourceEntries) {
 			if (entry.type === "session") continue;
 			// The closing marker belongs to the source log, not to an independent fork of its history.
-			if (
-				entry === sourceEntries.at(-1) &&
-				entry.type === "custom" &&
-				entry.customType === SESSION_ROTATED_ENTRY_TYPE
-			)
-				continue;
+			if (entry === sourceEntries.at(-1) && isRotationMarker(entry)) continue;
 			const copy = structuredClone(entry);
 			missing += hydrateImages([copy], sourceArtifacts);
 			appendFileSync(newSessionFile, `${JSON.stringify(externalizeImages(copy, forkArtifactDir))}\n`);
