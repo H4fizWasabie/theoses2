@@ -4,7 +4,7 @@ import { Text } from "theoses-tui";
 import { type Static, Type } from "typebox";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
-import { applyPlanAction, formatPlan, MAX_PLAN_ITEMS, type TaskPlan } from "../task-plan.ts";
+import { applyPlanAction, formatPlan, MAX_PLAN_ITEMS, type TaskPlanPort } from "../task-plan.ts";
 
 const taskPlanSchema = Type.Object({
 	action: StringEnum(["create", "add", "update", "abandon", "show"] as const, {
@@ -53,13 +53,6 @@ const taskPlanSchema = Type.Object({
 
 export type TaskPlanToolInput = Static<typeof taskPlanSchema>;
 
-export interface TaskPlanToolDeps {
-	get: () => TaskPlan | undefined;
-	set: (plan: TaskPlan) => void;
-	/** Messages of the current run so far, for verify evidence and the request text. */
-	runMessages: () => AgentMessage[];
-}
-
 function requestText(messages: AgentMessage[]): string {
 	const user = messages.find((m) => m.role === "user");
 	if (!user || user.role !== "user") return "";
@@ -68,10 +61,7 @@ function requestText(messages: AgentMessage[]): string {
 		: user.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
 }
 
-export function createTaskPlanToolDefinition(
-	deps: TaskPlanToolDeps,
-	cwd: string,
-): ToolDefinition<typeof taskPlanSchema> {
+export function createTaskPlanToolDefinition(taskPlan: TaskPlanPort): ToolDefinition<typeof taskPlanSchema> {
 	return {
 		name: "task_plan",
 		label: "task_plan",
@@ -85,10 +75,14 @@ export function createTaskPlanToolDefinition(
 		],
 		parameters: taskPlanSchema,
 		execute: async (_toolCallId, input: TaskPlanToolInput) => {
-			const runMessages = deps.runMessages();
-			const result = applyPlanAction(deps.get(), input, { runMessages, request: requestText(runMessages), cwd });
+			const runMessages = taskPlan.runMessages();
+			const result = applyPlanAction(taskPlan.get(), input, {
+				runMessages,
+				request: requestText(runMessages),
+				cwd: taskPlan.cwd,
+			});
 			if (result.error || !result.plan) throw new Error(result.error ?? "No task plan.");
-			if (input.action !== "show") deps.set(result.plan);
+			if (input.action !== "show") taskPlan.set(result.plan);
 			return { content: [{ type: "text", text: formatPlan(result.plan) }], details: undefined };
 		},
 		renderCall: (args, theme: Theme) =>

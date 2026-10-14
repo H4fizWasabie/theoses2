@@ -57,6 +57,10 @@ _Avoid_: tool manager, tool catalog
 Applying a chosen model to a session, whichever way it was chosen (`setModel`, cycling scoped models, cycling all available models). One private path in `AgentSession` (`_applyModel`) does it: picks the thinking level for the new model through `resolveThinkingLevel`, the one ladder session startup shares (a scoped model's own level, else the per-model default, else the global default, else the level it is running at), sets the model and records a `model_change`, saves it as the default only when asked to persist, applies the thinking level clamped to what the model supports, then emits `model_select`. The three entry points differ only in how they choose the model; the auth check belongs to `setModel`, since cycling only picks models whose provider already has credentials.
 _Avoid_: model change (that is the session-log entry), model selection
 
+**Task**:
+The stretch of a session between two task boundaries: one user request and its follow-ups. A Task Plan belongs to exactly one Task and never outlives it.
+_Avoid_: job, request (a request is the user message that starts a Task)
+
 **Task Plan**:
 An optional record of a change's obligations, including root cause, siblings and fix scope for a fix, plus verification criteria with declared runtime checks and their Verification Evidence. Distinct from the Working Note's facts; keeping a Task Plan means accounting for its open or deferred obligations, not making planning mandatory.
 _Avoid_: todo list, checklist

@@ -5,7 +5,8 @@ import { join } from "node:path";
 import type { AgentMessage } from "theoses-agent-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { findClaimProblem } from "../src/core/claim-check.ts";
-import { applyPlanAction, type TaskPlan, verifyOutput } from "../src/core/task-plan.ts";
+import { SessionManager } from "../src/core/session-manager.ts";
+import { applyPlanAction, createTaskPlanPort, type TaskPlan, verifyOutput } from "../src/core/task-plan.ts";
 import { commandEffect, isCheckCommand, type ToolRun } from "../src/core/tool-runs.ts";
 import { createBashTool } from "../src/core/tools/bash.ts";
 import { createTaskPlanToolDefinition } from "../src/core/tools/task-plan.ts";
@@ -42,7 +43,7 @@ function create(command = CHECK): TaskPlan {
 			verify: "feature assertions pass",
 			verify_command: command,
 		},
-		{ runMessages: [], request: "fix feature" },
+		{ runMessages: [], request: "fix feature", cwd: process.cwd() },
 	);
 	if (!result.plan) throw new Error(result.error);
 	return result.plan;
@@ -51,13 +52,13 @@ function close(plan: TaskPlan, messages: AgentMessage[], id = 2) {
 	return applyPlanAction(
 		plan,
 		{ action: "update", id, status: "done" },
-		{ runMessages: messages, request: "fix feature" },
+		{ runMessages: messages, request: "fix feature", cwd: process.cwd() },
 	);
 }
 
 describe("runtime verification classification", () => {
 	it.each(["bash", "powershell"])("rejects syntax-only evidence through %s", (name) => {
-		expect(isCheckCommand(run("node --check unrelated.mjs", name))).toBe(false);
+		expect(isCheckCommand(run("node --check unrelated.mjs", name), process.cwd())).toBe(false);
 	});
 	it.each([
 		"node --help",
@@ -97,7 +98,7 @@ describe("runtime verification classification", () => {
 		"bun build app.js",
 		"bun pm",
 	])("rejects information-only %s", (command) => {
-		expect(isCheckCommand(run(command))).toBe(false);
+		expect(isCheckCommand(run(command), process.cwd())).toBe(false);
 		expect(() => create(command)).toThrow(/runtime/);
 	});
 	it.each([
@@ -127,7 +128,7 @@ describe("runtime verification classification", () => {
 		"bash -lc 'true || node tests/feature.mjs'",
 		"if false\nnode tests/feature.mjs\nfi",
 	])("does not credit %s as a runtime check", (command) => {
-		expect(isCheckCommand(run(command))).toBe(false);
+		expect(isCheckCommand(run(command), process.cwd())).toBe(false);
 	});
 	it.each([
 		"node tests/feature.mjs",
@@ -141,7 +142,7 @@ describe("runtime verification classification", () => {
 		"node --check app.js && node tests/feature.mjs",
 		"set -euo pipefail; node tests/feature.mjs | tail -1",
 	])("credits runtime %s", (command) => {
-		expect(isCheckCommand(run(command))).toBe(true);
+		expect(isCheckCommand(run(command), process.cwd())).toBe(true);
 	});
 });
 
@@ -178,7 +179,7 @@ describe("ecosystem-agnostic classification", () => {
 		'mysql -h db.internal -e "select 1"',
 		"curl -fsS http://localhost:8080/health",
 	])("credits an unfamiliar runner: %s", (command) => {
-		expect(isCheckCommand(run(command))).toBe(true);
+		expect(isCheckCommand(run(command), process.cwd())).toBe(true);
 	});
 	it.each([
 		"npm run check",
@@ -212,11 +213,11 @@ describe("ecosystem-agnostic classification", () => {
 		"gradle assemble",
 		"ruby -wc app.rb",
 	])("does not credit a build, lint or listing form: %s", (command) => {
-		expect(isCheckCommand(run(command))).toBe(false);
+		expect(isCheckCommand(run(command), process.cwd())).toBe(false);
 	});
 	it("treats -h as a host flag unless it is the only argument", () => {
-		expect(isCheckCommand(run("psql -h localhost -c 'select 1'"))).toBe(true);
-		expect(isCheckCommand(run("psql -h"))).toBe(false);
+		expect(isCheckCommand(run("psql -h localhost -c 'select 1'"), process.cwd())).toBe(true);
+		expect(isCheckCommand(run("psql -h"), process.cwd())).toBe(false);
 	});
 	it("tells the model how to proceed when nothing qualifies", () => {
 		expect(() => create("npm run lint")).toThrow(/script/);
@@ -286,7 +287,7 @@ describe("declared per-item evidence", () => {
 			applyPlanAction(
 				undefined,
 				{ action: "create", goal: "g", verify: "feature works" },
-				{ runMessages: [], request: "go" },
+				{ runMessages: [], request: "go", cwd: process.cwd() },
 			).error,
 		).toContain("verify_command");
 		expect(create().items[1]).toMatchObject({ verifyCommand: CHECK });
@@ -330,7 +331,7 @@ describe("declared per-item evidence", () => {
 		const plan = applyPlanAction(
 			undefined,
 			{ action: "create", goal: "g", items: ["feature"], verify: "feature works", verify_command: CHECK },
-			{ runMessages: earlier, request: "go" },
+			{ runMessages: earlier, request: "go", cwd: process.cwd() },
 		).plan!;
 		expect(close(plan, earlier).error).toContain("since");
 		expect(close(plan, [...earlier, ...tool("bash", { command: CHECK })]).error).toBeUndefined();
@@ -341,7 +342,7 @@ describe("declared per-item evidence", () => {
 		const reopened = applyPlanAction(
 			closed,
 			{ action: "update", id: 2, status: "open" },
-			{ runMessages: earlier, request: "go" },
+			{ runMessages: earlier, request: "go", cwd: process.cwd() },
 		).plan!;
 		expect(close(reopened, earlier).error).toBeDefined();
 		expect(close(reopened, [...earlier, ...tool("bash", { command: CHECK })]).error).toBeUndefined();
@@ -365,13 +366,13 @@ describe("declared per-item evidence", () => {
 			applyPlanAction(
 				closed,
 				{ action: "update", id: 2, verify_command: "node tests/other.mjs" },
-				{ runMessages: [], request: "go" },
+				{ runMessages: [], request: "go", cwd: process.cwd() },
 			).error,
 		).toBeDefined();
 		const reopened = applyPlanAction(
 			closed,
 			{ action: "update", id: 2, status: "open", verify_command: "node tests/other.mjs" },
-			{ runMessages: [], request: "go" },
+			{ runMessages: [], request: "go", cwd: process.cwd() },
 		).plan!;
 		expect(reopened.items[1]).toMatchObject({ status: "open", verifyCommand: "node tests/other.mjs" });
 		expect(reopened.items[1].evidence).toBeUndefined();
@@ -381,7 +382,7 @@ describe("declared per-item evidence", () => {
 		const added = applyPlanAction(
 			first,
 			{ action: "add", items: ["other"], verify: "other works", verify_command: "node tests/other.mjs" },
-			{ runMessages: [], request: "go" },
+			{ runMessages: [], request: "go", cwd: process.cwd() },
 		).plan!;
 		const finished = close(added, tool("bash", { command: "node tests/other.mjs" }, "OTHER PASS"), 4).plan!;
 		expect(verifyOutput(finished)).toContain("FEATURE PASS");
@@ -467,7 +468,9 @@ describe("actual runtime and claim-check regression", () => {
 			expect(executed.status).toBe(0);
 			expect(executed.stdout.length).toBeGreaterThan(0);
 			for (const name of ["bash", "powershell"]) {
-				expect(isCheckCommand({ ...run(`node ${flag}`, name), output: executed.stdout })).toBe(false);
+				expect(isCheckCommand({ ...run(`node ${flag}`, name), output: executed.stdout }, process.cwd())).toBe(
+					false,
+				);
 			}
 			expect(() => create(`node ${flag}`)).toThrow(/runtime/);
 		},
@@ -478,8 +481,8 @@ describe("actual runtime and claim-check regression", () => {
 		const executed = spawnSync(process.execPath, [script, "--help"], { encoding: "utf8" });
 		expect(executed.status).toBe(0);
 		expect(executed.stdout).toContain("application executed --help");
-		expect(isCheckCommand(run(`node ${script} --help`))).toBe(true);
-		expect(isCheckCommand(run("node --help && node tests/feature.mjs"))).toBe(true);
+		expect(isCheckCommand(run(`node ${script} --help`), process.cwd())).toBe(true);
+		expect(isCheckCommand(run("node --help && node tests/feature.mjs"), process.cwd())).toBe(true);
 	});
 	it("runs the changed module, writes an isolated artifact and captures real evidence", () => {
 		const source = join(dir, "feature.mjs");
@@ -496,26 +499,15 @@ describe("actual runtime and claim-check regression", () => {
 		expect(result.plan?.items[1].evidence?.output).toContain("feature PASS");
 	});
 	it("uses the real task_plan/write/bash tool factories and their configured cwd", async () => {
-		let plan: TaskPlan | undefined;
 		const messages: AgentMessage[] = [];
+		const taskPlan = createTaskPlanPort(SessionManager.inMemory(), () => messages, dir);
 		const artifactDir = mkdtempSync(join(tmpdir(), "verification-artifacts-"));
 		try {
 			const source = join(dir, "feature.mjs");
 			const artifact = join(artifactDir, "result.txt");
 			const code = `import assert from "node:assert/strict"; import fs from "node:fs"; import { answer } from ${JSON.stringify(source)}; assert.equal(answer(), 42); fs.writeFileSync(${JSON.stringify(artifact)}, "tool pipeline PASS"); console.log("tool pipeline PASS");`;
 			const command = `node --input-type=module -e '${code}'`;
-			const planTool = wrapToolDefinition(
-				createTaskPlanToolDefinition(
-					{
-						get: () => plan,
-						set: (next) => {
-							plan = next;
-						},
-						runMessages: () => messages,
-					},
-					dir,
-				),
-			);
+			const planTool = wrapToolDefinition(createTaskPlanToolDefinition(taskPlan));
 			expect(planTool.parameters).toHaveProperty("properties.verify_command");
 			await planTool.execute("create", {
 				action: "create",
@@ -540,7 +532,7 @@ describe("actual runtime and claim-check regression", () => {
 				...tool("bash", { command }, executed.content.map((c) => (c.type === "text" ? c.text : "")).join("\n")),
 			);
 			await planTool.execute("close", { action: "update", id: 2, status: "done" });
-			expect(plan?.items[1].evidence?.output).toContain("tool pipeline PASS");
+			expect(taskPlan.get()?.items[1].evidence?.output).toContain("tool pipeline PASS");
 			expect(readFileSync(artifact, "utf8")).toBe("tool pipeline PASS");
 			await planTool.execute("source-done", { action: "update", id: 1, status: "done" });
 			// A literal /tmp write into this configured source cwd remains a source mutation.
@@ -566,7 +558,7 @@ describe("actual runtime and claim-check regression", () => {
 			...tool("bash", { command: `node --check ${source}` }, executed.stdout),
 			{ role: "assistant", content: [{ type: "text", text: "Tested and verified." }] } as AgentMessage,
 		];
-		expect(findClaimProblem(messages)).toContain("no check command");
+		expect(findClaimProblem(messages, { cwd: process.cwd() })).toContain("no check command");
 	});
 });
 
@@ -587,8 +579,10 @@ describe("one reading of a run for every evidence question", () => {
 		const checkId = (check[1] as { toolCallId: string }).toolCallId;
 		const messages = [...tool("edit", { path: "feature.mjs" }), ...check, reply("Tested and verified.")];
 
-		expect(findClaimProblem(messages, { plan: { command: CHECK } })).toBeUndefined();
-		expect(findClaimProblem(messages, { plan: { command: CHECK, after: checkId } })).toContain("no check command");
+		expect(findClaimProblem(messages, { plan: { command: CHECK }, cwd: process.cwd() })).toBeUndefined();
+		expect(findClaimProblem(messages, { plan: { command: CHECK, after: checkId }, cwd: process.cwd() })).toContain(
+			"no check command",
+		);
 	});
 
 	it("reports what the run changed and touched", () => {

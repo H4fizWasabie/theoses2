@@ -54,7 +54,7 @@ export {
 
 import { copySessionImages, externalizeImages, hydrateImages } from "./session-images.ts";
 import { TASK_BOUNDARY_CUSTOM_TYPE, type TaskBoundaryData } from "./task-boundary-detector.ts";
-import { TASK_PLAN_ENTRY_TYPE, type TaskPlan } from "./task-plan.ts";
+import { currentTaskPlan, TASK_PLAN_ENTRY_TYPE } from "./task-plan.ts";
 import { type SessionTotals, sumSessionTotals } from "./usage-totals.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
@@ -939,36 +939,6 @@ export class SessionManager {
 		};
 	}
 
-	/** The current Task Plan (issue #382): the latest `task_plan` custom entry on this branch, within the
-	 * current task. A plan from before the latest task boundary belongs to an earlier task: returning it let
-	 * an open plan from one task reject every later task's `create` (2026-10-04). */
-	getTaskPlan(): TaskPlan | undefined {
-		return this._findTaskPlanEntry()?.data as TaskPlan | undefined;
-	}
-
-	private _findTaskPlanEntry(): CustomEntry | undefined {
-		// Walks back from the leaf and stops at the first plan entry: read on every file-changing tool call.
-		// The boundary entry is written after its turn's reply, so the task starts at its anchor message,
-		// not at the boundary entry itself.
-		let taskStartId: string | undefined;
-		let entry = this.leafId ? this.byId.get(this.leafId) : undefined;
-		while (entry) {
-			if (entry.type === "custom") {
-				if (entry.customType === TASK_PLAN_ENTRY_TYPE) return entry;
-				if (entry.customType === TASK_BOUNDARY_CUSTOM_TYPE && taskStartId === undefined) {
-					taskStartId = (entry.data as TaskBoundaryData).beforeEntryId;
-				}
-			}
-			if (entry.id === taskStartId) return undefined;
-			entry = entry.parentId ? this.byId.get(entry.parentId) : undefined;
-		}
-		return undefined;
-	}
-
-	setTaskPlan(plan: TaskPlan): string {
-		return this.appendCustomEntry(TASK_PLAN_ENTRY_TYPE, plan);
-	}
-
 	getWorkingNote(): string {
 		let note = "";
 		for (const entry of this.getBranch()) {
@@ -1265,7 +1235,8 @@ export class SessionManager {
 			ranges.push([first, last]);
 			for (let index = first; index <= last; index++) promoted[index] = true;
 		}
-		const tail = branch.slice(tailStart(branch, position, promoted, this.getTaskPlan()?.createdAt));
+		const plan = currentTaskPlan(branch);
+		const tail = branch.slice(tailStart(branch, position, promoted, plan?.data?.createdAt));
 
 		// Label entries are not copied: one in the tail can be undone by a clear on another branch. The resolved
 		// labels of kept entries are written once below, as `createBranchedSession` does.
@@ -1280,7 +1251,7 @@ export class SessionManager {
 		add(branch.findLast((e) => e.type === "operation_finished"));
 		const boundary = branch.findLast((e) => isCustom(e, TASK_BOUNDARY_CUSTOM_TYPE)) as CustomEntry | undefined;
 		if (boundary) add(this.byId.get((boundary.data as TaskBoundaryData).beforeEntryId));
-		add(this._findTaskPlanEntry());
+		add(plan);
 		add(all.findLast((e) => e.type === "session_info")); // getSessionName reads every entry, not just the branch
 		const artifactPaths = new Set<string>();
 		const customTypes = new Set<string>([FILE_CHECKPOINT_ENTRY_TYPE, TASK_PLAN_ENTRY_TYPE]);

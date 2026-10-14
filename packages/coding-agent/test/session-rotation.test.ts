@@ -16,7 +16,7 @@ import { createAgentSession } from "../src/core/sdk.ts";
 import { SESSION_ROTATE_BYTES, SESSION_ROTATED_ENTRY_TYPE, SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import { TASK_BOUNDARY_CUSTOM_TYPE, TASK_DESCRIPTOR_CUSTOM_TYPE } from "../src/core/task-boundary-detector.ts";
-import type { TaskPlan } from "../src/core/task-plan.ts";
+import { currentTaskPlan, TASK_PLAN_ENTRY_TYPE, type TaskPlan } from "../src/core/task-plan.ts";
 import { createRecallTurnsToolDefinition } from "../src/core/tools/recall-turns.ts";
 
 const usage = {
@@ -58,7 +58,7 @@ function state(manager: SessionManager) {
 		model: context.model,
 		thinkingLevel: context.thinkingLevel,
 		workingNote: manager.getWorkingNote(),
-		taskPlan: manager.getTaskPlan(),
+		taskPlan: currentTaskPlan(manager.getBranch())?.data,
 		sessionName: manager.getSessionName(),
 		lastOutcome: manager.getLastOperationOutcome(),
 		artifacts: manager.getArtifactCatalog(),
@@ -104,7 +104,7 @@ describe("session log rotation", () => {
 		manager.storeArtifact("report", "report.txt", new TextEncoder().encode("report"));
 		const anchor = manager.appendMessage(user("second task"));
 		manager.appendCustomEntry(FILE_CHECKPOINT_ENTRY_TYPE, { turnId: anchor, path: "/tmp/b", hash: null });
-		manager.setTaskPlan(plan("second task"));
+		manager.appendCustomEntry(TASK_PLAN_ENTRY_TYPE, plan("second task"));
 		const answer = manager.appendMessage(assistant("second answer"));
 		manager.appendCustomEntry(TASK_BOUNDARY_CUSTOM_TYPE, { taskSummary: "second task", beforeEntryId: anchor });
 		manager.appendCustomEntry(TASK_DESCRIPTOR_CUSTOM_TYPE, { descriptor: "second task" });
@@ -181,18 +181,18 @@ describe("session log rotation", () => {
 
 	it("does not bring back a plan from an earlier task", () => {
 		const manager = SessionManager.create(root, sessionDir, key);
-		manager.setTaskPlan(plan("earlier task"));
+		manager.appendCustomEntry(TASK_PLAN_ENTRY_TYPE, plan("earlier task"));
 		manager.appendMessage(user("earlier"));
 		manager.appendMessage(assistant("done"));
 		const anchor = manager.appendMessage(user("new task"));
 		manager.appendMessage(assistant("on it"));
 		manager.appendCustomEntry(TASK_BOUNDARY_CUSTOM_TYPE, { taskSummary: "new task", beforeEntryId: anchor });
 		manager.appendCompaction("summary", anchor, 100);
-		expect(manager.getTaskPlan()).toBeUndefined();
+		expect(currentTaskPlan(manager.getBranch())?.data).toBeUndefined();
 
 		manager.rotate();
 
-		expect(manager.getTaskPlan()).toBeUndefined();
+		expect(currentTaskPlan(manager.getBranch())?.data).toBeUndefined();
 		expect(readFileSync(manager.getSessionFile() as string, "utf8")).not.toContain("earlier task");
 	});
 
@@ -281,7 +281,9 @@ describe("session log rotation", () => {
 		const promoted = manager.appendPromotedRange(t1.id, t2.answer);
 		turn("an abandoned idea", { "/q": null });
 		manager.branch(promoted);
-		const planTurn = turn("start the plan task", { "/x": "x2", "/z": null }, () => manager.setTaskPlan(plan("plan")));
+		const planTurn = turn("start the plan task", { "/x": "x2", "/z": null }, () =>
+			manager.appendCustomEntry(TASK_PLAN_ENTRY_TYPE, plan("plan")),
+		);
 		manager.appendPromotedRange(planTurn.id, planTurn.answer);
 		const pending = turn("pending fact about the boiler", { "/w": "w1" });
 		manager.appendCustomEntry("ext-state", { version: 2 });
@@ -310,7 +312,7 @@ describe("session log rotation", () => {
 	it("gives Plan Review the same files for the active Task Plan", () => {
 		const { manager } = historySession();
 		const directory = manager.getCheckpointDirectory();
-		const createdAt = manager.getTaskPlan()?.createdAt as string;
+		const createdAt = currentTaskPlan(manager.getBranch())?.data?.createdAt as string;
 		const before = originalsSince(manager.getBranch(), directory, createdAt);
 		expect(before.files.length + before.skipped.length).toBe(4);
 

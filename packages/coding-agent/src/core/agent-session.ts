@@ -146,6 +146,7 @@ import { createSessionSystemPrompt, type SessionSystemPrompt } from "./session-s
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createTaskToolDefinition, type TaskToolOptions } from "./task-agent.ts";
+import { createTaskPlanPort, type TaskPlanPort } from "./task-plan.ts";
 import { TaskPlanGuard } from "./task-plan-guard.ts";
 import { resolveThinkingLevel } from "./thinking-level.ts";
 import { createToolRegistry, initialActiveToolNames, type ToolRegistry } from "./tool-registry.ts";
@@ -500,6 +501,7 @@ export class AgentSession {
 	private _modelRuntime: ModelRuntime;
 	private readonly _memoryStore = new FileMemoryStore();
 	private readonly _memoryPromotion: MemoryPromotion;
+	private readonly _taskPlan: TaskPlanPort;
 	private readonly _taskPlanGuard: TaskPlanGuard;
 	private readonly _fileCheckpoints: FileCheckpoints;
 
@@ -570,13 +572,15 @@ export class AgentSession {
 		});
 		this._fileCheckpoints = new FileCheckpoints(this.sessionManager, this._cwd);
 		if (this.sessionManager.isPersisted()) sweepCheckpoints(this.sessionManager.getCheckpointDirectory());
+		this._taskPlan = createTaskPlanPort(
+			this.sessionManager,
+			() => currentRunMessages(this.agent.state.messages),
+			this._cwd,
+		);
 		this._taskPlanGuard = new TaskPlanGuard({
-			cwd: this._cwd,
-			getPlan: () => this.sessionManager.getTaskPlan(),
-			setPlan: (plan) => this.sessionManager.setTaskPlan(plan),
+			taskPlan: this._taskPlan,
 			// Without the task_plan tool active the model could never satisfy the gate.
 			enabled: () => this.settingsManager.getTaskPlanEnabled() && this.getActiveToolNames().includes("task_plan"),
-			runMessages: () => currentRunMessages(this.agent.state.messages),
 			review: (input) =>
 				reviewPlan({
 					...input,
@@ -2514,11 +2518,7 @@ export class AgentSession {
 					...sharedToolOptions,
 					workingNote: (note) => appendWorkingNote(this.sessionManager, note),
 					workingNoteClear: () => clearWorkingNote(this.sessionManager),
-					taskPlan: {
-						get: () => this.sessionManager.getTaskPlan(),
-						set: (plan) => this.sessionManager.setTaskPlan(plan),
-						runMessages: () => currentRunMessages(this.agent.state.messages),
-					},
+					taskPlan: this._taskPlan,
 					memory: this._memoryStore,
 				});
 
