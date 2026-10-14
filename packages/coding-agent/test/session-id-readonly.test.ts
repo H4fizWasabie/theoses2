@@ -190,4 +190,24 @@ describe("--session-id", () => {
 		const fork = await createSessionManager(args({ fork: "old-session-id" }), root, root, SettingsManager.inMemory());
 		expect(fork.getHeader()?.parentSession).toBe(a);
 	});
+
+	it.each([{ sessionId: "old-session-id" }, { session: "old-session" }, { continue: true }])(
+		"reports a broken rotation chain as a startup error for %o",
+		async (request) => {
+			const root = createTempDir();
+			const manager = SessionManager.create(root, root, { id: "old-session-id" });
+			persistSession(manager, "before rotation");
+			manager.rotate();
+			rmSync(manager.getSessionFile()!);
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+			vi.spyOn(process, "exit").mockImplementation((code) => {
+				throw new Error(`exit:${code}`);
+			});
+
+			await expect(createSessionManager(args(request), root, root, SettingsManager.inMemory())).rejects.toThrow(
+				"exit:1",
+			);
+			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("Broken Log Rotation chain"));
+		},
+	);
 });

@@ -331,27 +331,23 @@ function validateSessionIdFlags(parsed: Args): void {
 	}
 }
 
-function openSessionOrExit(path: string, sessionDir?: string): SessionManager {
-	try {
-		return SessionManager.open(path, sessionDir);
-	} catch (error: unknown) {
-		const message = error instanceof Error ? error.message : String(error);
-		console.error(chalk.red(`Error: ${message}`));
-		process.exit(1);
-	}
-}
-
-function forkSessionOrExit(sourcePath: string, cwd: string, sessionDir?: string, sessionId?: string): SessionManager {
-	try {
-		return SessionManager.forkFrom(sourcePath, cwd, sessionDir, { id: sessionId });
-	} catch (error: unknown) {
-		const message = error instanceof Error ? error.message : String(error);
-		console.error(chalk.red(`Error: ${message}`));
-		process.exit(1);
-	}
-}
-
+/** Every startup path can hit a broken Log Rotation chain or unreadable log; report it rather than crash. */
 export async function createSessionManager(
+	parsed: Args,
+	cwd: string,
+	sessionDir: string | undefined,
+	settingsManager: SettingsManager,
+): Promise<SessionManager> {
+	try {
+		return await selectStartupSession(parsed, cwd, sessionDir, settingsManager);
+	} catch (error: unknown) {
+		const message = error instanceof Error ? error.message : String(error);
+		console.error(chalk.red(`Error: ${message}`));
+		process.exit(1);
+	}
+}
+
+async function selectStartupSession(
 	parsed: Args,
 	cwd: string,
 	sessionDir: string | undefined,
@@ -376,7 +372,7 @@ export async function createSessionManager(
 			case "path":
 			case "local":
 			case "global":
-				return forkSessionOrExit(resolved.path, cwd, sessionDir, parsed.sessionId);
+				return SessionManager.forkFrom(resolved.path, cwd, sessionDir, { id: parsed.sessionId });
 
 			case "not_found":
 				console.error(chalk.red(`No session found matching '${resolved.arg}'`));
@@ -390,7 +386,7 @@ export async function createSessionManager(
 		switch (resolved.type) {
 			case "path":
 			case "local":
-				return openSessionOrExit(resolved.path, sessionDir);
+				return SessionManager.open(resolved.path, sessionDir);
 
 			case "global": {
 				console.log(chalk.yellow(`Session found in different project: ${resolved.cwd}`));
@@ -399,7 +395,7 @@ export async function createSessionManager(
 					console.log(chalk.dim("Aborted."));
 					process.exit(0);
 				}
-				return forkSessionOrExit(resolved.path, cwd, sessionDir);
+				return SessionManager.forkFrom(resolved.path, cwd, sessionDir);
 			}
 
 			case "not_found":

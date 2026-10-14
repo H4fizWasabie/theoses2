@@ -161,7 +161,21 @@ export async function findSessionById(
 	const matches = (await Promise.all(files.map((path) => buildSessionInfo(path, channel, true))))
 		.filter((info): info is SessionInfo => info !== null)
 		.sort(byRecency);
-	const match = matches.find((info) => info.id === id) ?? matches[0];
+	const exact = matches.find((info) => info.id === id);
+	// A prefix may name one chain's logs (one session), but an archive read targets one log. A broken chain counts
+	// as its own session and reports its error when selected.
+	const targets = new Set(
+		matches.map((info) => {
+			if (archive) return info.path;
+			try {
+				return resolveSessionFile(info.path);
+			} catch {
+				return info.path;
+			}
+		}),
+	);
+	if (!exact && targets.size > 1) throw new Error(`Session ID prefix '${id}' is ambiguous: ${targets.size} matches`);
+	const match = exact ?? matches[0];
 	if (!match || archive) return match;
 	const current = resolveSessionFile(match.path);
 	const info = await buildSessionInfo(current, channel, true);
@@ -169,21 +183,26 @@ export async function findSessionById(
 	return info;
 }
 
-/** Matches an old engine ID against this live log's actual rotation predecessors, never fork parents. */
+/** Matches an old engine ID against this live log's actual rotation predecessors, never fork parents.
+ * A damaged link ends the walk as no match, so one damaged chain cannot break lookup of other sessions. */
 export function sessionIdMatches(id: string, sessionFile: string): boolean {
 	let current = resolvePath(sessionFile);
 	const visited = new Set<string>();
-	while (existsSync(current)) {
-		const identity = realpathSync(current);
-		if (visited.has(identity)) throw new Error(`Broken Log Rotation chain: cycle at ${current}`);
-		visited.add(identity);
-		const header = rotationHeader(current);
-		if (header?.id === id) return true;
-		const parent = header?.parentSession;
-		if (!parent || !existsSync(parent)) return false;
-		const successor = rotationSuccessor(parent);
-		if (!successor || realpathSync(successor) !== identity) return false;
-		current = parent;
+	try {
+		while (existsSync(current)) {
+			const identity = realpathSync(current);
+			if (visited.has(identity)) return false;
+			visited.add(identity);
+			const header = rotationHeader(current);
+			if (header?.id === id) return true;
+			const parent = header?.parentSession;
+			if (!parent || !existsSync(parent)) return false;
+			const successor = rotationSuccessor(parent);
+			if (!successor || realpathSync(successor) !== identity) return false;
+			current = parent;
+		}
+	} catch {
+		return false;
 	}
 	return false;
 }

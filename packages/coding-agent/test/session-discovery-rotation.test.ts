@@ -9,6 +9,7 @@ import { exportFromFile } from "../src/core/export-html/index.ts";
 import { backfillFromSessionLog } from "../src/core/memory-consolidation.ts";
 import { FileMemoryStore } from "../src/core/memory-store.ts";
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
+import { findSessionById, sessionIdMatches } from "../src/core/session-discovery.ts";
 import { findMostRecentSession, SessionManager } from "../src/core/session-manager.ts";
 
 describe("session discovery after Log Rotation", () => {
@@ -63,6 +64,35 @@ describe("session discovery after Log Rotation", () => {
 		expect(switched.getSessionFile()).toBe(c);
 		utimesSync(a, new Date("2030-01-01"), new Date("2030-01-01"));
 		expect(findMostRecentSession(root, undefined, manager.getChannelSessionKey())).toBe(c);
+	});
+
+	it("resolves an ID prefix shared by one chain's logs to its current log", async () => {
+		const { manager, aId, bId, c } = chain();
+		const prefix = aId.slice(0, 4);
+		expect([bId, manager.getSessionId()].every((id) => id.startsWith(prefix))).toBe(true);
+		expect((await findSessionById(prefix, { sessionDir: root, prefix: true }))?.path).toBe(c);
+	});
+
+	it("rejects an ID prefix shared by different sessions, but still resolves an exact ID", async () => {
+		const twins = ["twin-1", "twin-2"].map((id) => {
+			const manager = SessionManager.create(root, root, { id, channel: "dashboard", channelSessionId: id });
+			manager.appendMessage({ role: "user", content: id, timestamp: 1 });
+			return manager.getSessionFile();
+		});
+		await expect(findSessionById("twin", { sessionDir: root, prefix: true })).rejects.toThrow(/ambiguous/);
+		expect((await findSessionById("twin-1", { sessionDir: root, prefix: true }))?.path).toBe(twins[0]);
+	});
+
+	it("treats an old ID behind a damaged rotation link as no match, not an error", () => {
+		const { manager, aId, b, c } = chain();
+		const lines = readFileSync(b, "utf8").trim().split("\n");
+		lines[lines.length - 1] = JSON.stringify({
+			...JSON.parse(lines[lines.length - 1]),
+			data: { to: join(root, "gone.jsonl") },
+		});
+		writeFileSync(b, `${lines.join("\n")}\n`);
+		expect(sessionIdMatches(aId, c)).toBe(false);
+		expect(sessionIdMatches(manager.getSessionId(), c)).toBe(true);
 	});
 
 	it("refuses a stale handle's append after another handle closes its log by rotation", () => {
