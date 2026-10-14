@@ -89,7 +89,7 @@ function plan(): TaskPlan {
 	const result = applyPlanAction(
 		undefined,
 		{ action: "create", goal: "g", items: ["a.ts"], verify: "npm test", verify_command: "npm test" },
-		{ runMessages: [], request: "do the thing", now: new Date(0) },
+		{ runMessages: [], request: "do the thing", now: new Date(0), cwd: process.cwd() },
 	);
 	if (!result.plan) throw new Error(result.error);
 	return result.plan;

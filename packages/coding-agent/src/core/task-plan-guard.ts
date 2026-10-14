@@ -14,7 +14,14 @@ import { claimCheck, FINAL_REPLY_NOTE, type PlanVerification } from "./claim-che
 import type { Originals } from "./file-checkpoints.ts";
 import { createCustomMessage } from "./messages.ts";
 import { formatFindings, logReview, PLAN_REVIEW_CUSTOM_TYPE, type ReviewOutcome } from "./plan-reviewer.ts";
-import { formatPlanStatus, needsReview, planAtStop, type TaskPlan, verifyOutput } from "./task-plan.ts";
+import {
+	formatPlanStatus,
+	needsReview,
+	planAtStop,
+	type TaskPlan,
+	type TaskPlanPort,
+	verifyOutput,
+} from "./task-plan.ts";
 import { fileChangesOf, firstLine, textOf } from "./tool-runs.ts";
 import { resolveToCwd } from "./tools/path-utils.ts";
 import { readRunEvidence } from "./verification-evidence.ts";
@@ -24,12 +31,8 @@ const MAX_SNAPSHOT_BYTES = 1_000_000;
 const TOO_LARGE = `[file larger than ${MAX_SNAPSHOT_BYTES} bytes]`;
 
 export interface TaskPlanGuardDeps {
-	cwd: string;
-	getPlan: () => TaskPlan | undefined;
-	setPlan: (plan: TaskPlan) => void;
+	taskPlan: TaskPlanPort;
 	enabled: () => boolean;
-	/** Messages of the current run (since the last user message). */
-	runMessages: () => AgentMessage[];
 	review: (input: {
 		plan: TaskPlan;
 		diff: string;
@@ -63,7 +66,7 @@ export class TaskPlanGuard {
 
 	/** What changed since the current plan was created, from the file checkpoints. */
 	private originals(): Originals {
-		const plan = this.deps.getPlan();
+		const plan = this.deps.taskPlan.get();
 		return plan ? this.deps.originalsSince(plan.createdAt) : NO_ORIGINALS;
 	}
 
@@ -107,8 +110,8 @@ export class TaskPlanGuard {
 		}
 		// An untraced command has no target paths, only the directories it changed files in.
 		for (const command of untraced) {
-			for (const dir of fileChangesOf("bash", { command }, this.deps.cwd)?.dirs ?? []) {
-				const absolute = resolveToCwd(dir, this.deps.cwd);
+			for (const dir of fileChangesOf("bash", { command }, this.deps.taskPlan.cwd)?.dirs ?? []) {
+				const absolute = resolveToCwd(dir, this.deps.taskPlan.cwd);
 				if (this.isOutside(absolute)) dirs.add(absolute);
 			}
 		}
@@ -116,40 +119,40 @@ export class TaskPlanGuard {
 	}
 
 	private shown(path: string): string {
-		return this.isOutside(path) ? path : relative(this.deps.cwd, path) || path;
+		return this.isOutside(path) ? path : relative(this.deps.taskPlan.cwd, path) || path;
 	}
 
 	private isOutside(path: string): boolean {
-		const rel = relative(this.deps.cwd, path);
+		const rel = relative(this.deps.taskPlan.cwd, path);
 		return rel.startsWith("..") || isAbsolute(rel);
 	}
 
 	/** Marks the start of a user operation, so planStatus only reports plans this operation touched. */
 	startOperation(): void {
-		this.planAtOperationStart = JSON.stringify(this.deps.getPlan() ?? null);
+		this.planAtOperationStart = JSON.stringify(this.deps.taskPlan.get() ?? null);
 	}
 
 	/** The status line for the final reply, when this operation created or changed the plan. */
 	planStatus(): string | undefined {
 		if (!this.deps.enabled()) return undefined;
-		const plan = this.deps.getPlan();
+		const plan = this.deps.taskPlan.get();
 		if (!plan || JSON.stringify(plan) === this.planAtOperationStart) return undefined;
 		return formatPlanStatus(plan);
 	}
 
 	async beforeStop(): Promise<AgentMessage[]> {
-		const run = this.deps.runMessages();
+		const run = this.deps.taskPlan.runMessages();
 		// One reading of the run per stop, so the reopen rule, the claim check and the review trigger agree.
-		const evidence = readRunEvidence(run, this.deps.cwd);
+		const evidence = readRunEvidence(run, this.deps.taskPlan.cwd);
 		const enabled = this.deps.enabled();
-		let plan = enabled ? this.deps.getPlan() : undefined;
+		let plan = enabled ? this.deps.taskPlan.get() : undefined;
 		const planUsed = evidence.usedPlanTool || JSON.stringify(plan ?? null) !== this.planAtOperationStart;
 		let verification: PlanVerification | undefined;
 		if (plan && planUsed) {
 			const atStop = planAtStop(plan, evidence);
 			if (atStop.plan !== plan) {
 				plan = atStop.plan;
-				this.deps.setPlan(plan);
+				this.deps.taskPlan.set(plan);
 			}
 			verification = atStop.verification;
 		}
@@ -167,11 +170,11 @@ export class TaskPlanGuard {
 				locations: this.locations(),
 			});
 			if ("skipped" in outcome) {
-				this.deps.setPlan({ ...plan, review: { skipped: outcome.skipped } });
+				this.deps.taskPlan.set({ ...plan, review: { skipped: outcome.skipped } });
 				logReview({ phase: "skipped", goal: plan.goal, kind: plan.kind, reason: outcome.skipped });
 				return [];
 			}
-			this.deps.setPlan({
+			this.deps.taskPlan.set({
 				...plan,
 				review: { model: outcome.model, verdict: outcome.verdict, mustFix: outcome.mustFix.length },
 			});

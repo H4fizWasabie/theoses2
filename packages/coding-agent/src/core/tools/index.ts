@@ -106,6 +106,7 @@ import type { ToolDefinition } from "../extensions/types.ts";
 import { createMemoryWriteGate, isMemoryGateEnabled } from "../memory-gate.ts";
 import { isRememberRelevanceEnabled, RELEVANCE_CANDIDATES, rankByRelevance } from "../memory-relevance.ts";
 import { FileMemoryStore, type MemoryStore } from "../memory-store.ts";
+import type { TaskPlanPort } from "../task-plan.ts";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.ts";
 import type { ConvertDocOperations } from "./convert-doc.ts";
 import { createConvertDocToolDefinition } from "./convert-doc.ts";
@@ -119,7 +120,7 @@ import { createOperationalNotesToolDefinition } from "./operational-notes.ts";
 import { createPowerShellToolDefinition, type PowerShellToolOptions } from "./powershell.ts";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
 import { createRecallTurnsToolDefinition } from "./recall-turns.ts";
-import { createTaskPlanToolDefinition, type TaskPlanToolDeps } from "./task-plan.ts";
+import { createTaskPlanToolDefinition } from "./task-plan.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import { createWebSearchToolDefinition, type WebSearchOperations } from "./web-search.ts";
 import { createWorkingNoteToolDefinition } from "./working-note.ts";
@@ -176,7 +177,7 @@ export interface ToolsOptions {
 	ls?: LsToolOptions;
 	workingNote?: (note: string) => void;
 	workingNoteClear?: () => void;
-	taskPlan?: TaskPlanToolDeps;
+	taskPlan?: TaskPlanPort;
 	operationalNotes?: { path?: string };
 	memory?: MemoryStore;
 	convertDoc?: { operations?: ConvertDocOperations };
@@ -213,8 +214,7 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 			options?.workingNoteClear ?? (() => {}),
 		),
 		task_plan: createTaskPlanToolDefinition(
-			options?.taskPlan ?? { get: () => undefined, set: () => {}, runMessages: () => [] },
-			cwd,
+			options?.taskPlan ?? { get: () => undefined, set: () => {}, runMessages: () => [], cwd },
 		),
 		note_operations: createOperationalNotesToolDefinition(options?.operationalNotes),
 		remember: rememberTool!,

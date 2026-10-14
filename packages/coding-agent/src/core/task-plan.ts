@@ -14,11 +14,14 @@
  * The plan was mandatory until 2026-09-29: no file change without one, no end of run with open items.
  * Both forced a plan and extra round trips onto small tasks, so the model now chooses.
  *
- * State lives in the session as `task_plan` custom entries (latest wins), so it survives restarts and
- * "continue". Pure functions only; the session wiring is in agent-session.ts.
+ * State lives in the session as `task_plan` custom entries (latest within the current Task wins), so it
+ * survives restarts and "continue". Pure functions plus the port the tool and the stop guard share; the
+ * session wiring is in agent-session.ts.
  */
 import type { AgentMessage } from "theoses-agent-core";
 import type { PlanVerification } from "./claim-check.ts";
+import type { CustomEntry, SessionEntry } from "./session-manager.ts";
+import { TASK_BOUNDARY_CUSTOM_TYPE, type TaskBoundaryData } from "./task-boundary-detector.ts";
 import { firstLine, type ToolRun } from "./tool-runs.ts";
 import { type RunEvidence, readRunEvidence } from "./verification-evidence.ts";
 
@@ -75,6 +78,53 @@ export interface TaskPlanInput {
 	status?: "done" | "deferred" | "open";
 	note?: string;
 	reason?: string;
+}
+
+/**
+ * The current Task Plan's entry on a branch: the latest `task_plan` entry within the current Task. A plan from
+ * before the latest task boundary belongs to an earlier Task: returning it let an open plan from one Task reject
+ * every later Task's `create` (2026-10-04). The boundary entry is written after its turn's reply, so the Task
+ * starts at its anchor message, not at the boundary entry itself.
+ */
+export function currentTaskPlan(branch: readonly SessionEntry[]): CustomEntry<TaskPlan> | undefined {
+	let taskStartId: string | undefined;
+	for (let index = branch.length - 1; index >= 0; index--) {
+		const entry = branch[index];
+		if (entry.type === "custom") {
+			if (entry.customType === TASK_PLAN_ENTRY_TYPE) return entry as CustomEntry<TaskPlan>;
+			if (entry.customType === TASK_BOUNDARY_CUSTOM_TYPE && taskStartId === undefined) {
+				taskStartId = (entry.data as TaskBoundaryData).beforeEntryId;
+			}
+		}
+		if (entry.id === taskStartId) return undefined;
+	}
+	return undefined;
+}
+
+/** What the `task_plan` tool and the stop guard read and write the current Task Plan through. */
+export interface TaskPlanPort {
+	get: () => TaskPlan | undefined;
+	set: (plan: TaskPlan) => void;
+	/** Messages of the current run (since the last user message). */
+	runMessages: () => AgentMessage[];
+	cwd: string;
+}
+
+/** The session log, as far as the Task Plan needs it. */
+export interface TaskPlanStore {
+	getBranch(): SessionEntry[];
+	appendCustomEntry(customType: string, data?: unknown): string;
+}
+
+export function createTaskPlanPort(store: TaskPlanStore, runMessages: () => AgentMessage[], cwd: string): TaskPlanPort {
+	return {
+		get: () => currentTaskPlan(store.getBranch())?.data,
+		set: (plan) => {
+			store.appendCustomEntry(TASK_PLAN_ENTRY_TYPE, plan);
+		},
+		runMessages,
+		cwd,
+	};
 }
 
 const FIX_ITEMS: { kind: PlanItemKind; text: string }[] = [
@@ -236,9 +286,9 @@ export interface PlanActionResult {
 export function applyPlanAction(
 	current: TaskPlan | undefined,
 	input: TaskPlanInput,
-	context: { runMessages: AgentMessage[]; request: string; now?: Date; cwd?: string },
+	context: { runMessages: AgentMessage[]; request: string; now?: Date; cwd: string },
 ): PlanActionResult {
-	const runEvidence = readRunEvidence(context.runMessages, context.cwd ?? process.cwd());
+	const runEvidence = readRunEvidence(context.runMessages, context.cwd);
 	switch (input.action) {
 		case "show":
 			return current ? { plan: current } : { error: "No task plan." };

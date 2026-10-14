@@ -10,11 +10,15 @@ import { SessionManager } from "../src/core/session-manager.ts";
 import { TASK_BOUNDARY_CUSTOM_TYPE } from "../src/core/task-boundary-detector.ts";
 import {
 	applyPlanAction,
+	createTaskPlanPort,
+	currentTaskPlan,
 	formatPlanStatus,
 	needsReview,
 	planAtStop,
+	TASK_PLAN_ENTRY_TYPE,
 	type TaskPlan,
 	type TaskPlanInput,
+	type TaskPlanPort,
 } from "../src/core/task-plan.ts";
 import { TaskPlanGuard } from "../src/core/task-plan-guard.ts";
 import { commandEffect } from "../src/core/tool-runs.ts";
@@ -65,7 +69,12 @@ function tool(name: string, args: Record<string, unknown>, output: string, isErr
 }
 
 function act(plan: TaskPlan | undefined, input: TaskPlanInput, runMessages: AgentMessage[] = []) {
-	return applyPlanAction(plan, input, { runMessages, request: "switch run.sh to one image", now: new Date(0) });
+	return applyPlanAction(plan, input, {
+		runMessages,
+		request: "switch run.sh to one image",
+		now: new Date(0),
+		cwd: process.cwd(),
+	});
 }
 
 function created(input: Partial<TaskPlanInput> = {}): TaskPlan {
@@ -156,7 +165,7 @@ describe("commandEffect", () => {
 		["rm -f old.json && ls", ["old.json"]],
 		["make build 2>&1 | tee build.log", ["build.log"]],
 	])("%s changes %j", (command, paths) => {
-		expect(commandEffect(command)).toMatchObject({ changesFiles: true, paths });
+		expect(commandEffect(command, process.cwd())).toMatchObject({ changesFiles: true, paths });
 	});
 
 	it.each([
@@ -166,7 +175,7 @@ describe("commandEffect", () => {
 		"sed -n '1,20p' a.ts",
 		"find . -name '*.ts' 2>/dev/null",
 	])("%s only reads", (command) => {
-		expect(commandEffect(command)).toMatchObject({ readOnly: true, changesFiles: false });
+		expect(commandEffect(command, process.cwd())).toMatchObject({ readOnly: true, changesFiles: false });
 	});
 
 	it.each([
@@ -174,23 +183,26 @@ describe("commandEffect", () => {
 		'node -e "const f = (a) => a > 1"',
 		"bash tools/run.sh --dry-run 2>&1 | tail -12",
 	])("%s runs something without changing files", (command) => {
-		expect(commandEffect(command)).toMatchObject({ readOnly: false, changesFiles: false });
+		expect(commandEffect(command, process.cwd())).toMatchObject({ readOnly: false, changesFiles: false });
 	});
 
 	it("flags a python heredoc that writes files as an untraced change", () => {
-		const effect = commandEffect("python3 - <<'EOF'\nopen('run.sh','w').write(s)\nEOF");
+		const effect = commandEffect("python3 - <<'EOF'\nopen('run.sh','w').write(s)\nEOF", process.cwd());
 		expect(effect).toMatchObject({ changesFiles: true, unknownChange: true, paths: [], dirs: [] });
 	});
 
 	it("reads paths after a cd relative to it, and records where an untraced change ran", () => {
-		expect(commandEffect("cd /srv/app && sed -i 's/a/b/' tools/run.sh")).toMatchObject({
+		expect(commandEffect("cd /srv/app && sed -i 's/a/b/' tools/run.sh", process.cwd())).toMatchObject({
 			paths: ["/srv/app/tools/run.sh"],
 			dirs: ["/srv/app"],
 		});
-		const untraced = commandEffect("cd /srv/reels && python3 - <<'EOF'\nopen('addvoice.sh','w').write(s)\nEOF");
+		const untraced = commandEffect(
+			"cd /srv/reels && python3 - <<'EOF'\nopen('addvoice.sh','w').write(s)\nEOF",
+			process.cwd(),
+		);
 		expect(untraced).toMatchObject({ unknownChange: true, paths: [], dirs: ["/srv/reels"] });
-		expect(commandEffect("cd /srv/app && git status")).toMatchObject({ readOnly: true, dirs: [] });
-		expect(commandEffect("cd /tmp/x && echo hi > out.txt")).toMatchObject({
+		expect(commandEffect("cd /srv/app && git status", process.cwd())).toMatchObject({ readOnly: true, dirs: [] });
+		expect(commandEffect("cd /tmp/x && echo hi > out.txt", process.cwd())).toMatchObject({
 			changesFiles: true,
 			paths: ["/tmp/x/out.txt"],
 			dirs: ["/tmp/x"],
@@ -377,7 +389,7 @@ describe("task plan replays", () => {
 	});
 });
 
-describe("SessionManager.getTaskPlan", () => {
+describe("currentTaskPlan", () => {
 	// Production 2026-10-04: an open plan from issue #486 (10-01) survived nine task switches and
 	// rejected the next task's create with "A plan is already open".
 	const say = (text: string) => ({ role: "user" as const, content: text, timestamp: 0 });
@@ -385,21 +397,21 @@ describe("SessionManager.getTaskPlan", () => {
 	it("does not return a plan from before the latest task boundary", () => {
 		const session = SessionManager.inMemory();
 		session.appendMessage(say("fix issue 486"));
-		session.setTaskPlan(created());
+		session.appendCustomEntry(TASK_PLAN_ENTRY_TYPE, created());
 		const anchor = session.appendMessage(say("now fix the psychology refill"));
 		session.appendCustomEntry(TASK_BOUNDARY_CUSTOM_TYPE, { taskSummary: "psychology", beforeEntryId: anchor });
-		expect(session.getTaskPlan()).toBeUndefined();
+		expect(currentTaskPlan(session.getBranch())).toBeUndefined();
 	});
 
 	it("returns a plan created in the new task's first turn, before the boundary entry was written", () => {
 		const session = SessionManager.inMemory();
 		session.appendMessage(say("fix issue 486"));
-		session.setTaskPlan(created({ goal: "old" }));
+		session.appendCustomEntry(TASK_PLAN_ENTRY_TYPE, created({ goal: "old" }));
 		const anchor = session.appendMessage(say("now fix the psychology refill"));
-		session.setTaskPlan(created({ goal: "new" }));
+		session.appendCustomEntry(TASK_PLAN_ENTRY_TYPE, created({ goal: "new" }));
 		// The detector writes the boundary after the turn's reply (turn-settlement.ts).
 		session.appendCustomEntry(TASK_BOUNDARY_CUSTOM_TYPE, { taskSummary: "psychology", beforeEntryId: anchor });
-		expect(session.getTaskPlan()?.goal).toBe("new");
+		expect(currentTaskPlan(session.getBranch())?.data?.goal).toBe("new");
 	});
 });
 
@@ -475,7 +487,8 @@ describe("parseReview", () => {
 
 describe("TaskPlanGuard", () => {
 	let dir: string;
-	let plan: TaskPlan | undefined;
+	let session: SessionManager;
+	let taskPlan: TaskPlanPort;
 	let run: AgentMessage[];
 	let reviews: { diff: string; verifyOutput: string | undefined; locations: string[] }[];
 	let reviewResult: ReviewOutcome | { skipped: string };
@@ -493,15 +506,27 @@ describe("TaskPlanGuard", () => {
 		originals.files.push({ path: absolute, before });
 	}
 
+	/** The plan the session log holds now. */
+	function current(): TaskPlan {
+		const plan = taskPlan.get();
+		if (!plan) throw new Error("No task plan.");
+		return plan;
+	}
+
+	function closeAll(): void {
+		taskPlan.set({ ...current(), items: current().items.map((i) => ({ ...i, status: "done" as const })) });
+	}
+
+	function update(input: TaskPlanInput): void {
+		const result = act(current(), input, run);
+		if (!result.plan) throw new Error(result.error);
+		taskPlan.set(result.plan);
+	}
+
 	function guard(enabled = true): TaskPlanGuard {
 		return new TaskPlanGuard({
-			cwd: dir,
-			getPlan: () => plan,
-			setPlan: (next) => {
-				plan = next;
-			},
+			taskPlan,
 			enabled: () => enabled,
-			runMessages: () => run,
 			review: async (input) => {
 				reviews.push({ diff: input.diff, verifyOutput: input.verifyOutput, locations: input.locations });
 				return reviewResult;
@@ -515,7 +540,8 @@ describe("TaskPlanGuard", () => {
 		// These are synthetic review outcomes, not production metrics, even with an inherited agent-dir env.
 		vi.spyOn(planReviewer, "logReview").mockImplementation(() => {});
 		dir = mkdtempSync(join(tmpdir(), "task-plan-guard-"));
-		plan = undefined;
+		session = SessionManager.inMemory();
+		taskPlan = createTaskPlanPort(session, () => run, dir);
 		run = [];
 		reviews = [];
 		originals = { files: [], skipped: [], untraced: [] };
@@ -534,7 +560,7 @@ describe("TaskPlanGuard", () => {
 		changing("run.sh");
 		writeFileSync(file, "after-first\n");
 		expect(g.diff()).toBe("");
-		plan = created();
+		taskPlan.set(created());
 		changing("run.sh");
 		writeFileSync(file, "after-second\n");
 		expect(g.diff()).toContain("-before");
@@ -544,7 +570,7 @@ describe("TaskPlanGuard", () => {
 	it("names a changed file too large to diff, even when both sides are past the limit", () => {
 		const file = join(dir, "big.log");
 		const g = guard();
-		plan = created();
+		taskPlan.set(created());
 		originals.files.push({ path: file, before: "é".repeat(600_000) });
 		writeFileSync(file, "x".repeat(1_100_000));
 		expect(g.diff()).toContain("so no diff:\nbig.log");
@@ -552,7 +578,7 @@ describe("TaskPlanGuard", () => {
 
 	it("lists files whose original was not saved, and untraced commands, instead of diffing them", () => {
 		const g = guard();
-		plan = created();
+		taskPlan.set(created());
 		originals.skipped.push({ path: join(dir, "big.bin"), reason: "larger than 10485760 bytes" });
 		originals.untraced.push("python3 gen.py");
 		expect(g.diff()).toContain("big.bin (larger than 10485760 bytes)");
@@ -561,14 +587,14 @@ describe("TaskPlanGuard", () => {
 
 	it("does nothing when disabled", async () => {
 		const g = guard(false);
-		plan = created();
+		taskPlan.set(created());
 		run = [user("go"), ...tool("edit", { path: "run.sh" }, "ok"), reply("Done.")];
 		expect(await g.beforeStop()).toEqual([]);
 	});
 
 	it("replays 2026-09-26: the failed edit is flagged, and the open item shows in the status instead of holding the run", async () => {
 		const g = guard();
-		plan = created();
+		taskPlan.set(created());
 		run = [
 			user("switch run.sh to one image"),
 			...tool("edit", { path: "carousel.py" }, "ok"),
@@ -588,11 +614,11 @@ describe("TaskPlanGuard", () => {
 		const file = join(dir, "run.sh");
 		writeFileSync(file, "gate 2-10\n");
 		const g = guard();
-		plan = created();
+		taskPlan.set(created());
 		g.startOperation();
 		changing("run.sh");
 		writeFileSync(file, "gate 1\n");
-		plan = { ...plan, items: plan.items.map((i) => ({ ...i, status: "done" as const })) };
+		closeAll();
 		run = [
 			user("go"),
 			...tool("task_plan", {}, "plan"),
@@ -600,7 +626,7 @@ describe("TaskPlanGuard", () => {
 			...tool("bash", { command: "bash run.sh --dry-run" }, "gates passed"),
 			reply("Done."),
 		];
-		plan = act(plan, { action: "update", id: 3, status: "done" }, run).plan;
+		update({ action: "update", id: 3, status: "done" });
 		reviewResult = {
 			model: "luna",
 			verdict: "gaps",
@@ -617,7 +643,7 @@ describe("TaskPlanGuard", () => {
 		expect(reviews[0].diff).toContain("+gate 1");
 		expect(reviews[0].verifyOutput).toContain("gates passed");
 		expect(planReviewer.logReview).toHaveBeenCalledWith(expect.objectContaining({ phase: "review", model: "luna" }));
-		expect(plan?.review).toEqual({ model: "luna", verdict: "gaps", mustFix: 1 });
+		expect(current().review).toEqual({ model: "luna", verdict: "gaps", mustFix: 1 });
 
 		run = [...run, pushed, reply("Fixed the publish call too.")];
 		expect(await g.beforeStop()).toEqual([]);
@@ -630,7 +656,7 @@ describe("TaskPlanGuard", () => {
 		// The session cwd (dir) is under /tmp, as eval workspaces are. Judged against process.cwd() instead, a write
 		// into it reads as a scratch artifact, the run looks like it changed nothing, and the review is skipped.
 		const g = guard();
-		plan = created();
+		taskPlan.set(created());
 		g.startOperation();
 		const check = tool("bash", { command: "bash run.sh --dry-run" }, "gates passed");
 		const checkId = (check[1] as { toolCallId: string }).toolCallId;
@@ -640,16 +666,16 @@ describe("TaskPlanGuard", () => {
 			...check,
 			reply("Done."),
 		];
-		plan = {
-			...plan,
-			items: plan.items.map((i) => ({
+		taskPlan.set({
+			...current(),
+			items: current().items.map((i) => ({
 				...i,
 				status: "done" as const,
 				...(i.kind === "verify"
 					? { evidence: { toolCallId: checkId, command: "bash run.sh --dry-run", output: "gates passed" } }
 					: {}),
 			})),
-		};
+		});
 
 		expect(await g.beforeStop()).toEqual([]);
 		expect(reviews).toHaveLength(1);
@@ -661,13 +687,13 @@ describe("TaskPlanGuard", () => {
 			const script = join(workspace, "build.sh");
 			writeFileSync(script, "drawtext\n");
 			const g = guard();
-			plan = created({ verify_command: `bash ${script}` });
+			taskPlan.set(created({ verify_command: `bash ${script}` }));
 			g.startOperation();
 			changing(script);
 			writeFileSync(script, "zoompan\n");
 			originals.untraced.push(`cd ${workspace} && python3 - <<'EOF'\nopen('addvoice.sh','w')\nEOF`);
 			changing("run.sh");
-			plan = { ...plan, items: plan.items.map((i) => ({ ...i, status: "done" as const })) };
+			closeAll();
 			run = [
 				user("go"),
 				...tool("task_plan", {}, "plan"),
@@ -676,7 +702,7 @@ describe("TaskPlanGuard", () => {
 				reply("Done."),
 			];
 
-			plan = act(plan, { action: "update", id: 3, status: "done" }, run).plan;
+			update({ action: "update", id: 3, status: "done" });
 			await g.beforeStop();
 			expect(reviews[0].locations).toEqual([workspace]);
 			expect(reviews[0].diff).toContain(script);
@@ -687,7 +713,7 @@ describe("TaskPlanGuard", () => {
 	});
 
 	it("reopens only the final gate when a later source edit makes its captured result stale", async () => {
-		plan = created();
+		taskPlan.set(created());
 		const g = guard();
 		g.startOperation();
 		run = [
@@ -695,48 +721,51 @@ describe("TaskPlanGuard", () => {
 			...tool("edit", { path: "run.sh" }, "ok"),
 			...tool("bash", { command: "bash run.sh --dry-run" }, "gates passed"),
 		];
-		plan = act(plan, { action: "update", id: 3, status: "done" }, run).plan;
+		update({ action: "update", id: 3, status: "done" });
 		run.push(
 			...tool("edit", { path: "run.sh" }, "later edit"),
 			...tool("bash", { command: "node unrelated.mjs" }, "unrelated pass"),
 			reply("Done and verified."),
 		);
 		expect((await g.beforeStop())[0]).toMatchObject({ customType: "claim-check" });
-		expect(plan?.items[2]).toMatchObject({ status: "open", evidence: undefined });
+		expect(current().items[2]).toMatchObject({ status: "open", evidence: undefined });
 		expect(reviews).toHaveLength(0);
 	});
 
 	it("keeps the final gate closed and reviews the plan when its check is rerun with no change after it", async () => {
-		plan = created();
+		taskPlan.set(created());
 		const g = guard();
 		g.startOperation();
-		plan = { ...plan, items: plan.items.map((i) => (i.kind === "step" ? { ...i, status: "done" as const } : i)) };
+		taskPlan.set({
+			...current(),
+			items: current().items.map((i) => (i.kind === "step" ? { ...i, status: "done" as const } : i)),
+		});
 		run = [
 			user("go"),
 			...tool("task_plan", {}, "plan"),
 			...tool("edit", { path: "run.sh" }, "ok"),
 			...tool("bash", { command: "bash run.sh --dry-run" }, "gates passed"),
 		];
-		plan = act(plan, { action: "update", id: 3, status: "done" }, run).plan;
+		update({ action: "update", id: 3, status: "done" });
 		run.push(
 			...tool("bash", { command: "bash run.sh --dry-run" }, "gates passed again"),
 			reply("Done and verified."),
 		);
 
 		expect(await g.beforeStop()).toEqual([]);
-		expect(plan?.items[2]).toMatchObject({ status: "done", evidence: { output: "gates passed again" } });
+		expect(current().items[2]).toMatchObject({ status: "done", evidence: { output: "gates passed again" } });
 		expect(reviews).toHaveLength(1);
 		expect(reviews[0].verifyOutput).toContain("gates passed again");
 	});
 
 	it("does not resurrect an old plan for a new unplanned change", async () => {
 		const old = created();
-		plan = {
+		taskPlan.set({
 			...old,
 			items: old.items.map((item) => ({ ...item, status: "done" })),
 			review: { model: "luna", verdict: "ok", mustFix: 0 },
-		};
-		const before = JSON.stringify(plan);
+		});
+		const before = JSON.stringify(current());
 		const g = guard();
 		g.startOperation();
 		run = [
@@ -746,16 +775,35 @@ describe("TaskPlanGuard", () => {
 			reply("Fixed and tested."),
 		];
 		expect(await g.beforeStop()).toEqual([]);
-		expect(JSON.stringify(plan)).toBe(before);
+		expect(JSON.stringify(current())).toBe(before);
 		expect(reviews).toHaveLength(0);
+		expect(g.planStatus()).toBeUndefined();
+	});
+
+	it("does not judge a stop in a new Task by an open plan from the previous one (#517)", async () => {
+		session.appendMessage({ role: "user", content: "fix issue 486", timestamp: 0 });
+		taskPlan.set(created());
+		const anchor = session.appendMessage({ role: "user", content: "now fix the psychology refill", timestamp: 0 });
+		session.appendCustomEntry(TASK_BOUNDARY_CUSTOM_TYPE, { taskSummary: "psychology", beforeEntryId: anchor });
+		const g = guard();
+		g.startOperation();
+		run = [
+			user("now fix the psychology refill"),
+			...tool("task_plan", {}, "No task plan."),
+			...tool("edit", { path: "refill.py" }, "ok"),
+			...tool("bash", { command: "node tests/refill.mjs" }, "refill PASS"),
+			reply("Fixed and tested."),
+		];
+		// Judged by the old plan, its unrun `bash run.sh --dry-run` would push back on this claim.
+		expect(await g.beforeStop()).toEqual([]);
 		expect(g.planStatus()).toBeUndefined();
 	});
 
 	it("records a skipped review in the plan status", async () => {
 		const g = guard();
-		plan = created();
+		taskPlan.set(created());
 		g.startOperation();
-		plan = { ...plan, items: plan.items.map((i) => ({ ...i, status: "done" as const })) };
+		closeAll();
 		run = [user("go"), ...tool("task_plan", {}, "plan"), reply("Done.")];
 		reviewResult = { skipped: "timeout" };
 		expect(await g.beforeStop()).toEqual([]);

@@ -38,12 +38,16 @@ const DONE_CLAIM = /\b(done|fixed|updated|changed|added|removed|deleted|renamed|
  */
 export type PlanVerification = { covered: true } | { command?: string; after?: string };
 
-export interface ClaimCheckOptions {
-	plan?: PlanVerification;
-	/** The caller's reading of this run, so both judge it the same way; read here (with `cwd`) when absent. */
-	evidence?: RunEvidence;
-	cwd?: string;
-}
+export type ClaimCheckOptions = { plan?: PlanVerification } & (
+	| {
+			/** The caller's reading of this run, so both judge it the same way. */
+			evidence: RunEvidence;
+	  }
+	| {
+			/** The session cwd, to read the run here when the caller has no reading. */
+			cwd: string;
+	  }
+);
 
 function lastReply(messages: AgentMessage[]): AssistantMessage | undefined {
 	for (let i = messages.length - 1; i >= 0; i--) {
@@ -54,11 +58,11 @@ function lastReply(messages: AgentMessage[]): AssistantMessage | undefined {
 }
 
 /** Returns the push-back text, or undefined when the reply is consistent with the run. Exported for tests. */
-export function findClaimProblem(runMessages: AgentMessage[], options: ClaimCheckOptions = {}): string | undefined {
+export function findClaimProblem(runMessages: AgentMessage[], options: ClaimCheckOptions): string | undefined {
 	const reply = lastReply(runMessages);
 	if (!reply) return undefined;
 	const replyText = textOf(reply.content);
-	const evidence = options.evidence ?? readRunEvidence(runMessages, options.cwd ?? process.cwd());
+	const evidence = "evidence" in options ? options.evidence : readRunEvidence(runMessages, options.cwd);
 	const { runs } = evidence;
 
 	// A: unresolved failed file changes.
@@ -113,7 +117,7 @@ export const FINAL_REPLY_NOTE =
 	"The user will only see your last reply, not the one above. Once this is resolved, write that last reply as the complete answer for the user (results, links, anything deferred and why), not as a report on this check.";
 
 /** One corrective push per run at most; undefined when there is nothing to push. */
-export function claimCheck(runMessages: AgentMessage[], options: ClaimCheckOptions = {}): CustomMessage | undefined {
+export function claimCheck(runMessages: AgentMessage[], options: ClaimCheckOptions): CustomMessage | undefined {
 	if (runMessages.some((m) => m.role === "custom" && m.customType === CLAIM_CHECK_CUSTOM_TYPE)) return undefined;
 	const problem = findClaimProblem(runMessages, options);
 	if (!problem) return undefined;

@@ -48,72 +48,90 @@ function tool(name: string, args: Record<string, unknown>, output: string, isErr
 
 describe("findClaimProblem", () => {
 	it("A: flags a failed edit that was never retried (the 2026-09-26 run.sh case)", () => {
-		const problem = findClaimProblem([
-			user("switch run.sh to a single image"),
-			...tool(
-				"edit",
-				{ path: "tools/run.sh" },
-				"No changes applied: all 5 edits were rejected. Could not find edits[4]",
-				true,
-			),
-			...tool("bash", { command: "sed -i '105d' tools/run.sh" }, ""),
-			...tool("bash", { command: "bash tools/run.sh --dry-run" }, "[dry-run] nothing published"),
-			reply("Done and verified — gate changed to exactly 1 image."),
-		]);
+		const problem = findClaimProblem(
+			[
+				user("switch run.sh to a single image"),
+				...tool(
+					"edit",
+					{ path: "tools/run.sh" },
+					"No changes applied: all 5 edits were rejected. Could not find edits[4]",
+					true,
+				),
+				...tool("bash", { command: "sed -i '105d' tools/run.sh" }, ""),
+				...tool("bash", { command: "bash tools/run.sh --dry-run" }, "[dry-run] nothing published"),
+				reply("Done and verified — gate changed to exactly 1 image."),
+			],
+			{ cwd: process.cwd() },
+		);
 		expect(problem).toContain("tools/run.sh");
 		expect(problem).toContain("never successfully retried");
 	});
 
 	it("A: a later successful edit to the same path resolves the failure", () => {
 		expect(
-			findClaimProblem([
-				user("fix it"),
-				...tool("edit", { path: "a.ts" }, "Could not find the exact text", true),
-				...tool("edit", { path: "a.ts" }, "Successfully replaced 1 block(s)"),
-				reply("Updated a.ts."),
-			]),
+			findClaimProblem(
+				[
+					user("fix it"),
+					...tool("edit", { path: "a.ts" }, "Could not find the exact text", true),
+					...tool("edit", { path: "a.ts" }, "Successfully replaced 1 block(s)"),
+					reply("Updated a.ts."),
+				],
+				{ cwd: process.cwd() },
+			),
 		).toBeUndefined();
 	});
 
 	it("A: stays quiet when the reply already reports the failure", () => {
 		expect(
-			findClaimProblem([
-				user("fix it"),
-				...tool("edit", { path: "src/a.ts" }, "Could not find the exact text", true),
-				reply("The edit to a.ts failed: the text changed. Want me to retry?"),
-			]),
+			findClaimProblem(
+				[
+					user("fix it"),
+					...tool("edit", { path: "src/a.ts" }, "Could not find the exact text", true),
+					reply("The edit to a.ts failed: the text changed. Want me to retry?"),
+				],
+				{ cwd: process.cwd() },
+			),
 		).toBeUndefined();
 	});
 
 	it("B: flags a verification claim with no command after the last change", () => {
-		const problem = findClaimProblem([
-			user("fix it"),
-			...tool("bash", { command: "npm test" }, "ok"),
-			...tool("edit", { path: "a.ts" }, "Successfully replaced 1 block(s)"),
-			reply("Fixed and tested."),
-		]);
+		const problem = findClaimProblem(
+			[
+				user("fix it"),
+				...tool("bash", { command: "npm test" }, "ok"),
+				...tool("edit", { path: "a.ts" }, "Successfully replaced 1 block(s)"),
+				reply("Fixed and tested."),
+			],
+			{ cwd: process.cwd() },
+		);
 		expect(problem).toContain("no check command ran after your last change (a.ts)");
 	});
 
 	it("B: flags a verification claim when the last command failed", () => {
-		const problem = findClaimProblem([
-			user("fix it"),
-			...tool("write", { path: "a.ts" }, "Wrote a.ts"),
-			...tool("bash", { command: "npm test" }, "1 failing\nCommand exited with code 1", true),
-			reply("Fixed, tests pass."),
-		]);
+		const problem = findClaimProblem(
+			[
+				user("fix it"),
+				...tool("write", { path: "a.ts" }, "Wrote a.ts"),
+				...tool("bash", { command: "npm test" }, "1 failing\nCommand exited with code 1", true),
+				reply("Fixed, tests pass."),
+			],
+			{ cwd: process.cwd() },
+		);
 		expect(problem).toContain("last check after your changes failed: 1 failing");
 	});
 
 	it("B: a grep with no matches after the change is not a failed check", () => {
 		expect(
-			findClaimProblem([
-				user("fix it"),
-				...tool("edit", { path: "a.ts" }, "Successfully replaced 1 block(s)"),
-				...tool("bash", { command: "npm test" }, "all passed"),
-				...tool("bash", { command: "grep -n oldName src/a.ts" }, "Command exited with code 1", true),
-				reply("Fixed and verified."),
-			]),
+			findClaimProblem(
+				[
+					user("fix it"),
+					...tool("edit", { path: "a.ts" }, "Successfully replaced 1 block(s)"),
+					...tool("bash", { command: "npm test" }, "all passed"),
+					...tool("bash", { command: "grep -n oldName src/a.ts" }, "Command exited with code 1", true),
+					reply("Fixed and verified."),
+				],
+				{ cwd: process.cwd() },
+			),
 		).toBeUndefined();
 	});
 
@@ -125,40 +143,45 @@ describe("findClaimProblem", () => {
 					...tool("edit", { path: "a.ts" }, "Successfully replaced 1 block(s)"),
 					reply("Fixed and tested."),
 				],
-				{ plan: { covered: true } },
+				{ plan: { covered: true }, cwd: process.cwd() },
 			),
 		).toBeUndefined();
 	});
 
 	it("B: accepts a verification claim backed by a passing command", () => {
 		expect(
-			findClaimProblem([
-				user("fix it"),
-				...tool("edit", { path: "a.ts" }, "Successfully replaced 1 block(s)"),
-				...tool("bash", { command: "npm test" }, "all passed"),
-				reply("Fixed and verified."),
-			]),
+			findClaimProblem(
+				[
+					user("fix it"),
+					...tool("edit", { path: "a.ts" }, "Successfully replaced 1 block(s)"),
+					...tool("bash", { command: "npm test" }, "all passed"),
+					reply("Fixed and verified."),
+				],
+				{ cwd: process.cwd() },
+			),
 		).toBeUndefined();
 	});
 
 	it("C: flags a done claim for a requested change with no tool calls", () => {
-		expect(findClaimProblem([user("delete the old backup file"), reply("Done, deleted.")])).toContain(
-			"no tool calls",
-		);
+		expect(
+			findClaimProblem([user("delete the old backup file"), reply("Done, deleted.")], { cwd: process.cwd() }),
+		).toContain("no tool calls");
 	});
 
 	it("C: ignores plain conversation", () => {
-		expect(findClaimProblem([user("how are you?"), reply("All good, done for the day.")])).toBeUndefined();
+		expect(
+			findClaimProblem([user("how are you?"), reply("All good, done for the day.")], { cwd: process.cwd() }),
+		).toBeUndefined();
 	});
 });
 
 describe("claimCheck", () => {
 	it("pushes back at most once per run", async () => {
 		const run = [user("delete the old backup file"), reply("Done.")];
-		const first = claimCheck(run);
+		const first = claimCheck(run, { cwd: process.cwd() });
 		expect(first).toMatchObject({ role: "custom", customType: CLAIM_CHECK_CUSTOM_TYPE });
 		// #389: the corrected reply replaces this one in Telegram, so it must be the full answer.
 		expect(first?.content).toContain(FINAL_REPLY_NOTE);
-		expect(claimCheck([...run, first as AgentMessage, reply("Done.")])).toBeUndefined();
+		expect(claimCheck([...run, first as AgentMessage, reply("Done.")], { cwd: process.cwd() })).toBeUndefined();
 	});
 });

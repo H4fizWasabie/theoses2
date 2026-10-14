@@ -414,11 +414,7 @@ export interface CommandEffect {
 	unknownChange: boolean;
 }
 
-export function commandEffect(
-	command: string,
-	cwd = process.cwd(),
-	protectedPaths: readonly string[] = [],
-): CommandEffect {
+export function commandEffect(command: string, cwd: string, protectedPaths: readonly string[] = []): CommandEffect {
 	const { lines, heredocBodies } = commandLines(command);
 	const context = `${command}\n${heredocBodies}`;
 	const paths = new Set<string>();
@@ -480,7 +476,7 @@ export interface FileChanges {
 export function fileChangesOf(
 	toolName: string,
 	args: Record<string, unknown>,
-	cwd = process.cwd(),
+	cwd: string,
 	protectedPaths: readonly string[] = [],
 ): FileChanges | undefined {
 	if (FILE_TOOLS.has(toolName) && typeof args.path === "string") return { paths: [args.path], dirs: [] };
@@ -493,7 +489,7 @@ export function fileChangesOf(
 }
 
 /** True when this tool run changed (or tried to change) files. A failed edit/write changed nothing. */
-export function runChangesFiles(run: ToolRun, cwd = process.cwd(), protectedPaths: readonly string[] = []): boolean {
+export function runChangesFiles(run: ToolRun, cwd: string, protectedPaths: readonly string[] = []): boolean {
 	if (FILE_TOOLS.has(run.name)) return !run.isError;
 	if (COMMAND_TOOLS.has(run.name) && run.command) return commandEffect(run.command, cwd, protectedPaths).changesFiles;
 	return false;
@@ -677,7 +673,7 @@ function runtimeBody(command: string, depth = 0): boolean {
 }
 
 /** A recognized runtime command with no source/unknown writes; isolated artifacts are permitted. */
-export function isCheckCommand(run: ToolRun, cwd = process.cwd(), protectedPaths: readonly string[] = []): boolean {
+export function isCheckCommand(run: ToolRun, cwd: string, protectedPaths: readonly string[] = []): boolean {
 	if (!COMMAND_TOOLS.has(run.name) || run.command === undefined) return false;
 	const effect = commandEffect(run.command, cwd, protectedPaths);
 	return !effect.readOnly && !effect.changesFiles && runtimeBody(run.command);
