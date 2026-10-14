@@ -16,7 +16,7 @@ import {
 import type { CompactionReason } from "./run.ts";
 
 /**
- * Compaction Trigger (CONTEXT.md): the decision, after an assistant message, of whether to compact and why. It reads
+ * Compaction Trigger (GLOSSARY.md): the decision, after an assistant message, of whether to compact and why. It reads
  * a snapshot and returns what to do; the caller applies it (sets the recovery flag, drops the failed message, starts the
  * Compaction Run). The automatic cases:
  * 1. Overflow with retry: a context-overflow error or a recoverable length stop. The caller removes the failed

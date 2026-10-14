@@ -10,7 +10,7 @@ import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { createDeferredToolDefinitions } from "./tools/deferred-dispatch.ts";
 
 /**
- * Tool Registry (CONTEXT.md): the session's set of available tools, built from built-in, SDK, external and
+ * Tool Registry (GLOSSARY.md): the session's set of available tools, built from built-in, SDK, external and
  * extension sources, and the rule that decides which of them are active. It does not own the active set (the
  * Agent does): `refresh` returns the names that should be active and the caller applies them.
  */

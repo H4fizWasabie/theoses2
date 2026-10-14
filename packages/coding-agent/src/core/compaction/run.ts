@@ -13,7 +13,7 @@ import {
 } from "./compaction.ts";
 
 /**
- * Compaction Run (CONTEXT.md): one execution of context compaction from preparation to `compaction_end`,
+ * Compaction Run (GLOSSARY.md): one execution of context compaction from preparation to `compaction_end`,
  * for the manual and the automatic triggers alike. It owns the extension hooks, the summarizer call, the
  * compaction entry, the message rebuild and every `compaction_end` / `session_compact_failed` pair. The
  * trigger decision and overflow-retry bookkeeping stay with the caller.

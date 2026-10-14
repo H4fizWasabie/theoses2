@@ -1,7 +1,7 @@
 import type { OperationFinishedEntry, SessionManager } from "./session-manager.ts";
 
 /**
- * Working Note (CONTEXT.md): the rules for the note's content and lifecycle. SessionManager only stores it, as
+ * Working Note (GLOSSARY.md): the rules for the note's content and lifecycle. SessionManager only stores it, as
  * `working_note` entries holding the whole note (ADR-0001); everything that decides what the note says lives here.
  */
 

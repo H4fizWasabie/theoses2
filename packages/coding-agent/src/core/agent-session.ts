@@ -1339,7 +1339,7 @@ export class AgentSession {
 		if (outcome !== "completed") return;
 		// Turn Settlement: only a completed operation of a non-CLI Channel Session (every header defaults
 		// to channel "cli"). CLI still reaches Durable Memory, but only through compaction distilling the
-		// turns it drops (see CONTEXT.md's Turn Settlement entry) — settlement itself never runs for it.
+		// turns it drops (see GLOSSARY.md's Turn Settlement entry) — settlement itself never runs for it.
 		if (this.sessionManager.getChannelSessionKey().channel !== "cli") {
 			settleTurn(this, this._settlementText);
 		}
