@@ -5,6 +5,7 @@ import type { ToolDefinition } from "./extensions/types.ts";
 import { describeRewindPlan, type RewindPoint, type RewindResult } from "./file-checkpoints.ts";
 import { findExactModelReferenceMatch } from "./model-resolver.ts";
 import { createAgentSession } from "./sdk.ts";
+import { sessionIdMatches } from "./session-discovery.ts";
 import { SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 
@@ -238,7 +239,11 @@ export function createChannelSessions(options: ChannelSessionsOptions) {
 		 * (a session file is only flushed once it has an assistant message). Never opens one.
 		 */
 		find(sessionId: string): ChannelSession | undefined {
-			return open.find((session) => session.sessionId === sessionId);
+			return open.find(
+				(session) =>
+					session.sessionId === sessionId ||
+					(session.sessionFile !== undefined && sessionIdMatches(sessionId, session.sessionFile)),
+			);
 		},
 	};
 }

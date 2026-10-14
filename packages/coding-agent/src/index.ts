@@ -1,7 +1,6 @@
 // Core session management
 
 export { type Args, parseArgs } from "./cli/args.ts";
-
 // Config paths
 export {
 	CONFIG_DIR_NAME,
@@ -257,6 +256,7 @@ export {
 	type TaskBoundaryData,
 	type TaskDescriptorData,
 } from "./core/sdk.ts";
+export { findSessionById } from "./core/session-discovery.ts";
 export {
 	type ArtifactEntry,
 	type BranchSummaryEntry,

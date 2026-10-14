@@ -12,6 +12,7 @@ import {
 	createChannelSessions,
 	describeFinalError,
 	describeRewindResult,
+	findSessionById,
 	getAgentDir,
 	type SessionInfo,
 	SessionManager,
@@ -256,9 +257,7 @@ async function visibleSessions(): Promise<SessionView[]> {
 }
 
 async function findVisibleSession(id: string, channelSessions: ChannelSessions, cwd: string): Promise<SessionInfo> {
-	const info = (await SessionManager.listAll(undefined, undefined, DASHBOARD_CHANNEL)).find(
-		(session) => session.id === id,
-	);
+	const info = await findSessionById(id, { channel: DASHBOARD_CHANNEL });
 	if (info) return info;
 
 	// Not on disk yet, so a brand-new session is only among the open Channel Sessions.
@@ -266,7 +265,7 @@ async function findVisibleSession(id: string, channelSessions: ChannelSessions, 
 	if (!open?.sessionFile) throw new Error("Session not found");
 	return {
 		path: open.sessionFile,
-		id,
+		id: open.sessionId,
 		cwd,
 		channel: DASHBOARD_CHANNEL,
 		channelSessionId: open.channelSessionId,
