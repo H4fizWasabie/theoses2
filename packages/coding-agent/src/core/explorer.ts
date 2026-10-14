@@ -20,7 +20,7 @@
 
 import type { Api, Model, Usage } from "theoses-ai";
 import { type Static, Type } from "typebox";
-import { createBudgetedAgent } from "./background-agent.ts";
+import { createBudgetedAgent, describeStop } from "./background-agent.ts";
 import { resolveBackgroundModel } from "./background-models.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -58,6 +58,8 @@ export interface ExplorerResult {
 	usage: Usage;
 	/** The caps that cut the job off, e.g. "12-turn cap"; empty when none did. */
 	stoppedBy: string[];
+	/** The caller stopped the job; no cap was the reason. */
+	aborted: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -200,20 +202,20 @@ async function runExplorerWithSlot(
 	// A cap can cut the job off mid-research and the model can end without an answer; the handle then gives it
 	// one last turn with no tools to write up what it has read (it used to return only INCOMPLETE, and did so
 	// for 22 of 34 jobs).
-	const { status, text, stats, stoppedBy } = await handle.promptToAnswer(options.question, {
-		finalizePrompt: FINALIZE_PROMPT,
-	});
+	const result = await handle.promptToAnswer(options.question, { finalizePrompt: FINALIZE_PROMPT });
+	const { status, text, stats, stoppedBy, aborted } = result;
+	const why = describeStop(result) ?? "ended without an answer";
 
 	let answer: string;
 	if (status !== "none") {
 		answer = ensureBudgetFooter(text, tier, stats.turns, stats.inputTokens);
 	} else {
 		const kIn = Math.round(stats.inputTokens / 1000);
-		answer = `INCOMPLETE: budget exhausted before a final answer was produced.\n~${kIn}K in, ${Math.min(stats.turns, caps.maxTurns)}/${caps.maxTurns} turns`;
+		answer = `INCOMPLETE: the explorer ${why} before a final answer was produced.\n~${kIn}K in, ${Math.min(stats.turns, caps.maxTurns)}/${caps.maxTurns} turns`;
 	}
 	if (status !== "complete") {
 		console.error(
-			`[explore] ${status === "partial" ? "partial" : "no answer"} (${tier}): ${stats.turns} turns, ${Math.round(stats.inputTokens / 1000)}K in${stoppedBy.length > 0 ? `, hit ${stoppedBy.join(", ")}` : ", ended without an answer"}`,
+			`[explore] ${status === "partial" ? "partial" : "no answer"} (${tier}): ${stats.turns} turns, ${Math.round(stats.inputTokens / 1000)}K in, ${why}`,
 		);
 	}
 
@@ -227,6 +229,7 @@ async function runExplorerWithSlot(
 		outputTokens: stats.outputTokens,
 		usage: stats.usage,
 		stoppedBy,
+		aborted,
 	};
 }
 
@@ -276,11 +279,12 @@ export function createExploreToolDefinition(deps: ExploreToolDeps): ToolDefiniti
 				providerHooks: deps.providerHooks,
 				onStatus: (status) => onUpdate?.({ content: [{ type: "text", text: status }], details: undefined }),
 			});
+			const why = describeStop(result);
 			const header = result.complete
 				? ""
 				: result.answer.startsWith("INCOMPLETE:")
-					? "INCOMPLETE (explorer hit its budget) — consider a narrower re-spawn.\n"
-					: `PARTIAL (explorer stopped at its ${result.stoppedBy.length > 0 ? result.stoppedBy.join(" and ") : "budget"}; this is what it had read) — consider a narrower re-spawn for the rest.\n`;
+					? `INCOMPLETE (explorer ${why ?? "ended without an answer"}) — consider a narrower re-spawn.\n`
+					: `PARTIAL (explorer ${why ?? "stopped early"}; this is what it had read) — consider a narrower re-spawn for the rest.\n`;
 			return {
 				content: [{ type: "text", text: `${header}${result.answer}` }],
 				details: result,

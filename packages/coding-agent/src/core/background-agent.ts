@@ -1,16 +1,16 @@
 /**
  * Shared runner core for sub-agents (explorer.ts, researcher.ts, task-agent.ts, plan-reviewer.ts): an isolated
- * `Agent` with a turns/input-token budget, provider-hook wiring (so cost-watch sees its traffic under its own
- * model), abort-signal plumbing, a live status line and a line cap. Deliberately does not cover consolidation's
+ * `Agent` with turn, input-token and wall-clock caps, provider-hook wiring (so cost-watch sees its traffic under its
+ * own model), abort-signal plumbing, a live status line and a line cap. Deliberately does not cover consolidation's
  * modelRuntime.completeSimple() calls - that bypass of extension hooks is its own documented decision (see
  * memory-consolidation.ts), not a duplicate of this.
  *
  * `promptToAnswer()` owns what a run ended with: whether the agent answered (its last message is an assistant
  * message with text and no tool call, and the caller's `isAnswer` accepts the text), the tool-free finalize turn
- * when it did not, and the status: complete, partial (a cap or abort cut it short) or none. Each caller keeps
- * only its prompts, its tools, what counts as an answer, and how it words the result. `prompt()` accumulates
- * turns/tokens across repeat calls rather than resetting them, so the finalize turn counts against the same
- * budget as the first prompt.
+ * when it did not, the status (complete, partial when a cap or abort cut it short, or none), and why it stopped:
+ * the caps it hit, or the caller's abort. Each caller keeps only its prompts, its tools, what counts as an answer,
+ * and how it words the result around `describeStop`. The finalize turn counts against the same budget as the first
+ * prompt.
  */
 
 import {
@@ -26,7 +26,7 @@ import type { ModelRuntime } from "./model-runtime.ts";
 import type { ProviderHooks } from "./provider-hooks.ts";
 import { logServedProvider } from "./served-provider-log.ts";
 
-export function lastAssistantText(messages: AgentMessage[]): string {
+function lastAssistantText(messages: AgentMessage[]): string {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const message = messages[i];
 		if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
@@ -40,7 +40,7 @@ export function lastAssistantText(messages: AgentMessage[]): string {
 	return "";
 }
 
-export function endedOnToolCall(messages: AgentMessage[]): boolean {
+function endedOnToolCall(messages: AgentMessage[]): boolean {
 	const last = messages[messages.length - 1];
 	return last?.role === "assistant" && Array.isArray(last.content) && last.content.some((b) => b.type === "toolCall");
 }
@@ -48,11 +48,12 @@ export function endedOnToolCall(messages: AgentMessage[]): boolean {
 /**
  * The text of the run's final message when that message is an assistant reply with no tool call, else "". A cap
  * stops the loop after a turn's tool results, so a capped run ends on a tool result: the narration beside its last
- * tool call ("Let me run the tests.") is not an answer, though `lastAssistantText` would return it.
+ * tool call ("Let me run the tests.") is not an answer, though `lastAssistantText` would return it. Nor is a reply
+ * an abort cut off mid-stream (a time limit or the caller's stop): it is half written.
  */
 function finalReplyText(messages: AgentMessage[]): string {
 	const last = messages[messages.length - 1];
-	if (last?.role !== "assistant" || endedOnToolCall(messages)) return "";
+	if (last?.role !== "assistant" || last.stopReason === "aborted" || endedOnToolCall(messages)) return "";
 	return lastAssistantText([last]);
 }
 
@@ -90,6 +91,19 @@ export interface CreateBudgetedAgentOptions {
 	onStatus?: (status: string) => void;
 	/** Truncates the text `promptToAnswer` returns to this many lines, with a note saying so. */
 	capLines?: number;
+	/**
+	 * A wall-clock cap, counted from `promptToAnswer`. At the deadline the turn in progress is aborted, a hung model
+	 * call or tool included, and the finalize turn runs like after any other cap.
+	 */
+	maxWallMs?: number;
+	/** How long that finalize turn may take before it is aborted too. Only tests change it. */
+	finalizeGraceMs?: number;
+}
+
+export const FINALIZE_GRACE_MS = 2 * 60_000;
+
+function timeLimitLabel(ms: number): string {
+	return ms % 60_000 === 0 ? `${ms / 60_000}-minute time limit` : `${ms / 1000}-second time limit`;
 }
 
 export interface BudgetedAgentTurnStats {
@@ -100,7 +114,7 @@ export interface BudgetedAgentTurnStats {
 	cost: number;
 	/** The run's assistant-message usage summed, for the tool result that reports it to session stats (issue #536). */
 	usage: Usage;
-	/** True once maxTurns or maxInputTokens was hit. */
+	/** True once a cap was hit: maxTurns, maxInputTokens or maxWallMs. */
 	stoppedByBudget: boolean;
 }
 
@@ -130,24 +144,28 @@ export interface PromptedAnswer {
 	stats: BudgetedAgentTurnStats;
 	/** True when the first prompt did not end in an answer and the finalize turn ran. */
 	finalized: boolean;
-	/** The budget limits the first prompt reached, e.g. "30-turn cap"; empty when none. */
+	/** The caps the first prompt reached, e.g. "30-turn cap" or "10-minute time limit"; empty when none. */
 	stoppedBy: string[];
+	/** The caller's signal aborted: the run was stopped, which is not a cap and gets no finalize turn. */
+	aborted: boolean;
 }
 
 export interface BudgetedAgentHandle {
-	/** The underlying Agent, for a caller that needs its own state or subscription. */
-	agent: Agent;
-	/**
-	 * Run one prompt to completion. Turns/tokens accumulate across repeat calls on the same
-	 * handle (a finalize prompt counts against the same budget as the first prompt).
-	 */
-	prompt(text: string): Promise<BudgetedAgentTurnStats>;
 	/**
 	 * Run one prompt; if it does not end in an answer (the caller decides what that is), give the agent one
 	 * last turn with no tools to write one up from what it has read. It runs after a cap on purpose: a cap
 	 * must never be the reason the caller gets nothing. Skipped once the signal has aborted.
 	 */
 	promptToAnswer(text: string, options: PromptToAnswerOptions): Promise<PromptedAnswer>;
+}
+
+/** Why a run ended early, for a caller to word: "was stopped", "hit its 30-turn cap", or undefined when neither. */
+export function describeStop({
+	aborted,
+	stoppedBy,
+}: Pick<PromptedAnswer, "aborted" | "stoppedBy">): string | undefined {
+	if (aborted) return "was stopped";
+	return stoppedBy.length > 0 ? `hit its ${stoppedBy.join(" and ")}` : undefined;
 }
 
 export function createBudgetedAgent(options: CreateBudgetedAgentOptions): BudgetedAgentHandle {
@@ -236,15 +254,35 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 		return reply.length > 0 && (isAnswer?.(reply, stats) ?? true) ? reply : undefined;
 	};
 
+	// Runs one prompt, aborting it as a cap after `ms`, and says whether that fired.
+	const timed = async (text: string, ms: number | undefined) => {
+		let fired = false;
+		const timer =
+			ms === undefined
+				? undefined
+				: setTimeout(() => {
+						fired = true;
+						stoppedByBudget = true;
+						agent.abort();
+					}, ms);
+		try {
+			const stats = await prompt(text);
+			return { stats, fired };
+		} finally {
+			clearTimeout(timer);
+		}
+	};
+	const timeLimit = options.maxWallMs === undefined ? undefined : timeLimitLabel(options.maxWallMs);
+
 	return {
-		agent,
-		prompt,
 		async promptToAnswer(text, { finalizePrompt, isAnswer }) {
-			let stats = await prompt(text);
+			const first = await timed(text, options.maxWallMs);
+			let stats = first.stats;
 			const stoppedBy = stats.stoppedByBudget
 				? [
 						turns >= options.maxTurns && `${options.maxTurns}-turn cap`,
 						inputTokens >= options.maxInputTokens && `${options.maxInputTokens / 1000}K input-token cap`,
+						first.fired && timeLimit,
 					].filter((limit): limit is string => typeof limit === "string")
 				: [];
 			let answer = answerOf(stats, isAnswer);
@@ -252,20 +290,26 @@ export function createBudgetedAgent(options: CreateBudgetedAgentOptions): Budget
 			if (answer === undefined && !options.signal?.aborted) {
 				finalized = true;
 				agent.state.tools = [];
-				stats = await prompt(finalizePrompt);
+				// Only a time limit needs a bound on the finalize turn: the other caps stopped the run between turns.
+				const grace = first.fired ? (options.finalizeGraceMs ?? FINALIZE_GRACE_MS) : undefined;
+				stats = (await timed(finalizePrompt, grace)).stats;
 				answer = answerOf(stats, isAnswer);
 			}
+			// Read after the finalize turn: the caller can stop the run during it too.
+			const aborted = options.signal?.aborted === true;
 			if (answer === undefined) {
-				return { status: "none", text: lastAssistantText(agent.state.messages), stats, finalized, stoppedBy };
+				const notes = lastAssistantText(agent.state.messages);
+				return { status: "none", text: notes, stats, finalized, stoppedBy, aborted };
 			}
 			// A cap that fired on the turn the agent answered cut nothing off; only one that forced the finalize turn did.
-			const cutShort = (finalized && stoppedBy.length > 0) || options.signal?.aborted === true;
+			const cutShort = (finalized && stoppedBy.length > 0) || aborted;
 			return {
 				status: cutShort ? "partial" : "complete",
 				text: capLines(answer, options.capLines),
 				stats,
 				finalized,
 				stoppedBy,
+				aborted,
 			};
 		},
 	};

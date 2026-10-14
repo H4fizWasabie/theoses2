@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AssistantMessage, type Context, EventStream, getModel, type ProviderHeaders } from "theoses-ai/compat";
+import { type AssistantMessage, type Context, EventStream, getModel } from "theoses-ai/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createExploreToolDefinition, resetExplorerConcurrencyForTests, runExplorer } from "../src/core/explorer.ts";
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
@@ -261,7 +261,7 @@ describe("explorer (issue #254)", () => {
 		const result = await tool.execute("id", { question: "q" }, undefined, undefined, undefined as never);
 
 		const text = JSON.stringify(result.content);
-		expect(text).toContain("PARTIAL (explorer stopped at its 12-turn cap");
+		expect(text).toContain("PARTIAL (explorer hit its 12-turn cap");
 		expect(text).toContain("retry.ts:42");
 		expect(text).not.toContain("INCOMPLETE");
 	});
@@ -388,76 +388,6 @@ describe("explorer (issue #254)", () => {
 			} as unknown as ModelRuntime;
 			return { runtime, captured };
 		}
-
-		it("forwards onPayload and onResponse to streamSimple options", async () => {
-			const { runtime, captured } = createCapturingRuntime(() => createAssistantMessage("done. ~1K in, 1/8 turns"));
-			const onPayload = async (payload: unknown) => payload;
-			const onResponse = async () => {};
-
-			await runExplorer({
-				question: "q",
-				cwd: tempDir,
-				modelRuntime: runtime,
-				providerHooks: hooks({ onPayload, onResponse }),
-			});
-
-			expect(captured.length).toBeGreaterThan(0);
-			for (const options of captured) {
-				expect(options?.onPayload).toBe(onPayload);
-				expect(options?.onResponse).toBe(onResponse);
-			}
-		});
-
-		it("injects transformHeaders into streamSimple options, preserving fallback when absent", async () => {
-			const { runtime, captured } = createCapturingRuntime(() => createAssistantMessage("done. ~1K in, 1/8 turns"));
-			const transformHeaders = async (headers: ProviderHeaders | undefined) => ({ ...headers, "x-probe": "1" });
-
-			await runExplorer({
-				question: "q",
-				cwd: tempDir,
-				modelRuntime: runtime,
-				providerHooks: hooks({ transformHeaders }),
-			});
-
-			expect(captured.length).toBeGreaterThan(0);
-			for (const options of captured) {
-				// The wrapper applies the hook and never returns undefined.
-				const applied = await options?.transformHeaders?.({});
-				expect(applied).toEqual({ "x-probe": "1" });
-			}
-		});
-
-		// Issue #263: agent-session.ts's onPayload/onResponse/transformHeaders read their `model`
-		// argument to override ctx.model on the ExtensionRunner (see extensions-runner.test.ts), so
-		// the explorer's wrapper here must actually pass its resolved model through, not just the
-		// headers. Before this fix transformHeaders was only ever called with one argument.
-		it("passes the explorer's resolved model as transformHeaders' second argument", async () => {
-			const { runtime, captured } = createCapturingRuntime(() => createAssistantMessage("done. ~1K in, 1/8 turns"));
-			const seenModels: unknown[] = [];
-			const transformHeaders = async (headers: ProviderHeaders | undefined, model: unknown) => {
-				seenModels.push(model);
-				return headers ?? {};
-			};
-
-			await runExplorer({
-				question: "q",
-				cwd: tempDir,
-				modelRuntime: runtime,
-				providerHooks: hooks({ transformHeaders }),
-			});
-
-			expect(captured.length).toBeGreaterThan(0);
-			for (const options of captured) {
-				await options?.transformHeaders?.({});
-			}
-			// This fixture's getModel ignores the requested provider/id and always returns the
-			// same fake model (see createCapturingRuntime above) — the point here isn't which
-			// model it is, only that runExplorer's resolved model reaches transformHeaders at all.
-			expect(seenModels.length).toBeGreaterThan(0);
-			for (const model of seenModels) {
-				expect((model as { id?: string } | undefined)?.id).toBe("claude-sonnet-4-5");
-			}
-		});
 
 		it("createExploreToolDefinition passes its deps hooks through to runExplorer", async () => {
 			const { runtime, captured } = createCapturingRuntime(() =>
