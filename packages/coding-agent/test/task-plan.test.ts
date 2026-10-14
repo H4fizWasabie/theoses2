@@ -12,7 +12,7 @@ import {
 	applyPlanAction,
 	formatPlanStatus,
 	needsReview,
-	refreshFinalVerify,
+	planAtStop,
 	type TaskPlan,
 	type TaskPlanInput,
 } from "../src/core/task-plan.ts";
@@ -81,7 +81,7 @@ function created(input: Partial<TaskPlanInput> = {}): TaskPlan {
 	return result.plan;
 }
 
-describe("refreshFinalVerify", () => {
+describe("planAtStop", () => {
 	const check = "bash run.sh --dry-run";
 	const verified = () => [
 		user("go"),
@@ -95,35 +95,53 @@ describe("refreshFinalVerify", () => {
 		return result.plan;
 	}
 
-	function refresh(plan: TaskPlan, run: AgentMessage[]): TaskPlan {
-		return refreshFinalVerify(plan, readRunEvidence(run, process.cwd()));
+	function stop(plan: TaskPlan, run: AgentMessage[]) {
+		return planAtStop(plan, readRunEvidence(run, process.cwd()));
 	}
 
-	it("returns the plan itself while the final gate's evidence is current, or the run changed nothing", () => {
+	it("returns the plan itself, vouching for a claim, while the final criterion's evidence is current or the run changed nothing", () => {
 		const run = verified();
 		const plan = closed(run);
-		expect(refresh(plan, run)).toBe(plan);
-		expect(refresh(plan, [user("next"), ...tool("bash", { command: check }, "passed later")])).toBe(plan);
+		expect(stop(plan, run)).toEqual({ plan, verification: { covered: true } });
+		expect(stop(plan, run).plan).toBe(plan);
+		expect(stop(plan, [user("next"), ...tool("bash", { command: check }, "passed later")]).plan).toBe(plan);
 	});
 
-	it("keeps the final gate closed on a passing rerun, with the rerun as its evidence", () => {
+	it("keeps the final criterion closed on a passing rerun, with the rerun as its evidence", () => {
 		const run = verified();
 		const plan = closed(run);
 		run.push(...tool("bash", { command: check }, "passed again"));
-		expect(refresh(plan, run).items[2]).toMatchObject({ status: "done", evidence: { output: "passed again" } });
+		const result = stop(plan, run);
+		expect(result.plan.items[2]).toMatchObject({ status: "done", evidence: { output: "passed again" } });
+		expect(result.verification).toEqual({ covered: true });
 	});
 
-	it("reopens the final gate after a later change, unless the check passed again after it", () => {
+	it("reopens the final criterion after a later change, binding a claim to its check, unless the check passed again", () => {
 		const edited = [...verified(), ...tool("edit", { path: "run.sh" }, "later edit")];
 		const plan = closed(verified());
-		expect(refresh(plan, edited).items[2]).toMatchObject({ status: "open", evidence: undefined });
-		const failed = [...edited, ...tool("bash", { command: check }, "FAILURE: gate 1", true)];
-		expect(refresh(plan, failed).items[2]).toMatchObject({ status: "open", evidence: undefined });
-		const passed = [...edited, ...tool("bash", { command: check }, "passed after the edit")];
-		expect(refresh(plan, passed).items[2]).toMatchObject({
-			status: "done",
-			evidence: { output: "passed after the edit" },
-		});
+		const declared = { command: check, after: plan.items[2].verifyAfter };
+		const reopened = stop(plan, edited);
+		expect(reopened.plan.items[2]).toMatchObject({ status: "open", evidence: undefined });
+		expect(reopened.verification).toEqual(declared);
+		const failed = stop(plan, [...edited, ...tool("bash", { command: check }, "FAILURE: gate 1", true)]);
+		expect(failed.plan.items[2]).toMatchObject({ status: "open", evidence: undefined });
+		expect(failed.verification).toEqual(declared);
+		const passed = stop(plan, [...edited, ...tool("bash", { command: check }, "passed after the edit")]);
+		expect(passed.plan.items[2]).toMatchObject({ status: "done", evidence: { output: "passed after the edit" } });
+		expect(passed.verification).toEqual({ covered: true });
+	});
+
+	it("binds a claim to an open final criterion's check", () => {
+		const plan = created();
+		expect(stop(plan, verified()).verification).toEqual({ command: check, after: plan.items[2].verifyAfter });
+	});
+
+	it("binds nothing for an abandoned plan or one without a verification criterion", () => {
+		const abandoned = act(closed(verified()), { action: "abandon", reason: "user changed course" }).plan!;
+		expect(stop(abandoned, verified()).verification).toBeUndefined();
+		const plan = closed(verified());
+		const noCriterion = { ...plan, items: plan.items.filter((item) => item.kind !== "verify") };
+		expect(stop(noCriterion, verified()).verification).toBeUndefined();
 	});
 });
 

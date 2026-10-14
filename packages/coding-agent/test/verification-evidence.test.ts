@@ -587,8 +587,8 @@ describe("one reading of a run for every evidence question", () => {
 		const checkId = (check[1] as { toolCallId: string }).toolCallId;
 		const messages = [...tool("edit", { path: "feature.mjs" }), ...check, reply("Tested and verified.")];
 
-		expect(findClaimProblem(messages, { verifyCommand: CHECK })).toBeUndefined();
-		expect(findClaimProblem(messages, { verifyCommand: CHECK, verifyAfter: checkId })).toContain("no check command");
+		expect(findClaimProblem(messages, { plan: { command: CHECK } })).toBeUndefined();
+		expect(findClaimProblem(messages, { plan: { command: CHECK, after: checkId } })).toContain("no check command");
 	});
 
 	it("reports what the run changed and touched", () => {

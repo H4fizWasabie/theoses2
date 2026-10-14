@@ -10,11 +10,11 @@
 import { readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative } from "node:path";
 import type { AgentMessage } from "theoses-agent-core";
-import { claimCheck, FINAL_REPLY_NOTE } from "./claim-check.ts";
+import { claimCheck, FINAL_REPLY_NOTE, type PlanVerification } from "./claim-check.ts";
 import type { Originals } from "./file-checkpoints.ts";
 import { createCustomMessage } from "./messages.ts";
 import { formatFindings, logReview, PLAN_REVIEW_CUSTOM_TYPE, type ReviewOutcome } from "./plan-reviewer.ts";
-import { formatPlanStatus, needsReview, refreshFinalVerify, type TaskPlan, verifyOutput } from "./task-plan.ts";
+import { formatPlanStatus, needsReview, planAtStop, type TaskPlan, verifyOutput } from "./task-plan.ts";
 import { fileChangesOf, firstLine, textOf } from "./tool-runs.ts";
 import { resolveToCwd } from "./tools/path-utils.ts";
 import { readRunEvidence } from "./verification-evidence.ts";
@@ -144,27 +144,17 @@ export class TaskPlanGuard {
 		const enabled = this.deps.enabled();
 		let plan = enabled ? this.deps.getPlan() : undefined;
 		const planUsed = evidence.usedPlanTool || JSON.stringify(plan ?? null) !== this.planAtOperationStart;
+		let verification: PlanVerification | undefined;
 		if (plan && planUsed) {
-			const refreshed = refreshFinalVerify(plan, evidence);
-			if (refreshed !== plan) {
-				plan = refreshed;
+			const atStop = planAtStop(plan, evidence);
+			if (atStop.plan !== plan) {
+				plan = atStop.plan;
 				this.deps.setPlan(plan);
 			}
+			verification = atStop.verification;
 		}
-		const latestVerify =
-			planUsed && !plan?.abandoned ? plan?.items.filter((item) => item.kind === "verify").at(-1) : undefined;
-		const verifyCovered =
-			plan !== undefined &&
-			!plan.abandoned &&
-			latestVerify?.status !== "open" &&
-			latestVerify?.evidence !== undefined;
 
-		const claim = claimCheck(run, {
-			verifyCovered,
-			verifyCommand: latestVerify?.verifyCommand,
-			verifyAfter: latestVerify?.verifyAfter,
-			evidence,
-		});
+		const claim = claimCheck(run, { plan: verification, evidence });
 		if (claim) return [claim];
 		if (!enabled) return [];
 

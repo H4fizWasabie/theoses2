@@ -10,7 +10,7 @@
  * Rules, checked in order, at most one push per run:
  *   A. An edit/write failed and no later edit/write to the same path succeeded (claim-independent).
  *   B. The reply claims verification, but no check command ran after the last file change, or the
- *      last one failed. Skipped when a task plan's verify item already demands that evidence.
+ *      last one failed. Skipped when a task plan's final verification criterion already holds that evidence.
  *   C. The user asked for a change, the reply claims it is done, and the run made no tool calls.
  *
  * Read-only commands (grep, cat, ls, git status...) are never evidence either way: self-diagnostic's
@@ -31,13 +31,15 @@ const CHANGE_REQUEST_VERB =
 	/\b(edit|change|update|fix|add|remove|delete|rename|move|create|write|patch|replace|set)\b/i;
 const DONE_CLAIM = /\b(done|fixed|updated|changed|added|removed|deleted|renamed|created|applied|patched|all set)\b/i;
 
+/**
+ * What a Task Plan binds a verification claim to. `covered`: its final verification criterion holds Verification
+ * Evidence, so rule B is already enforced there. Otherwise only that criterion's `command`, run `after` its
+ * declaration, counts, so unrelated runtime commands cannot mask it. No plan: any runtime check counts.
+ */
+export type PlanVerification = { covered: true } | { command?: string; after?: string };
+
 export interface ClaimCheckOptions {
-	/** A task plan's verify item covers this run, so rule B's evidence check is already enforced there. */
-	verifyCovered?: boolean;
-	/** When a plan is present, unrelated runtime commands cannot mask its check. */
-	verifyCommand?: string;
-	/** With a plan, only a check after its verify item was declared counts, as for closing that item. */
-	verifyAfter?: string;
+	plan?: PlanVerification;
 	/** The caller's reading of this run, so both judge it the same way; read here (with `cwd`) when absent. */
 	evidence?: RunEvidence;
 	cwd?: string;
@@ -77,9 +79,10 @@ export function findClaimProblem(runMessages: AgentMessage[], options: ClaimChec
 	}
 
 	// B: verification claimed without a passing check command after the last file change.
-	if (!options.verifyCovered && VERIFICATION_CLAIM.test(replyText)) {
+	const plan: PlanVerification = options.plan ?? {};
+	if (!("covered" in plan) && VERIFICATION_CLAIM.test(replyText)) {
 		const { changed, lastChange } = evidence;
-		const lastCheck = evidence.check({ command: options.verifyCommand, after: options.verifyAfter });
+		const lastCheck = evidence.check(plan);
 		if (changed) {
 			const what = lastChange?.path ?? firstLine(lastChange?.command ?? "a file", 80);
 			if (!lastCheck) {
