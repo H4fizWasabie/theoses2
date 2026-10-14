@@ -252,23 +252,23 @@ async function findLocalSessionByExactId(
 async function resolveSessionPath(
 	sessionArg: string,
 	cwd: string,
-	sessionDir?: string,
-	archive = false,
+	options: { sessionDir?: string; followRotation?: boolean } = {},
 ): Promise<ResolvedSession> {
+	const { sessionDir, followRotation } = options;
 	// If it looks like a file path, resolve it before handing it to the session manager.
 	if (sessionArg.includes("/") || sessionArg.includes("\\") || sessionArg.endsWith(".jsonl")) {
 		return { type: "path", path: resolvePath(sessionArg, cwd) };
 	}
 
 	// Try to match as session ID in current project first
-	const localMatch = await findSessionById(sessionArg, { cwd, sessionDir, prefix: true, archive });
+	const localMatch = await findSessionById(sessionArg, { cwd, sessionDir, prefix: true, followRotation });
 
 	if (localMatch) {
 		return { type: "local", path: localMatch.path };
 	}
 
 	// Try global search across all projects
-	const globalMatch = await findSessionById(sessionArg, { sessionDir, prefix: true, archive });
+	const globalMatch = await findSessionById(sessionArg, { sessionDir, prefix: true, followRotation });
 
 	if (globalMatch) {
 		return { type: "global", path: globalMatch.path, cwd: globalMatch.cwd };
@@ -366,7 +366,7 @@ async function selectStartupSession(
 			}
 		}
 
-		const resolved = await resolveSessionPath(parsed.fork, cwd, sessionDir, true);
+		const resolved = await resolveSessionPath(parsed.fork, cwd, { sessionDir, followRotation: false });
 
 		switch (resolved.type) {
 			case "path":
@@ -381,7 +381,7 @@ async function selectStartupSession(
 	}
 
 	if (parsed.session) {
-		const resolved = await resolveSessionPath(parsed.session, cwd, sessionDir);
+		const resolved = await resolveSessionPath(parsed.session, cwd, { sessionDir });
 
 		switch (resolved.type) {
 			case "path":

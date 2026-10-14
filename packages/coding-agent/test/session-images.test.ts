@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, uti
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { getDefaultSessionDir } from "../src/core/session-discovery.ts";
 import { exportSessionToJsonl } from "../src/core/session-export.ts";
 import {
 	EXTERNAL_IMAGE_MIN_CHARS,
@@ -11,7 +12,7 @@ import {
 	imageFileName,
 	saveImageFile,
 } from "../src/core/session-images.ts";
-import { getDefaultSessionDir, SessionManager } from "../src/core/session-manager.ts";
+import { SessionManager } from "../src/core/session-manager.ts";
 
 /** Canonical base64 of `bytes` filler bytes, so a save-then-load round trip returns the identical string. */
 const image = (bytes = 4000, fill = 7) => Buffer.alloc(bytes, fill).toString("base64");

@@ -42,8 +42,12 @@ _Avoid_: compaction check, compaction policy
 
 **Log Rotation**:
 Continuing a session in a new log once the old one grows too large, keeping an unbroken tail of its recent history, so that history reads the same after rotation as before. Bounds the log on disk, where a Compaction Run bounds what the model sees.
-The continuation remains one Channel Session: old references resume its current log, while closed logs remain archived history.
+The continuation remains one Channel Session: old references resume its current log, while closed logs remain readable history.
 _Avoid_: log truncation, session split, archiving
+
+**Closed log**:
+A session log that Log Rotation has ended: it names the log that continues it, stays readable, and is never written again. Resuming it, by path or ID, follows rotation to the session's current log; forking from it reads the closed log itself.
+_Avoid_: archive, archived log
 
 **Operation Loop**:
 What happens after each agent run inside one operation (one prompt, from its first agent run to its recorded outcome): retry a retryable error after backoff, recover from overflow with one compact-and-retry, run a post-turn Compaction Run, or finish. Retries and overflow recovery continue the same operation; the operation finishes before any other compaction, so a crash there never reads as an interrupted task. Implemented by `core/operation-loop.ts`: it owns the retry budget and the flags that carry decisions from agent events to the post-run step, and the pre-prompt compaction check; the session owns the `agent.continue()` loop and what finishing records (outcome entry, Working Note clearing, Turn Settlement).

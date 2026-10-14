@@ -28,4 +28,4 @@ Session artifacts live under a per-session `artifacts/` directory. Stored files 
 
 ## Configuration paths
 
-The default identity is `.theoses` for project settings and `~/.theoses/agent` for the global agent directory; environment overrides are derived from the app name. Session files are under the agent directory's `sessions/<encoded cwd>` path ([packages/coding-agent/src/config.ts](../packages/coding-agent/src/config.ts), identity and paths, lines 479-599; [packages/coding-agent/src/core/session-manager.ts](../packages/coding-agent/src/core/session-manager.ts), `getDefaultSessionDir`, lines 547-563).
+The default identity is `.theoses` for project settings and `~/.theoses/agent` for the global agent directory; environment overrides are derived from the app name. Session files are under the agent directory's `sessions/<encoded cwd>` path ([packages/coding-agent/src/config.ts](../packages/coding-agent/src/config.ts), identity and paths, lines 479-599; [packages/coding-agent/src/core/session-discovery.ts](../packages/coding-agent/src/core/session-discovery.ts), `getDefaultSessionDir`, lines 236-249).

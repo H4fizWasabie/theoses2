@@ -18,9 +18,25 @@ import type { Message, TextContent } from "theoses-ai";
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { type SessionLookupKey, sessionLookupKey } from "./session-cwd.ts";
-import type { FileEntry, SessionHeader, SessionInfo, SessionMessageEntry } from "./session-manager.ts";
+import type {
+	CustomEntry,
+	FileEntry,
+	SessionHeader,
+	SessionInfo,
+	SessionMessageEntry,
+	SessionRotatedData,
+} from "./session-manager.ts";
 
 export const SESSION_ROTATED_ENTRY_TYPE = "session_rotated";
+
+/** The entry Log Rotation ends a closed log with, naming the log that continues it. */
+export function isRotationMarker(entry: FileEntry | null | undefined): entry is CustomEntry<SessionRotatedData> {
+	return entry?.type === "custom" && entry.customType === SESSION_ROTATED_ENTRY_TYPE;
+}
+
+const NEWLINE = 0x0a;
+/** \n, \r, space and tab, trimmed from the end of the file before its last record. */
+const TRAILING_WHITESPACE = [NEWLINE, 0x0d, 0x20, 0x09];
 
 /** Reads only the last physical record, including records larger than a read buffer. */
 function lastEntry(filePath: string): FileEntry | null {
@@ -34,11 +50,11 @@ function lastEntry(filePath: string): FileEntry | null {
 			const chunk = Buffer.allocUnsafe(length);
 			readSync(fd, chunk, 0, length, position);
 			let end = chunk.length;
-			if (chunks.length === 0) while (end > 0 && [10, 13, 32, 9].includes(chunk[end - 1])) end--;
+			if (chunks.length === 0) while (end > 0 && TRAILING_WHITESPACE.includes(chunk[end - 1])) end--;
 			if (end === 0) {
 				continue;
 			}
-			const start = chunk.lastIndexOf(10, end - 1) + 1;
+			const start = chunk.lastIndexOf(NEWLINE, end - 1) + 1;
 			chunks.push(chunk.subarray(start, end));
 			if (start > 0 || position === 0)
 				return parseSessionEntryLine(Buffer.concat(chunks.reverse()).toString("utf8"));
@@ -52,8 +68,7 @@ function lastEntry(filePath: string): FileEntry | null {
 /** A closed log cannot become writable again, even if its successor has disappeared. */
 export function assertSessionWritable(filePath: string): void {
 	if (!existsSync(filePath)) return;
-	const entry = lastEntry(filePath);
-	if (entry?.type === "custom" && entry.customType === SESSION_ROTATED_ENTRY_TYPE) {
+	if (isRotationMarker(lastEntry(filePath))) {
 		throw new Error(`Cannot write to a log closed by Log Rotation: ${filePath}`);
 	}
 }
@@ -68,12 +83,12 @@ function rotationHeader(path: string): SessionHeader | null {
 	}
 }
 
-/** Forward and reverse lookup share the same definition of a rotation link. */
+/** The one definition of a rotation link: forward and backward walks both follow it. */
 function rotationSuccessor(path: string): string | undefined {
 	const entry = lastEntry(path);
-	if (entry?.type !== "custom" || entry.customType !== SESSION_ROTATED_ENTRY_TYPE) return undefined;
-	const data = entry.data as { to?: unknown } | undefined;
-	const successor = typeof data?.to === "string" && data.to ? resolvePath(data.to) : undefined;
+	if (!isRotationMarker(entry)) return undefined;
+	const to: unknown = entry.data?.to;
+	const successor = typeof to === "string" && to ? resolvePath(to) : undefined;
 	if (!successor || !existsSync(successor)) throw new Error(`Broken Log Rotation chain: missing successor of ${path}`);
 	let source: SessionHeader | null;
 	let header: SessionHeader | null;
@@ -98,19 +113,41 @@ function rotationSuccessor(path: string): string | undefined {
 	return successor;
 }
 
-/** Normal empty/missing paths keep open()'s creation behavior; successors never do. */
-export function resolveSessionFile(filePath: string): string {
-	let current = resolvePath(filePath);
+/** Each existing log from `start`, following `next` until it names none; a log reached twice is a broken chain. */
+function* rotationChain(start: string, next: (path: string) => string | undefined): Generator<string> {
 	const visited = new Set<string>();
-	while (existsSync(current)) {
+	for (let current: string | undefined = start; current && existsSync(current); current = next(current)) {
 		const identity = realpathSync(current);
 		if (visited.has(identity)) throw new Error(`Broken Log Rotation chain: cycle at ${current}`);
 		visited.add(identity);
-		const successor = rotationSuccessor(current);
-		if (!successor) return current;
-		current = successor;
+		yield current;
 	}
+}
+
+/** Normal empty/missing paths keep open()'s creation behavior; successors never do. */
+export function resolveSessionFile(filePath: string): string {
+	let current = resolvePath(filePath);
+	for (const path of rotationChain(current, rotationSuccessor)) current = path;
 	return current;
+}
+
+/** The closed log `path` continues: its parent, only when the parent's rotation marker names `path`. Forks and
+ * branches name a parent too, and that parent's turns belong to another session. */
+function rotationPredecessor(path: string): string | undefined {
+	const parent = rotationHeader(path)?.parentSession;
+	if (!parent || !existsSync(parent)) return undefined;
+	const successor = rotationSuccessor(parent);
+	return successor && realpathSync(successor) === realpathSync(path) ? parent : undefined;
+}
+
+/** This log, then the closed logs of its session before it, newest first. A damaged link ends the walk, so one
+ * damaged chain cannot break lookup of other sessions. */
+export function* sessionLogsBack(sessionFile: string): Generator<string> {
+	try {
+		yield* rotationChain(resolvePath(sessionFile), rotationPredecessor);
+	} catch {
+		// Damaged link or cycle: the session's history ends here.
+	}
 }
 function sessionFiles(sessionDir?: string): string[] {
 	try {
@@ -141,10 +178,11 @@ export async function findSessionById(
 		sessionDir?: string;
 		channel?: string;
 		prefix?: boolean;
-		archive?: boolean;
+		/** False reads the matching log itself, even a closed log, instead of its session's current log. */
+		followRotation?: boolean;
 	} = {},
 ): Promise<SessionInfo | undefined> {
-	const { cwd, sessionDir, channel, prefix, archive } = options;
+	const { cwd, sessionDir, channel, prefix, followRotation = true } = options;
 	const directory = sessionDir ?? (cwd ? getDefaultSessionDirPath(cwd) : undefined);
 	const files = sessionFiles(directory).filter((path) => {
 		const header = readSessionHeaderForDiscovery(path);
@@ -158,15 +196,17 @@ export async function findSessionById(
 						sessionCwdMatches(getSessionHeaderCwd(header), resolvePath(cwd)))))
 		);
 	});
-	const matches = (await Promise.all(files.map((path) => buildSessionInfo(path, channel, true))))
+	const matches = (
+		await Promise.all(files.map((path) => buildSessionInfo(path, { channel, includeClosedLogs: true })))
+	)
 		.filter((info): info is SessionInfo => info !== null)
 		.sort(byRecency);
 	const exact = matches.find((info) => info.id === id);
-	// A prefix may name one chain's logs (one session), but an archive read targets one log. A broken chain counts
-	// as its own session and reports its error when selected.
+	// A prefix may name one chain's logs (one session), but a read that does not follow rotation targets one log. A
+	// broken chain counts as its own session and reports its error when selected.
 	const targets = new Set(
 		matches.map((info) => {
-			if (archive) return info.path;
+			if (!followRotation) return info.path;
 			try {
 				return resolveSessionFile(info.path);
 			} catch {
@@ -176,33 +216,19 @@ export async function findSessionById(
 	);
 	if (!exact && targets.size > 1) throw new Error(`Session ID prefix '${id}' is ambiguous: ${targets.size} matches`);
 	const match = exact ?? matches[0];
-	if (!match || archive) return match;
+	if (!match || !followRotation) return match;
 	const current = resolveSessionFile(match.path);
-	const info = await buildSessionInfo(current, channel, true);
+	const info = await buildSessionInfo(current, { channel, includeClosedLogs: true });
 	if (!info) throw new Error(`Broken Log Rotation chain: invalid current log ${current}`);
 	return info;
 }
 
-/** Matches an old engine ID against this live log's actual rotation predecessors, never fork parents.
- * A damaged link ends the walk as no match, so one damaged chain cannot break lookup of other sessions. */
+/** Matches an old engine ID against this live log's actual rotation predecessors, never fork parents. */
 export function sessionIdMatches(id: string, sessionFile: string): boolean {
-	let current = resolvePath(sessionFile);
-	const visited = new Set<string>();
 	try {
-		while (existsSync(current)) {
-			const identity = realpathSync(current);
-			if (visited.has(identity)) return false;
-			visited.add(identity);
-			const header = rotationHeader(current);
-			if (header?.id === id) return true;
-			const parent = header?.parentSession;
-			if (!parent || !existsSync(parent)) return false;
-			const successor = rotationSuccessor(parent);
-			if (!successor || realpathSync(successor) !== identity) return false;
-			current = parent;
-		}
+		for (const path of sessionLogsBack(sessionFile)) if (rotationHeader(path)?.id === id) return true;
 	} catch {
-		return false;
+		// An unreadable header is no match.
 	}
 	return false;
 }
@@ -244,7 +270,6 @@ function parseSessionEntryLine(line: string): FileEntry | null {
 	}
 }
 
-/** Exported for testing */
 export function loadEntriesFromFile(filePath: string): FileEntry[] {
 	const resolvedFilePath = normalizePath(filePath);
 	if (!existsSync(resolvedFilePath)) return [];
@@ -375,7 +400,6 @@ function sessionKeyMatches(header: SessionHeader, key: SessionLookupKey): boolea
 	return key.channel === "cli" && key.channelSessionId === resolvePath(header.cwd);
 }
 
-/** Exported for testing */
 /** Newest activity first. A rotated log starts with copies of its parent's last messages, so the two tie on activity
  * until the next message; the newer log wins the tie. */
 function byRecency(a: SessionInfo, b: SessionInfo): number {
@@ -438,7 +462,11 @@ function getMessageActivityTime(entry: SessionMessageEntry): number | undefined 
 	return Number.isNaN(t) ? undefined : t;
 }
 
-async function buildSessionInfo(filePath: string, channel?: string, archive = false): Promise<SessionInfo | null> {
+async function buildSessionInfo(
+	filePath: string,
+	options: { channel?: string; includeClosedLogs?: boolean } = {},
+): Promise<SessionInfo | null> {
+	const { channel, includeClosedLogs = false } = options;
 	try {
 		const stats = await stat(filePath);
 		let header: SessionHeader | null = null;
@@ -465,7 +493,7 @@ async function buildSessionInfo(filePath: string, channel?: string, archive = fa
 				}
 				header = entry;
 				try {
-					if (!archive && resolveSessionFile(filePath) !== resolvePath(filePath)) {
+					if (!includeClosedLogs && resolveSessionFile(filePath) !== resolvePath(filePath)) {
 						rl.close();
 						stream.destroy();
 						return null;
@@ -552,7 +580,7 @@ async function buildSessionInfosWithConcurrency(
 		if (!file) return;
 
 		let task: Promise<void>;
-		task = buildSessionInfo(file, channel)
+		task = buildSessionInfo(file, { channel })
 			.then((info) => {
 				results[index] = info;
 			})
