@@ -14,7 +14,7 @@
 import type { AgentOptions, ThinkingLevel } from "theoses-agent-core";
 import type { Api, Model, Usage } from "theoses-ai";
 import { type Static, Type } from "typebox";
-import { createBudgetedAgent } from "./background-agent.ts";
+import { createBudgetedAgent, describeStop } from "./background-agent.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { ProviderHooks } from "./provider-hooks.ts";
@@ -120,16 +120,9 @@ export async function runTask(options: RunTaskOptions): Promise<TaskResult> {
 	});
 	// A cap can cut the job off mid-work; the handle then gives it one last turn with no tools to say what is
 	// done and what is not, so the parent gets that instead of reconstructing it from git.
-	const { status, text, stats, stoppedBy } = await handle.promptToAnswer(options.prompt, {
-		finalizePrompt: FINALIZE_PROMPT,
-	});
-
-	const why =
-		stoppedBy.length > 0
-			? `hit its ${stoppedBy.join(" and ")}`
-			: options.signal?.aborted
-				? "was stopped"
-				: "ended without a final summary";
+	const result = await handle.promptToAnswer(options.prompt, { finalizePrompt: FINALIZE_PROMPT });
+	const { status, text, stats, stoppedBy } = result;
+	const why = describeStop(result) ?? "ended without a final summary";
 	let answer: string;
 	if (status === "complete") {
 		answer = text;

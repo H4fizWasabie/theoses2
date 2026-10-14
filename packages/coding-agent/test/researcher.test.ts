@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AssistantMessage, EventStream, getModel } from "theoses-ai/compat";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
 import { createResearchToolDefinition, RESEARCH_CAPS, ResearchJobs, runResearch } from "../src/core/researcher.ts";
 
@@ -140,12 +140,50 @@ describe("researcher", () => {
 		const result = await runResearch({ question: "q", modelRuntime: runtime });
 
 		expect(result.report).toContain("Wrote it up from what it had");
-		expect(result.report).toContain(`stopped early (${RESEARCH_CAPS.maxTurns}-turn cap)`);
+		expect(result.report).toContain(`the job hit its ${RESEARCH_CAPS.maxTurns}-turn cap, so this report covers`);
 		expect(result.complete).toBe(false);
 		expect(result.stoppedBy).toEqual([`${RESEARCH_CAPS.maxTurns}-turn cap`]);
 		expect(result.turnsUsed).toBe(RESEARCH_CAPS.maxTurns + 1);
 		expect(toolCounts.slice(0, -1).every((count) => count > 0)).toBe(true);
 		expect(toolCounts.at(-1)).toBe(0);
+	});
+
+	it("writes up what it has when the time limit cuts off a hung request", async () => {
+		// The first request hangs until aborted; the write-up turn after it answers.
+		let call = 0;
+		const runtime = {
+			getModel: () => getModel("anthropic", "claude-sonnet-4-5")!,
+			streamSimple: (_model: unknown, _context: unknown, options: { signal?: AbortSignal }) => {
+				const stream = new MockStream();
+				if (call++ === 0) {
+					const cut = { ...assistant("Let me read one more"), stopReason: "aborted" as const };
+					stream.push({ type: "start", partial: cut });
+					options.signal?.addEventListener("abort", () =>
+						stream.push({ type: "done", reason: "aborted", message: cut }),
+					);
+				} else {
+					const report = assistant("Summary\nWhat it had by then");
+					queueMicrotask(() => {
+						stream.push({ type: "start", partial: report });
+						stream.push({ type: "done", reason: "stop", message: report });
+					});
+				}
+				return stream;
+			},
+		} as unknown as ModelRuntime;
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		try {
+			const running = runResearch({ question: "q", modelRuntime: runtime });
+			await vi.advanceTimersByTimeAsync(RESEARCH_CAPS.timeoutMs);
+			const result = await running;
+
+			expect(result.report).toContain("What it had by then");
+			expect(result.report).toContain("hit its 10-minute time limit");
+			expect(result.stoppedBy).toEqual(["10-minute time limit"]);
+			expect(result.complete).toBe(false);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("reports turns, searches and the cap that tripped in the tool result", async () => {

@@ -17,7 +17,7 @@ import { join } from "node:path";
 import type { Usage } from "theoses-ai";
 import { type Static, Type } from "typebox";
 import { getAgentDir } from "../config.ts";
-import { createBudgetedAgent } from "./background-agent.ts";
+import { createBudgetedAgent, describeStop, FINALIZE_GRACE_MS } from "./background-agent.ts";
 import { resolveBackgroundModel } from "./background-models.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -104,10 +104,6 @@ export async function runResearch(options: RunResearchOptions): Promise<Research
 		wrapToolDefinition(withCallBudget(tool, budget)),
 	);
 
-	const signal = options.signal
-		? AbortSignal.any([options.signal, AbortSignal.timeout(RESEARCH_CAPS.timeoutMs)])
-		: AbortSignal.timeout(RESEARCH_CAPS.timeoutMs);
-
 	const handle = createBudgetedAgent({
 		systemPrompt: RESEARCH_SYSTEM_PROMPT,
 		model,
@@ -115,29 +111,26 @@ export async function runResearch(options: RunResearchOptions): Promise<Research
 		modelRuntime: options.modelRuntime,
 		maxTurns: RESEARCH_CAPS.maxTurns,
 		maxInputTokens: RESEARCH_CAPS.maxInputTokens,
-		signal,
+		maxWallMs: RESEARCH_CAPS.timeoutMs,
+		signal: options.signal,
 		providerHooks: options.providerHooks,
 	});
 
 	// The model can end a turn with narration and no tool call ("Let me extract a few pages..."), or a cap
 	// can cut it off mid-research (2026-09-30: the job stopped on "let me write the report directly" and
 	// returned nothing). Either way the handle gives it one last turn, with no tools, to write up what it has.
-	const {
-		status,
-		text,
-		stats,
-		stoppedBy: budgetLimits,
-	} = await handle.promptToAnswer(options.question, {
+	const answer = await handle.promptToAnswer(options.question, {
 		finalizePrompt: FINALIZE_PROMPT,
 		isAnswer: looksLikeReport,
 	});
-	const stoppedBy = signal.aborted ? [...budgetLimits, "time limit"] : budgetLimits;
+	const { status, text, stats, stoppedBy } = answer;
+	const why = describeStop(answer);
 
 	let report: string;
 	if (status === "none") {
-		report = `INCOMPLETE: the job hit its budget or timeout before finishing.${text ? `\n\nLast notes:\n${text}` : ""}`;
+		report = `INCOMPLETE: the job ${why ?? "ended without a report"} before finishing.${text ? `\n\nLast notes:\n${text}` : ""}`;
 	} else if (status === "partial") {
-		report = `Note: the job stopped early (${stoppedBy.join(", ")}), so this report covers only what it had gathered.\n\n${text}`;
+		report = `Note: the job ${why ?? "stopped early"}, so this report covers only what it had gathered.\n\n${text}`;
 	} else {
 		report = text;
 	}
@@ -193,8 +186,7 @@ export function createResearchToolDefinition(deps: ResearchToolDeps): ToolDefini
 	return {
 		name: "research",
 		label: "research",
-		description:
-			"Run a deep web-research sub-agent (searches and reads many sources, cross-checks them, writes a cited report) and return its report. Blocks until the job finishes, typically 1-3 minutes and at most 10. Use for open-ended, multi-source questions (comparisons, current state of a topic, market or technical surveys). Do NOT use for a single fact (use web_search) or for questions about the codebase (use explore). Each job costs real money.",
+		description: `Run a deep web-research sub-agent (searches and reads many sources, cross-checks them, writes a cited report) and return its report. Blocks until the job finishes, typically 1-3 minutes and at most ${(RESEARCH_CAPS.timeoutMs + FINALIZE_GRACE_MS) / 60_000}. Use for open-ended, multi-source questions (comparisons, current state of a topic, market or technical surveys). Do NOT use for a single fact (use web_search) or for questions about the codebase (use explore). Each job costs real money.`,
 		promptSnippet: "Run a multi-source web research sub-agent and get its cited report back",
 		promptGuidelines: [
 			"Use `research` only when the question needs many sources or cross-checking. Single facts belong to `web_search`, code questions to `explore`.",
