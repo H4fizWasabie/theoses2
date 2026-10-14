@@ -2,22 +2,30 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerSessionResourceCleanup } from "theoses-ai";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FILE_CHECKPOINT_ENTRY_TYPE, type FileCheckpoint } from "../src/core/file-checkpoints.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ExtensionContext } from "../src/core/extensions/types.ts";
+import {
+	FILE_CHECKPOINT_ENTRY_TYPE,
+	type FileCheckpoint,
+	originalsSince,
+	planFileRewind,
+	rewindPoints,
+} from "../src/core/file-checkpoints.ts";
 import { selectConsolidationWindow } from "../src/core/memory-promotion.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SESSION_ROTATE_BYTES, SESSION_ROTATED_ENTRY_TYPE, SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import { TASK_BOUNDARY_CUSTOM_TYPE, TASK_DESCRIPTOR_CUSTOM_TYPE } from "../src/core/task-boundary-detector.ts";
 import type { TaskPlan } from "../src/core/task-plan.ts";
+import { createRecallTurnsToolDefinition } from "../src/core/tools/recall-turns.ts";
 
 const usage = {
-	input: 0,
-	output: 0,
-	cacheRead: 0,
-	cacheWrite: 0,
-	totalTokens: 0,
-	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	input: 100,
+	output: 20,
+	cacheRead: 300,
+	cacheWrite: 4,
+	totalTokens: 424,
+	cost: { input: 0.001, output: 0.002, cacheRead: 0.0003, cacheWrite: 0.0004, total: 0.0037 },
 };
 const user = (text: string, extra: unknown[] = []) =>
 	({ role: "user", content: [{ type: "text", text }, ...extra], timestamp: Date.now() }) as never;
@@ -78,11 +86,13 @@ describe("session log rotation", () => {
 	});
 
 	afterEach(() => {
+		vi.useRealTimers();
 		rmSync(root, { recursive: true, force: true });
 	});
 
 	/** An earlier task (promoted, checkpointed), a task boundary, the current task with its plan, then a compaction keeping its last turn. */
 	function longSession() {
+		vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-01T00:00:00Z") });
 		const manager = SessionManager.create(root, sessionDir, key);
 		manager.appendModelChange("openrouter", "z-ai/glm-5.3-flash");
 		manager.appendThinkingLevelChange("high");
@@ -100,6 +110,7 @@ describe("session log rotation", () => {
 		manager.appendCustomEntry(TASK_DESCRIPTOR_CUSTOM_TYPE, { descriptor: "second task" });
 		manager.appendPromotedRange(first, answer);
 		manager.writeWorkingNote("current note");
+		vi.setSystemTime(Date.now() + 1000); // the next turn starts after the plan was created
 		const kept = manager.appendMessage(user("look at this", [{ type: "image", data: photo, mimeType: "image/png" }]));
 		manager.appendCustomEntry(FILE_CHECKPOINT_ENTRY_TYPE, { turnId: kept, path: "/tmp/c", hash: null });
 		const keptAnswer = manager.appendMessage(assistant("a photo"));
@@ -187,9 +198,8 @@ describe("session log rotation", () => {
 
 	it("rotates on its own at a compaction once the log reaches the size limit", () => {
 		const manager = SessionManager.create(root, sessionDir, key);
-		manager.appendMessage(user("start"));
-		manager.appendMessage(assistant("ok"));
-		manager.appendCustomEntry("filler", "x".repeat(SESSION_ROTATE_BYTES));
+		const start = manager.appendMessage(user("start"));
+		manager.appendPromotedRange(start, manager.appendMessage(assistant("x".repeat(SESSION_ROTATE_BYTES))));
 		const oldFile = manager.getSessionFile() as string;
 		const kept = manager.appendMessage(user("latest"));
 		manager.appendMessage(assistant("latest answer"));
@@ -242,6 +252,148 @@ describe("session log rotation", () => {
 			expect(released).toEqual([opened]);
 		} finally {
 			unregister();
+		}
+	});
+
+	/**
+	 * Every turn changes files. Two consolidated turns that rotation drops, with an abandoned branch after them; the
+	 * turn a Task Plan was created in (consolidated, so only the plan keeps it); an old turn Durable Memory has not
+	 * consolidated; a consolidated turn after it; and the turn the last compaction kept. An extension saves state
+	 * along the way. The clock moves a second per turn, as it does between real turns.
+	 */
+	function historySession() {
+		vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-01T00:00:00Z") });
+		const manager = SessionManager.create(root, sessionDir, key);
+		const turn = (text: string, files: Record<string, string | null>, during?: () => void) => {
+			vi.setSystemTime(Date.now() + 1000);
+			const id = manager.appendMessage(user(text));
+			during?.();
+			for (const [path, hash] of Object.entries(files)) {
+				manager.appendCustomEntry(FILE_CHECKPOINT_ENTRY_TYPE, { turnId: id, path, hash });
+			}
+			return { id, answer: manager.appendMessage(assistant(`answer to ${text}`)) };
+		};
+		manager.appendModelChange("openrouter", "z-ai/glm-5.3-flash");
+		const t1 = turn("the deploy key is in vault-7", { "/x": "x1" });
+		manager.appendCustomEntry("ext-state", { version: 1 });
+		const t2 = turn("second consolidated turn", { "/y": "y1" });
+		manager.appendCustomEntry("ext-other", { kept: true });
+		const promoted = manager.appendPromotedRange(t1.id, t2.answer);
+		turn("an abandoned idea", { "/q": null });
+		manager.branch(promoted);
+		const planTurn = turn("start the plan task", { "/x": "x2", "/z": null }, () => manager.setTaskPlan(plan("plan")));
+		manager.appendPromotedRange(planTurn.id, planTurn.answer);
+		const pending = turn("pending fact about the boiler", { "/w": "w1" });
+		manager.appendCustomEntry("ext-state", { version: 2 });
+		const later = turn("consolidated later", { "/y": "y2" });
+		manager.appendPromotedRange(later.id, later.answer);
+		manager.appendCustomEntry("ext-state", { version: 3 });
+		const latest = turn("latest turn", { "/z": "z2", "/x": "x3" });
+		manager.appendCompaction("summary", latest.id, 1000, undefined, undefined, usage);
+		manager.appendOperationFinished("completed");
+		return { manager, t1, t2, planTurn, pending, later, latest };
+	}
+
+	it("offers the same rewinds inside the kept tail, restoring the same files, and none before it", () => {
+		const { manager, planTurn, pending, later, latest } = historySession();
+		const before = new Map(
+			rewindPoints(manager.getBranch()).map((p) => [p.entryId, planFileRewind(manager.getBranch(), p.entryId)]),
+		);
+
+		manager.rotate();
+
+		const points = rewindPoints(manager.getBranch()).map((p) => p.entryId);
+		expect(points).toEqual([latest.id, later.id, pending.id, planTurn.id]);
+		for (const id of points) expect(planFileRewind(manager.getBranch(), id)).toEqual(before.get(id));
+	});
+
+	it("gives Plan Review the same files for the active Task Plan", () => {
+		const { manager } = historySession();
+		const directory = manager.getCheckpointDirectory();
+		const createdAt = manager.getTaskPlan()?.createdAt as string;
+		const before = originalsSince(manager.getBranch(), directory, createdAt);
+		expect(before.files.length + before.skipped.length).toBe(4);
+
+		manager.rotate();
+
+		expect(originalsSince(manager.getBranch(), directory, createdAt)).toEqual(before);
+		expect(
+			originalsSince(SessionManager.open(manager.getSessionFile() as string).getBranch(), directory, createdAt),
+		).toEqual(before);
+	});
+
+	it("lets recall_turns find a dropped turn in the log before, but not from a fork of the session", async () => {
+		const { manager } = historySession();
+		const recall = async (session: SessionManager, query: string) => {
+			const result = await createRecallTurnsToolDefinition().execute("call", { query }, undefined, undefined, {
+				sessionManager: session,
+			} as unknown as ExtensionContext);
+			const first = result.content[0];
+			return first?.type === "text" ? first.text : "";
+		};
+		expect(await recall(manager, "deploy key vault-7")).toContain("vault-7");
+
+		manager.rotate();
+		manager.rotate(); // two logs back
+
+		expect(await recall(manager, "deploy key vault-7")).toContain("vault-7");
+		const boiler = await recall(manager, "boiler");
+		expect(boiler.split("\n")).toHaveLength(2); // a kept turn and its answer, once each though every log holds them
+		const fork = SessionManager.forkFrom(manager.getSessionFile() as string, root, sessionDir);
+		expect(await recall(fork, "deploy key vault-7")).toBe("No matching turns found in this session.");
+	});
+
+	it("keeps whole-session totals: usage, cost, message counts and compactions", () => {
+		const { manager } = historySession();
+		const totals = (session: SessionManager) => session.getSessionTotals();
+		const before = totals(manager);
+		// Seven turns, the abandoned one included; seven answers and the compaction paid.
+		expect(before).toMatchObject({ userMessages: 7, assistantMessages: 7, totalMessages: 14, compactions: 1 });
+		expect(before.usage.cost).toBeCloseTo(8 * 0.0037);
+
+		manager.rotate();
+		manager.appendCompaction("summary again", manager.getBranch().at(-1)?.id as string, 1000);
+		manager.rotate();
+
+		const after = { ...before, compactions: 2 };
+		expect(totals(manager)).toEqual(after);
+		expect(totals(SessionManager.open(manager.getSessionFile() as string))).toEqual(after);
+	});
+
+	it("keeps the latest state an extension saved of each type, and its entries in the tail in order, across a reopen", () => {
+		const { manager } = historySession();
+		const saved = (session: SessionManager) =>
+			session.getEntries().flatMap((e) => (e.type === "custom" && e.customType.startsWith("ext-") ? [e.data] : []));
+		expect(saved(manager)).toEqual([{ version: 1 }, { kept: true }, { version: 2 }, { version: 3 }]);
+
+		manager.rotate();
+
+		expect(saved(SessionManager.open(manager.getSessionFile() as string))).toEqual([
+			{ kept: true },
+			{ version: 2 },
+			{ version: 3 },
+		]);
+	});
+
+	it("keeps each label as it reads now, a cleared one included, and none for a dropped entry", () => {
+		const { manager, t1, later, latest } = historySession();
+		manager.appendLabelChange(later.answer, "cleared elsewhere");
+		manager.appendLabelChange(latest.id, "kept");
+		manager.appendLabelChange(t1.id, "dropped");
+		const leaf = manager.getLeafId() as string;
+		manager.branch(t1.id); // the clear is on another branch; the label it clears is in the tail
+		manager.appendLabelChange(later.answer, undefined);
+		manager.branch(leaf);
+		const labels = (session: SessionManager) => [later.answer, latest.id].map((id) => session.getLabel(id));
+		expect(labels(manager)).toEqual([undefined, "kept"]);
+
+		manager.rotate();
+
+		const reopened = SessionManager.open(manager.getSessionFile() as string);
+		for (const session of [manager, reopened]) {
+			expect(labels(session)).toEqual([undefined, "kept"]);
+			const labelEntries = session.getEntries().filter((entry) => entry.type === "label");
+			expect(labelEntries.map((entry) => entry.targetId)).toEqual([latest.id]);
 		}
 	});
 

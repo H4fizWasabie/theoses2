@@ -40,6 +40,10 @@ _Avoid_: compaction pass, compact job
 The decision, after an assistant message, of whether to compact and why: overflow (with a one-time compact-and-retry for a failed or truncated response, without a retry for a completed one), usage crossing the threshold, or the history passing its turn cap once the provider cache has gone cold. Implemented by `decideCompaction` in `core/compaction/trigger.ts`: a snapshot in, an action out (nothing, compact for a reason, or overflow recovery failed). The Operation Loop applies the action (the recovery flag, dropping the failed message, starting a Compaction Run); the trigger never starts a run or changes state itself. Distinct from the Compaction Run, which executes a compaction once one is chosen.
 _Avoid_: compaction check, compaction policy
 
+**Log Rotation**:
+Continuing a session in a new log once the old one grows too large, keeping an unbroken tail of its recent history, so that history reads the same after rotation as before. Bounds the log on disk, where a Compaction Run bounds what the model sees.
+_Avoid_: log truncation, session split, archiving
+
 **Operation Loop**:
 What happens after each agent run inside one operation (one prompt, from its first agent run to its recorded outcome): retry a retryable error after backoff, recover from overflow with one compact-and-retry, run a post-turn Compaction Run, or finish. Retries and overflow recovery continue the same operation; the operation finishes before any other compaction, so a crash there never reads as an interrupted task. Implemented by `core/operation-loop.ts`: it owns the retry budget and the flags that carry decisions from agent events to the post-run step, and the pre-prompt compaction check; the session owns the `agent.continue()` loop and what finishing records (outcome entry, Working Note clearing, Turn Settlement).
 _Avoid_: post-run handler, retry loop (it also compacts and finishes)

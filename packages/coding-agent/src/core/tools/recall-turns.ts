@@ -3,7 +3,7 @@ import { contentText } from "theoses-ai";
 import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { buildTermMatcher } from "../memory-store.ts";
-import type { SessionEntry } from "../session-manager.ts";
+import { predecessorBranches, type SessionEntry } from "../session-manager.ts";
 
 const recallTurnsSchema = Type.Object({
 	query: Type.String({ description: "What to search for in this session's own past turns" }),
@@ -71,12 +71,21 @@ export function createRecallTurnsToolDefinition(): ToolDefinition<typeof recallT
 		promptSnippet: "Search this session's own past turns for something no longer in context",
 		parameters: recallTurnsSchema,
 		execute: async (_id, { query }: RecallTurnsInput, _signal, _onUpdate, ctx) => {
-			const entries = ctx.sessionManager.getBranch();
-			const records = extractTurnRecords(entries);
 			const matcher = buildTermMatcher(query);
 			if (matcher.terms.length === 0) {
 				return { content: [{ type: "text", text: "No searchable terms in that query." }], details: undefined };
 			}
+			// Log Rotation leaves older turns in the logs before this one; a rotation's tail is in both, under the same ids.
+			// ponytail: reads every earlier log on each call; stop at enough matches if rotation chains grow long.
+			const { sessionManager } = ctx;
+			const byId = new Map<string, SessionEntry>();
+			for (const branch of [
+				sessionManager.getBranch(),
+				...predecessorBranches(sessionManager.getSessionFile(), sessionManager.getHeader()),
+			]) {
+				for (const entry of branch) if (!byId.has(entry.id)) byId.set(entry.id, entry);
+			}
+			const records = extractTurnRecords([...byId.values()]);
 
 			const scored = records
 				.map((record) => ({ record, score: matcher.score(record.text) }))

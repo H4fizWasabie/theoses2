@@ -24,7 +24,7 @@ import type { AgentMessage } from "theoses-agent-core";
 import { type ImageContent, type Message, type TextContent, type Usage, uuidv7 } from "theoses-ai";
 import { APP_NAME, getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
-import { FILE_CHECKPOINT_ENTRY_TYPE, type FileCheckpoint } from "./file-checkpoints.ts";
+import { FILE_CHECKPOINT_ENTRY_TYPE, turnAt } from "./file-checkpoints.ts";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -34,21 +34,22 @@ import {
 } from "./messages.ts";
 import { type SessionLookupKey, sessionLookupKey } from "./session-cwd.ts";
 import { copySessionImages, externalizeImages, hydrateImages } from "./session-images.ts";
-import {
-	TASK_BOUNDARY_CUSTOM_TYPE,
-	TASK_DESCRIPTOR_CUSTOM_TYPE,
-	type TaskBoundaryData,
-} from "./task-boundary-detector.ts";
+import { TASK_BOUNDARY_CUSTOM_TYPE, type TaskBoundaryData } from "./task-boundary-detector.ts";
 import { TASK_PLAN_ENTRY_TYPE, type TaskPlan } from "./task-plan.ts";
+import { type SessionTotals, sumSessionTotals } from "./usage-totals.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
 
 /** A log at least this large continues in a new log at its next compaction (`SessionManager.rotate`, #519). */
-// ponytail: raised from 16 MB as a stopgap. Rotation carries history with gaps, so /rewind, Plan Review's diff,
-// recall_turns and session stats answer wrongly after it; back to 16 MB once rotation keeps a contiguous tail.
-export const SESSION_ROTATE_BYTES = 64 * 1024 * 1024;
-/** The last entry of a rotated log; `data.to` is the log the session continues in. */
+export const SESSION_ROTATE_BYTES = 16 * 1024 * 1024;
+/** The last entry of a rotated log; its `data` is `SessionRotatedData`. */
 export const SESSION_ROTATED_ENTRY_TYPE = "session_rotated";
+
+/** The `data` of a `session_rotated` marker. */
+export interface SessionRotatedData {
+	/** The log the session continues in. */
+	to: string;
+}
 
 export interface ChannelSessionKey {
 	channel: string;
@@ -64,6 +65,8 @@ export interface SessionHeader {
 	parentSession?: string;
 	channel?: string;
 	channelSessionId?: string;
+	/** Set by Log Rotation: the totals of everything earlier logs held that this one does not (`sumSessionTotals`). */
+	carriedTotals?: SessionTotals;
 }
 
 export interface NewSessionOptions {
@@ -396,6 +399,31 @@ export function getLatestCompactionEntry(entries: SessionEntry[]): CompactionEnt
 	return null;
 }
 
+/**
+ * Where Log Rotation's tail starts on `branch`: the earliest of the first entry the last compaction kept, the oldest
+ * message no promoted range covers, and the turn the active Task Plan was created in, widened back to that turn's
+ * user message so no rewind point is offered whose turn lost its earlier checkpoints.
+ */
+function tailStart(
+	branch: SessionEntry[],
+	position: Map<string, number>,
+	promoted: readonly boolean[],
+	planCreatedAt: string | undefined,
+): number {
+	const compaction = getLatestCompactionEntry(branch);
+	const pending = branch.findIndex((entry, index) => entry.type === "message" && !promoted[index]);
+	const planTurn = planCreatedAt === undefined ? undefined : turnAt(branch, planCreatedAt);
+	let start = Math.min(
+		compaction ? (position.get(compaction.firstKeptEntryId) ?? position.get(compaction.id) ?? 0) : 0,
+		pending < 0 ? branch.length : pending,
+		planTurn ? (position.get(planTurn.id) ?? branch.length) : branch.length,
+	);
+	const isUserMessage = (entry: SessionEntry | undefined) =>
+		entry?.type === "message" && entry.message.role === "user";
+	while (start > 0 && !isUserMessage(branch[start])) start--;
+	return start;
+}
+
 function buildEntryIndex(entries: SessionEntry[], byId?: Map<string, SessionEntry>): Map<string, SessionEntry> {
 	if (byId) return byId;
 	const index = new Map<string, SessionEntry>();
@@ -689,6 +717,36 @@ export function loadEntriesFromFile(filePath: string): FileEntry[] {
 	}
 
 	return entries;
+}
+
+/**
+ * The branch each earlier log of a rotated session ended on, newest log first, each read only when iterated to.
+ * A log's predecessor is its `parentSession` only when that log ends with a `session_rotated` marker naming it:
+ * forks and branches name a parent too, and that parent's turns belong to another session. The branches overlap
+ * where a rotation carried entries forward, with the same ids.
+ */
+export function* predecessorBranches(
+	sessionFile: string | undefined,
+	header: SessionHeader | null,
+): Generator<SessionEntry[]> {
+	let file = sessionFile;
+	let parent = header?.parentSession;
+	while (file && parent) {
+		const entries = loadEntriesFromFile(parent);
+		const marker = entries.at(-1);
+		if (
+			marker?.type !== "custom" ||
+			marker.customType !== SESSION_ROTATED_ENTRY_TYPE ||
+			resolve((marker.data as SessionRotatedData).to) !== resolve(file)
+		)
+			return;
+		yield buildSessionPath(
+			entries.filter((entry): entry is SessionEntry => entry.type !== "session"),
+			marker.id,
+		);
+		file = parent;
+		parent = (entries[0] as SessionHeader).parentSession;
+	}
 }
 
 /**
@@ -1535,14 +1593,12 @@ export class SessionManager {
 	}
 
 	/**
-	 * Continues the session in a new log holding only what is still live (#519), so a months-long Channel Session
-	 * is loaded, held and rewritten at the size of its recent history rather than its whole life. Carried: the
-	 * active context (latest compaction, its kept tail, everything after), the latest entry of each kind of state
-	 * a getter reads (model, thinking level, working note, task plan, task boundary and its anchor, task descriptor,
-	 * session name, last operation outcome), messages Durable Memory has not consolidated yet, live artifacts,
-	 * labels, and the checkpoints and promoted ranges of the carried turns. Entries keep their ids and relative order, so every getter answers as before; rewind reaches
-	 * back only as far as the carried turns. The new log gets a new id and names the old one as `parentSession`;
-	 * the old one ends with a `session_rotated` entry and is never written again. Returns the new log's path.
+	 * Continues the session in a new log (Log Rotation, #519, #545), so a months-long Channel Session is loaded, held
+	 * and rewritten at the size of its recent history rather than its whole life. The new log keeps a contiguous tail
+	 * of the current branch from `tailStart`, inside which history reads as before; before it, only the latest entry
+	 * of each kind of point state, and the resolved labels of kept entries. The header records the totals of what
+	 * was dropped. Entries keep their ids and relative order. The new log names the old one as `parentSession`; the
+	 * old one ends with a `session_rotated` entry and is never written again. Returns the new log's path.
 	 */
 	rotate(): string | undefined {
 		if (!this.persist || !this.sessionFile || !this.flushed) return undefined;
@@ -1554,28 +1610,10 @@ export class SessionManager {
 		};
 		const all = this.getEntries();
 		const branch = this.getBranch();
-		const keep = new Set<SessionEntry>(buildContextEntries(all, this.leafId, this.byId));
-		const add = (entry: SessionEntry | undefined) => {
-			if (entry) keep.add(entry);
-		};
+		const position = new Map(branch.map((entry, index) => [entry.id, index]));
 		const isCustom = (entry: SessionEntry, customType: string) =>
 			entry.type === "custom" && entry.customType === customType;
-		add(branch.findLast((e) => e.type === "model_change"));
-		add(branch.findLast((e) => e.type === "thinking_level_change"));
-		add(branch.findLast((e) => e.type === "message" && e.message.role === "assistant"));
-		add(branch.findLast((e) => e.type === "working_note"));
-		add(branch.findLast((e) => e.type === "operation_finished"));
-		add(branch.findLast((e) => isCustom(e, TASK_DESCRIPTOR_CUSTOM_TYPE)));
-		const boundary = branch.findLast((e) => isCustom(e, TASK_BOUNDARY_CUSTOM_TYPE)) as CustomEntry | undefined;
-		if (boundary) {
-			add(boundary);
-			add(this.byId.get((boundary.data as TaskBoundaryData).beforeEntryId));
-		}
-		add(this._findTaskPlanEntry());
-		add(all.findLast((e) => e.type === "session_info")); // getSessionName reads every entry, not just the branch
-		// Messages no promoted range covers are still waiting for Durable Memory (a pass pending, or one that failed):
-		// they are carried too, so settlement still reaches them. Before the kept tail they stay out of the model's context.
-		const position = new Map(branch.map((entry, index) => [entry.id, index]));
+
 		const ranges: Array<[number, number]> = [];
 		const promoted = new Array<boolean>(branch.length).fill(false);
 		for (const range of branch) {
@@ -1586,23 +1624,35 @@ export class SessionManager {
 			ranges.push([first, last]);
 			for (let index = first; index <= last; index++) promoted[index] = true;
 		}
-		branch.forEach((entry, index) => {
-			if (entry.type === "message" && !promoted[index]) keep.add(entry);
-		});
+		const tail = branch.slice(tailStart(branch, position, promoted, this.getTaskPlan()?.createdAt));
+
+		// Label entries are not copied: one in the tail can be undone by a clear on another branch. The resolved
+		// labels of kept entries are written once below, as `createBranchedSession` does.
+		const keep = new Set<SessionEntry>(tail.filter((entry) => entry.type !== "label"));
+		const add = (entry: SessionEntry | undefined) => {
+			if (entry) keep.add(entry);
+		};
+		add(branch.findLast((e) => e.type === "model_change"));
+		add(branch.findLast((e) => e.type === "thinking_level_change"));
+		add(branch.findLast((e) => e.type === "message" && e.message.role === "assistant"));
+		add(branch.findLast((e) => e.type === "working_note"));
+		add(branch.findLast((e) => e.type === "operation_finished"));
+		const boundary = branch.findLast((e) => isCustom(e, TASK_BOUNDARY_CUSTOM_TYPE)) as CustomEntry | undefined;
+		if (boundary) add(this.byId.get((boundary.data as TaskBoundaryData).beforeEntryId));
+		add(this._findTaskPlanEntry());
+		add(all.findLast((e) => e.type === "session_info")); // getSessionName reads every entry, not just the branch
 		const artifactPaths = new Set<string>();
+		const customTypes = new Set<string>([FILE_CHECKPOINT_ENTRY_TYPE, TASK_PLAN_ENTRY_TYPE]);
 		for (const entry of [...branch].reverse()) {
+			if (entry.type === "custom" && !customTypes.has(entry.customType)) {
+				customTypes.add(entry.customType);
+				keep.add(entry); // the latest of each type: task boundary and descriptor, and every extension's state
+			}
 			if (entry.type !== "artifact" || artifactPaths.has(entry.path) || !existsSync(entry.path)) continue;
 			artifactPaths.add(entry.path);
 			keep.add(entry);
 		}
 		const keptIds = new Set([...keep].map((entry) => entry.id));
-		for (const entry of branch) {
-			if (
-				isCustom(entry, FILE_CHECKPOINT_ENTRY_TYPE) &&
-				keptIds.has(((entry as CustomEntry).data as FileCheckpoint).turnId)
-			)
-				keep.add(entry);
-		}
 
 		const order = new Map(all.map((entry, index) => [entry.id, index]));
 		const carried = [...keep].sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
@@ -1653,8 +1703,12 @@ export class SessionManager {
 			parentSession: previous.sessionFile,
 			channel: oldHeader?.channel,
 			channelSessionId: oldHeader?.channelSessionId,
+			carriedTotals: sumSessionTotals(
+				all.filter((entry) => !keptIds.has(entry.id)),
+				oldHeader?.carriedTotals,
+			),
 		};
-		const marker: CustomEntry = {
+		const marker: CustomEntry<SessionRotatedData> = {
 			type: "custom",
 			customType: SESSION_ROTATED_ENTRY_TYPE,
 			id: generateId(this.byId),
@@ -1681,6 +1735,10 @@ export class SessionManager {
 		appendFileSync(previous.sessionFile, `${JSON.stringify(marker)}\n`);
 		const now = new Date();
 		utimesSync(sessionFile, now, now);
+		// The tail's length shows a Durable Memory backlog pinning it, which rotation never cuts.
+		console.error(
+			`[session] rotated ${previous.sessionFile} to ${sessionFile}: kept a tail of ${tail.length} entries, ${statSync(sessionFile).size} bytes`,
+		);
 		return sessionFile;
 	}
 
@@ -1891,6 +1949,11 @@ export class SessionManager {
 	getHeader(): SessionHeader | null {
 		const h = this.fileEntries.find((e) => e.type === "session");
 		return h ? (h as SessionHeader) : null;
+	}
+
+	/** Whole-session totals: every entry of this log plus what earlier logs held before a Log Rotation. */
+	getSessionTotals(): SessionTotals {
+		return sumSessionTotals(this.getEntries(), this.getHeader()?.carriedTotals);
 	}
 
 	/**

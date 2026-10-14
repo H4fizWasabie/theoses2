@@ -3,7 +3,6 @@ import { type Component, truncateToWidth, visibleWidth } from "theoses-tui";
 import type { AgentSession } from "../../../core/agent-session.ts";
 import { areExperimentalFeaturesEnabled } from "../../../core/experimental.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
-import { addUsageToTotals, createUsageTotals } from "../../../core/usage-totals.ts";
 import { theme } from "../theme/theme.ts";
 
 /**
@@ -84,23 +83,17 @@ export class FooterComponent implements Component {
 	render(width: number): string[] {
 		const state = this.session.state;
 
-		// Calculate cumulative usage from ALL session entries (not just post-compaction messages)
-		const usageTotals = createUsageTotals();
+		// Cumulative usage from ALL session entries (not just post-compaction messages) and earlier rotated logs
+		const { sessionManager } = this.session;
+		const usageTotals = sessionManager.getSessionTotals().usage;
 		let latestCacheHitRate: number | undefined;
-
-		for (const entry of this.session.sessionManager.getEntries()) {
-			if (entry.type === "message" && entry.message.role === "assistant") {
-				addUsageToTotals(usageTotals, entry.message.usage);
-
-				const latestPromptTokens =
-					entry.message.usage.input + entry.message.usage.cacheRead + entry.message.usage.cacheWrite;
-				latestCacheHitRate =
-					latestPromptTokens > 0 ? (entry.message.usage.cacheRead / latestPromptTokens) * 100 : undefined;
-			} else if (entry.type === "message" && entry.message.role === "toolResult" && entry.message.usage) {
-				addUsageToTotals(usageTotals, entry.message.usage);
-			} else if ((entry.type === "branch_summary" || entry.type === "compaction") && entry.usage) {
-				addUsageToTotals(usageTotals, entry.usage);
-			}
+		const latestAssistant = sessionManager
+			.getEntries()
+			.findLast((entry) => entry.type === "message" && entry.message.role === "assistant");
+		if (latestAssistant?.type === "message" && latestAssistant.message.role === "assistant") {
+			const { usage } = latestAssistant.message;
+			const latestPromptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+			latestCacheHitRate = latestPromptTokens > 0 ? (usage.cacheRead / latestPromptTokens) * 100 : undefined;
 		}
 
 		// Calculate context usage from session (handles compaction correctly).
