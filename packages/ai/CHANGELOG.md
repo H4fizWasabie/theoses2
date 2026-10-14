@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.0.126] - 2026-10-14
+
+- fix: OpenCode Go serves Google models (#557). The live catalog added `gemini-4-argon-contributor`, served over the Google Generative AI API, to OpenCode Go, which had no `google-generative-ai` stream wired, so the regenerated catalog failed CI's Check step on every branch. The provider now wires it, as OpenCode Zen does. The catalog also dropped `deepseek-v4-flash` from OpenCode Go, so its thinking-level test is gone.
+
 ## [1.0.117] - 2026-10-03
 
 - fix: Together's catalog renamed `deepseek-ai/DeepSeek-V4-Pro` to `deepseek-ai/DeepSeek-V4-Pro-0813`. The generator's reasoning-effort set still named the old id, so the renamed model lost `reasoning_effort` support (`high`/`max`), and `together-models.test.ts` stopped type-checking against the regenerated catalog, failing CI's Check step. The set and the test now use the new id.

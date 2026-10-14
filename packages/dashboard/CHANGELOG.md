@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.0.126] - 2026-10-14
+
+- fix: a dashboard session is found by its ID after Log Rotation (#553, issue #548). The session API looks it up with `findSessionById`, which resolves an old ID to the session's current log, and an open Channel Session not yet on disk reports its own session ID.
+
 ## [1.0.112] - 2026-09-30
 
 ## [1.0.111] - 2026-09-30
