@@ -491,7 +491,7 @@ export interface BackfillOptions {
  * Records no promoted ranges — backfill is a separate, explicit operation.
  */
 export async function backfillFromSessionLog(path: string, options: BackfillOptions): Promise<void> {
-	const sessionManager = SessionManager.open(path);
+	const sessionManager = SessionManager.read(path);
 	const header = sessionManager.getChannelSessionKey();
 	const branch = sessionManager.getBranch();
 	const window = branch.filter((e): e is SessionMessageEntry => e.type === "message");

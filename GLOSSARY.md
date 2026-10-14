@@ -42,6 +42,7 @@ _Avoid_: compaction check, compaction policy
 
 **Log Rotation**:
 Continuing a session in a new log once the old one grows too large, keeping an unbroken tail of its recent history, so that history reads the same after rotation as before. Bounds the log on disk, where a Compaction Run bounds what the model sees.
+The continuation remains one Channel Session: old references resume its current log, while closed logs remain archived history.
 _Avoid_: log truncation, session split, archiving
 
 **Operation Loop**:

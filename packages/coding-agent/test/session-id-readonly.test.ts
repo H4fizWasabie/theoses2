@@ -170,4 +170,44 @@ describe("--session-id", () => {
 			),
 		).rejects.toThrow("exit:1");
 	});
+
+	it("resumes rotated IDs and prefixes instead of creating a replacement under the old ID", async () => {
+		const root = createTempDir();
+		const manager = SessionManager.create(root, root, { id: "old-session-id" });
+		persistSession(manager, "before rotation");
+		const a = manager.getSessionFile()!;
+		manager.rotate();
+		manager.rotate();
+		const oldBytes = readFileSync(a, "utf8");
+		const warning = vi.spyOn(console, "error").mockImplementation(() => {});
+		for (const request of [{ sessionId: "old-session-id" }, { session: "old-session" }]) {
+			const resumed = await createSessionManager(args(request), root, root, SettingsManager.inMemory());
+			expect(resumed.getSessionFile()).toBe(manager.getSessionFile());
+			expect(resumed.getSessionId()).toBe(manager.getSessionId());
+		}
+		expect(warning).not.toHaveBeenCalled();
+		expect(readFileSync(a, "utf8")).toBe(oldBytes);
+		const fork = await createSessionManager(args({ fork: "old-session-id" }), root, root, SettingsManager.inMemory());
+		expect(fork.getHeader()?.parentSession).toBe(a);
+	});
+
+	it.each([{ sessionId: "old-session-id" }, { session: "old-session" }, { continue: true }])(
+		"reports a broken rotation chain as a startup error for %o",
+		async (request) => {
+			const root = createTempDir();
+			const manager = SessionManager.create(root, root, { id: "old-session-id" });
+			persistSession(manager, "before rotation");
+			manager.rotate();
+			rmSync(manager.getSessionFile()!);
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+			vi.spyOn(process, "exit").mockImplementation((code) => {
+				throw new Error(`exit:${code}`);
+			});
+
+			await expect(createSessionManager(args(request), root, root, SettingsManager.inMemory())).rejects.toThrow(
+				"exit:1",
+			);
+			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("Broken Log Rotation chain"));
+		},
+	);
 });

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Type } from "theoses-ai";
 import {
 	type FauxProviderRegistration,
 	fauxAssistantMessage,
@@ -11,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ENV_AGENT_DIR } from "../../src/config.ts";
 import type { AgentSessionEvent } from "../../src/core/agent-session.ts";
 import { type ChannelSession, createChannelSessions } from "../../src/core/channel-session.ts";
+import type { SessionManager } from "../../src/core/session-manager.ts";
 
 // Settlement runs memory consolidation against real stores; it has its own tests.
 vi.mock("../../src/core/turn-settlement.ts", () => ({ settleTurn: vi.fn() }));
@@ -100,6 +102,40 @@ describe("Channel Session", () => {
 		await session.submit({ text: "hi" });
 		const other = createChannelSessions({ channel: "other", cwd });
 		await expect(other.open("chat-1", session.sessionFile)).rejects.toThrow("not a other session");
+	});
+
+	it("finds the same live Channel Session by old IDs after repeated rotations", async () => {
+		const sessions = createChannelSessions({
+			channel: "test",
+			cwd,
+			customTools: [
+				{
+					name: "rotate_log",
+					label: "rotate_log",
+					description: "Rotate the fixture log",
+					parameters: Type.Object({}),
+					execute: async (_id, _args, _signal, _update, context) => {
+						(context.sessionManager as SessionManager).rotate();
+						return { content: [{ type: "text", text: "rotated" }], details: undefined };
+					},
+				},
+			],
+		});
+		const session = await sessions.open("chat-1");
+		opened.push(session);
+		const ids: string[] = [];
+		const originalFile = session.sessionFile;
+		for (let i = 0; i < 2; i++) {
+			ids.push(session.sessionId);
+			faux.setResponses([
+				fauxAssistantMessage(fauxToolCall("rotate_log", {}), { stopReason: "toolUse" }),
+				fauxAssistantMessage("done"),
+			]);
+			await session.submit({ text: "rotate" });
+		}
+		for (const id of ids) expect(sessions.find(id)).toBe(session);
+		expect(await sessions.open("chat-1", originalFile)).toBe(session);
+		expect((await registry().open("chat-1", originalFile)).sessionId).toBe(session.sessionId);
 	});
 
 	it.each([
