@@ -112,6 +112,16 @@ describe("researcher", () => {
 		expect(result.report).toContain("https://a.example");
 	});
 
+	it("accepts a numbered Summary heading", async () => {
+		const result = await runResearch({
+			question: "q",
+			modelRuntime: fakeRuntime("## 1. Summary\nAnswer https://a.example"),
+		});
+
+		expect(result.complete).toBe(true);
+		expect(result.report).toContain("https://a.example");
+	});
+
 	it("asks for the final report when the model ends on narration, not a report", async () => {
 		const result = await runResearch({
 			question: "q",

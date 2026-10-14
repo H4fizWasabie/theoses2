@@ -42,7 +42,7 @@ const DELIVERED_REPORT_CHARS = 20_000;
 
 /** The system prompt's report format opens with a "Summary" section; narration mid-job does not. */
 function looksLikeReport(text: string): boolean {
-	return /^\W*summary\b/im.test(text);
+	return /^\W*(?:\d+\.\s*)?summary\b/im.test(text);
 }
 
 const FINALIZE_PROMPT =
