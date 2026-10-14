@@ -34,6 +34,6 @@ The server is not a coding-agent daemon by itself. `TheosesServerService` suppli
 
 ## Architectural reading
 
-`CONTEXT.md` and handoff material establish vocabulary and investigation context, but they do not override executable behavior. This Bible follows the implementation when project guidance and current source differ.
+`GLOSSARY.md` and handoff material establish vocabulary and investigation context, but they do not override executable behavior. This Bible follows the implementation when project guidance and current source differ.
 
 The strongest existing seam is `AgentSessionServices` plus `TheosesSessionRuntime`: they make cwd/service ownership explicit. The main unresolved architectural question is whether the experimental remote server will eventually receive a first-party coding-agent service implementation; no such binding was verified in this pass ([packages/server/README.md](../packages/server/README.md), “This package does not provide a standalone CLI or coding-agent service”).

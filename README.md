@@ -109,7 +109,7 @@ The agent runs with the permissions of the account that launched it. It does not
 - [Skills](packages/coding-agent/docs/skills.md) and [extensions](packages/coding-agent/docs/extensions.md)
 - [SDK](packages/coding-agent/docs/sdk.md)
 - [Settings](packages/coding-agent/docs/settings.md)
-- [Domain glossary](CONTEXT.md)
+- [Domain glossary](GLOSSARY.md)
 - [Dashboard](packages/dashboard/README.md)
 - [Security policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
