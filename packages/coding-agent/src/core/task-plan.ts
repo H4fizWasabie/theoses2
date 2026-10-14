@@ -18,6 +18,7 @@
  * "continue". Pure functions only; the session wiring is in agent-session.ts.
  */
 import type { AgentMessage } from "theoses-agent-core";
+import type { PlanVerification } from "./claim-check.ts";
 import { firstLine, type ToolRun } from "./tool-runs.ts";
 import { type RunEvidence, readRunEvidence } from "./verification-evidence.ts";
 
@@ -173,20 +174,43 @@ function evidenceOf(run: ToolRun): VerificationEvidence {
 	return { toolCallId: run.id, command: run.command as string, output: boundedOutput(run.output) };
 }
 
+function finalCriterion(plan: TaskPlan): PlanItem | undefined {
+	return plan.abandoned ? undefined : plan.items.filter((item) => item.kind === "verify").at(-1);
+}
+
 /**
- * Keeps the final verify item's evidence current when the run changed files, by the same rule that closes it: a
- * matching check that passed after the last change becomes its evidence; with none, the item reopens. Earlier verify
- * items keep their historical evidence. Returns `plan` itself when nothing changes.
+ * Keeps the final verification criterion's evidence current when the run changed files, by the same rule that closes
+ * it: a matching check that passed after the last change becomes its evidence; with none, it reopens. Earlier
+ * criteria keep their historical evidence. Returns `plan` itself when nothing changes.
  */
-export function refreshFinalVerify(plan: TaskPlan, runEvidence: RunEvidence): TaskPlan {
-	const final = plan.items.filter((item) => item.kind === "verify").at(-1);
-	if (plan.abandoned || !final || final.status === "open" || !runEvidence.changed) return plan;
+function refreshFinalCriterion(plan: TaskPlan, runEvidence: RunEvidence): TaskPlan {
+	const final = finalCriterion(plan);
+	if (!final || final.status === "open" || !runEvidence.changed) return plan;
 	const { run } = verificationResult(runEvidence, final.verifyCommand, final.verifyAfter);
 	if (run && run.id === final.evidence?.toolCallId) return plan;
 	const refreshed: PlanItem = run
 		? { ...final, evidence: evidenceOf(run) }
 		: { ...final, status: "open", evidence: undefined };
 	return { ...plan, items: plan.items.map((item) => (item.id === final.id ? refreshed : item)) };
+}
+
+/**
+ * A stop's one judgement of the final verification criterion: the plan with that criterion refreshed (`plan` itself
+ * when nothing changes), and what the plan binds a verification claim to; none for an abandoned plan or one without
+ * a verification criterion.
+ */
+export function planAtStop(
+	plan: TaskPlan,
+	runEvidence: RunEvidence,
+): { plan: TaskPlan; verification?: PlanVerification } {
+	const refreshed = refreshFinalCriterion(plan, runEvidence);
+	const final = finalCriterion(refreshed);
+	if (!final) return { plan: refreshed };
+	const verification: PlanVerification =
+		final.status !== "open" && final.evidence
+			? { covered: true }
+			: { command: final.verifyCommand, after: final.verifyAfter };
+	return { plan: refreshed, verification };
 }
 
 /** Each closed item's captured result, including evidence from earlier turns, for the reviewer. */

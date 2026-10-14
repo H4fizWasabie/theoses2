@@ -61,6 +61,10 @@ _Avoid_: model change (that is the session-log entry), model selection
 An optional record of a change's obligations, including root cause, siblings and fix scope for a fix, plus verification criteria with declared runtime checks and their Verification Evidence. Distinct from the Working Note's facts; keeping a Task Plan means accounting for its open or deferred obligations, not making planning mandatory.
 _Avoid_: todo list, checklist
 
+**Final verification criterion**:
+A Task Plan's last verification criterion: the one a stop is judged on.
+_Avoid_: latest verify, final verify item
+
 **Verification Evidence**:
 The recorded successful execution of a Task Plan criterion's declared runtime check, after declaration and the latest source change, retained with that criterion for review. It establishes what actually ran and returned, not that arbitrary assertions adequately cover the criterion. What counts is decided in one place, `readRunEvidence` in `core/verification-evidence.ts`: one reading of a run (with the session cwd and the files the run edited) that answers what it changed, which check ran after its last change and its declaration, and whether a declared command is a runtime check at all. The Task Plan, its stop guard and the claim check all ask it.
 _Avoid_: green command, verification note

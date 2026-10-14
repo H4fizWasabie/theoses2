@@ -125,7 +125,7 @@ describe("findClaimProblem", () => {
 					...tool("edit", { path: "a.ts" }, "Successfully replaced 1 block(s)"),
 					reply("Fixed and tested."),
 				],
-				{ verifyCovered: true },
+				{ plan: { covered: true } },
 			),
 		).toBeUndefined();
 	});
