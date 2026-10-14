@@ -15,7 +15,16 @@
  * is missing when a session is loaded the image becomes a short text note instead of breaking the load.
  */
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	cpSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 
 /** Base64 shorter than this stays inline: not worth a file, and it keeps tiny test images readable. */
@@ -65,6 +74,22 @@ export function saveImageFile(artifactDir: string, data: string, mimeType: strin
 		return path;
 	} catch {
 		return undefined;
+	}
+}
+
+/**
+ * Copies a session's saved images to another artifact directory, created private like the one they came from, for a
+ * copy of the log that keeps its session id. A copy that fails leaves those images to load as text notes.
+ */
+export function copySessionImages(fromArtifactDir: string, toArtifactDir: string): void {
+	const from = join(fromArtifactDir, IMAGES_DIRECTORY);
+	if (!existsSync(from)) return;
+	try {
+		const to = join(toArtifactDir, IMAGES_DIRECTORY);
+		mkdirSync(to, { recursive: true, mode: 0o700 });
+		cpSync(from, to, { recursive: true });
+	} catch {
+		// fails open, like every step here
 	}
 }
 
