@@ -3670,8 +3670,7 @@ export class InteractiveMode {
 		this.renderProjectTrustWarningIfNeeded();
 
 		// Show compaction info if session was compacted
-		const allEntries = this.sessionManager.getEntries();
-		const compactionCount = allEntries.filter((e) => e.type === "compaction").length;
+		const compactionCount = this.sessionManager.getSessionTotals().compactions;
 		if (compactionCount > 0) {
 			const times = compactionCount === 1 ? "1 time" : `${compactionCount} times`;
 			this.showStatus(`Session compacted ${times}`);
@@ -5970,7 +5969,7 @@ export class InteractiveMode {
 		// Cost/token totals per provider/model actually used (e.g. OpenRouter `auto`
 		// resolves to a concrete responseModel). Usage without model attribution is
 		// grouped separately so the breakdown reconciles with the session total.
-		const usageBreakdown = getUsageCostBreakdown(entries);
+		const usageBreakdown = getUsageCostBreakdown(entries, this.sessionManager.getHeader()?.carriedTotals?.usage);
 
 		let info = `${theme.bold("Session Info")}\n\n`;
 		if (sessionName) {

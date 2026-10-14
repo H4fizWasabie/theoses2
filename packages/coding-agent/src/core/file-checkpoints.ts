@@ -238,18 +238,24 @@ export interface Originals {
 	untraced: string[];
 }
 
-/**
- * What the files changed since `since` (an ISO time) looked like before, from the checkpoints of the turn that was
- * running then and every turn after it. The earliest checkpoint per path wins, as for a rewind, so changes made
- * earlier in that turn are included. Persisted sessions only: a session that saves no checkpoints has no originals.
- */
-export function originalsSince(branch: SessionEntry[], checkpointDirectory: string, since: string): Originals {
+/** The user message of the turn that was running at `since` (an ISO time). */
+export function turnAt(branch: SessionEntry[], since: string): SessionEntry | undefined {
 	const sinceMs = new Date(since).getTime();
 	let turn: SessionEntry | undefined;
 	for (const entry of branch) {
 		if (new Date(entry.timestamp).getTime() > sinceMs) break;
 		if (entry.type === "message" && entry.message.role === "user") turn = entry;
 	}
+	return turn;
+}
+
+/**
+ * What the files changed since `since` (an ISO time) looked like before, from the checkpoints of the turn that was
+ * running then and every turn after it. The earliest checkpoint per path wins, as for a rewind, so changes made
+ * earlier in that turn are included. Persisted sessions only: a session that saves no checkpoints has no originals.
+ */
+export function originalsSince(branch: SessionEntry[], checkpointDirectory: string, since: string): Originals {
+	const turn = turnAt(branch, since);
 	const originals: Originals = { files: [], skipped: [], untraced: [] };
 	if (!turn) return originals;
 	const plan = planFileRewind(branch, turn.id);

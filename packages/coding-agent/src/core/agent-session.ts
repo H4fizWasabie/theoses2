@@ -156,7 +156,6 @@ import { createAllToolDefinitions } from "./tools/index.ts";
 import { spillPrunedText } from "./tools/output-shaping.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { settleTurn } from "./turn-settlement.ts";
-import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 import {
 	appendWorkingNote,
 	clearWorkingNote,
@@ -3048,48 +3047,15 @@ export class AgentSession {
 	/**
 	 * Get session statistics. Aggregates over ALL session entries (including
 	 * history that was compacted away), so token/cost totals reflect what was
-	 * actually billed across the session.
+	 * actually billed across the session, and what earlier logs held before a Log Rotation.
 	 */
 	getSessionStats(): SessionStats {
-		let userMessages = 0;
-		let assistantMessages = 0;
-		let toolResults = 0;
-		let totalMessages = 0;
-		let toolCalls = 0;
-		const usageTotals = createUsageTotals();
-
-		for (const entry of this.sessionManager.getEntries()) {
-			if ((entry.type === "branch_summary" || entry.type === "compaction") && entry.usage) {
-				addUsageToTotals(usageTotals, entry.usage);
-			}
-			if (entry.type !== "message") continue;
-			totalMessages++;
-			const message = entry.message;
-			if (message.role === "user") {
-				userMessages++;
-			} else if (message.role === "toolResult") {
-				toolResults++;
-				if (message.usage) {
-					addUsageToTotals(usageTotals, message.usage);
-				}
-			} else if (message.role === "assistant") {
-				assistantMessages++;
-				const assistantMsg = message as AssistantMessage;
-				if (Array.isArray(assistantMsg.content)) {
-					toolCalls += assistantMsg.content.filter((c) => c.type === "toolCall").length;
-				}
-				addUsageToTotals(usageTotals, assistantMsg.usage);
-			}
-		}
+		const { usage: usageTotals, compactions: _compactions, ...counts } = this.sessionManager.getSessionTotals();
 
 		return {
 			sessionFile: this.sessionFile,
 			sessionId: this.sessionId,
-			userMessages,
-			assistantMessages,
-			toolCalls,
-			toolResults,
-			totalMessages,
+			...counts,
 			tokens: {
 				input: usageTotals.input,
 				output: usageTotals.output,
