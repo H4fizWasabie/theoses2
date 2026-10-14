@@ -18,7 +18,8 @@
 							"order": ["Morph", "DeepInfra"],
 							"allow_fallbacks": false
 						}
-					}
+					},
+					"maxTokens": 65536
 				},
 				"openai/gpt-6-luna": {
 					"compat": {
