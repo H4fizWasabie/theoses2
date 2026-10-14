@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.0.127] - 2026-10-14
+
+- chore(evals): the eval suite caps DeepSeek v4.1 flash output at 64k tokens, as production now does (#561). Without a cap the request asked for the catalog's maximum output, and OpenRouter's context-length filter dropped every endpoint with a smaller one, DeepInfra (131k) included, so with fallbacks off the pinned fallback could never serve. No coding-agent changes.
+
 ## [1.0.126] - 2026-10-14
 
 - feat: Log Rotation keeps a contiguous tail, so history reads the same after it (#550, issue #545). The new log keeps every entry of the current branch from the earliest of what the last compaction kept, the oldest message Durable Memory has not consolidated and the active Task Plan's turn (widened to that turn's user message); point state from before the tail is carried as single entries, including the latest custom entry of each type. Rotation used to carry those pieces with gaps between them, so `/rewind` restored only some files, Plan Review's diff anchored on an unrelated turn, `recall_turns` lost dropped turns, session stats reset and extension state vanished on restart. The new log's header records the totals of what was dropped, so the footer, `/session` and RPC stay whole-session, and `recall_turns` follows the chain of closed logs. The rotation limit stays 16 MB (#544 raised it to 64 MB until this landed).
