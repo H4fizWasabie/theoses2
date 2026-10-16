@@ -29,6 +29,45 @@ describe("createModelExcluder", () => {
 	it("matches a whole pattern, not a substring, unless it uses *", () => {
 		expect(createModelExcluder(["deepseek"])(deepseek)).toBe(false);
 	});
+
+	describe("! allow patterns", () => {
+		it("lift a model that an exclude pattern matches", () => {
+			const isExcluded = createModelExcluder(["*deepseek*", "!openrouter/deepseek/deepseek-v4.1-flash"]);
+			expect(isExcluded(deepseek)).toBe(false);
+		});
+
+		it("win regardless of order", () => {
+			const isExcluded = createModelExcluder(["!openrouter/deepseek/deepseek-v4.1-flash", "*deepseek*"]);
+			expect(isExcluded(deepseek)).toBe(false);
+		});
+
+		it("exclude nothing on their own", () => {
+			expect(createModelExcluder(["!*deepseek*"])(deepseek)).toBe(false);
+			expect(createModelExcluder(["!*deepseek*"])(glm)).toBe(false);
+		});
+
+		it("match like exclude patterns: provider/id or bare id, ignoring case, * wildcard", () => {
+			expect(createModelExcluder(["*", "!DeepSeek/*"])(deepseek)).toBe(false);
+			expect(createModelExcluder(["*", "!OpenRouter/deepseek/*"])(deepseek)).toBe(false);
+			expect(createModelExcluder(["*", "!deepseek"])(deepseek)).toBe(true);
+		});
+
+		it("keep a bare-id allow pattern open on every provider that uses that id", () => {
+			const isExcluded = createModelExcluder(["*deepseek*", "!deepseek/deepseek-v4.1-flash"]);
+			expect(isExcluded({ provider: "openrouter", id: "deepseek/deepseek-v4.1-flash" })).toBe(false);
+			expect(isExcluded({ provider: "other", id: "deepseek/deepseek-v4.1-flash" })).toBe(false);
+		});
+
+		it("turn the production DeepSeek enumeration into one exclude and one allow", () => {
+			const isExcluded = createModelExcluder(["*deepseek*", "!openrouter/deepseek/deepseek-v4.1-flash"]);
+			expect(isExcluded({ provider: "openrouter", id: "deepseek/deepseek-v4.2-flash" })).toBe(true);
+			expect(isExcluded({ provider: "openrouter", id: "deepseek/deepseek-v4.1-flash:batch" })).toBe(true);
+			expect(isExcluded({ provider: "together", id: "deepseek-ai/DeepSeek-V4.1-Flash" })).toBe(true);
+			expect(isExcluded({ provider: "deepseek", id: "deepseek-v4-flash" })).toBe(true);
+			expect(isExcluded(deepseek)).toBe(false);
+			expect(isExcluded(glm)).toBe(false);
+		});
+	});
 });
 
 describe("ModelRuntime.setExcludedModels", () => {
@@ -52,6 +91,18 @@ describe("ModelRuntime.setExcludedModels", () => {
 		expect(hasDeepseek(r.getAvailableSnapshot())).toBe(false);
 		expect(hasDeepseek(await r.getAvailable())).toBe(false);
 		expect(r.getModel("openrouter", glm.id)).toBeDefined();
+	});
+
+	it("keeps a model that a ! allow pattern names and hides the rest of the family", async () => {
+		const r = await runtime();
+		r.setExcludedModels(["*deepseek*", "!openrouter/deepseek/deepseek-v4.1-flash"]);
+		expect(r.getModel("openrouter", deepseek.id)).toBeDefined();
+		expect(
+			r
+				.getModels()
+				.filter((m) => m.id.toLowerCase().includes("deepseek"))
+				.map((m) => m.id),
+		).toEqual([deepseek.id]);
 	});
 
 	it("brings a model back when the pattern is removed", async () => {

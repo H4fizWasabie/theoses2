@@ -10,6 +10,7 @@ import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { stripBom } from "../utils/text.ts";
 import type { BackgroundModelConfig } from "./background-models.ts";
 import { type CommandHooksConfig, mergeHooks, parseHooks } from "./command-hooks.ts";
+import { isAllowPattern } from "./excluded-models.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 import type {
 	HttpSidecarToolSourceOptions,
@@ -125,7 +126,7 @@ export interface Settings {
 	editSnippet?: boolean;
 	// Shell commands run at fixed points of an agent run, keyed by event name (see command-hooks.ts). Validated on read.
 	hooks?: Record<string, unknown>;
-	// Patterns for models that cannot be selected at all (see excluded-models.ts), e.g. ["*deepseek*"].
+	// Patterns for models that cannot be selected at all (see excluded-models.ts), e.g. ["*deepseek*"]; a "!" prefix allows.
 	excludedModels?: string[];
 	defaultThinkingLevel?: ThinkingLevel;
 	modelThinkingLevels?: Record<string, ThinkingLevel>; // per-model default thinking level overrides keyed by "provider/modelId"
@@ -935,14 +936,15 @@ export class SettingsManager {
 
 	/**
 	 * Patterns for models that cannot be selected (excluded-models.ts): the user's, then a trusted project's. Concatenated,
-	 * not merged, so a project cannot lift the owner's exclusions by declaring its own list.
+	 * not merged, so a project cannot lift the owner's exclusions by declaring its own list. A project's `!` allow
+	 * patterns are dropped for the same reason: an allow pattern would lift the user's exclusions.
 	 */
 	getExcludedModels(): string[] {
 		const strings = (value: unknown): string[] =>
 			Array.isArray(value) ? value.filter((v): v is string => typeof v === "string" && v.trim() !== "") : [];
 		return [
 			...strings(this.globalSettings.excludedModels),
-			...(this.projectTrusted ? strings(this.projectSettings.excludedModels) : []),
+			...(this.projectTrusted ? strings(this.projectSettings.excludedModels).filter((p) => !isAllowPattern(p)) : []),
 		];
 	}
 

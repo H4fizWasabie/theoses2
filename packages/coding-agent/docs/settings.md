@@ -79,6 +79,14 @@ The `reviewer` (the task-plan reviewer) defaults to `openai/gpt-6-luna` via Open
 { "excludedModels": ["*deepseek*"] }
 ```
 
+A pattern starting with `!` allows: it matches the same way, and a model is excluded when it matches at least one exclude pattern and no allow pattern. Order does not matter, and allow patterns alone exclude nothing. This hides every DeepSeek model except OpenRouter's v4.1 flash, including any DeepSeek id OpenRouter adds later:
+
+```json
+{ "excludedModels": ["*deepseek*", "!openrouter/deepseek/deepseek-v4.1-flash"] }
+```
+
+An allow pattern written as a bare id (`!deepseek/deepseek-v4.1-flash`) allows that id on every provider that uses it. A project's `!` patterns are ignored, so a project cannot lift your exclusions.
+
 Read at startup and on `/reload`.
 
 ### UI & Display

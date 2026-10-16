@@ -68,6 +68,14 @@ describe("SettingsManager.getExcludedModels", () => {
 		expect(withExclusions(["*deepseek*"], [], true).getExcludedModels()).toEqual(["*deepseek*"]);
 	});
 
+	it("keeps the user's allow patterns but drops a trusted project's, so a project cannot lift the user's exclusions", () => {
+		expect(withExclusions(["*deepseek*", "!*flash"], ["*qwen*", "!*deepseek*"], true).getExcludedModels()).toEqual([
+			"*deepseek*",
+			"!*flash",
+			"*qwen*",
+		]);
+	});
+
 	it("ignores an untrusted project's patterns, blank entries and non-strings", () => {
 		expect(withExclusions(["*deepseek*", "", 3, null], ["*qwen*"], false).getExcludedModels()).toEqual([
 			"*deepseek*",
