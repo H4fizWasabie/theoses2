@@ -10,6 +10,7 @@ import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { stripBom } from "../utils/text.ts";
 import type { BackgroundModelConfig } from "./background-models.ts";
 import { type CommandHooksConfig, mergeHooks, parseHooks } from "./command-hooks.ts";
+import { isAllowPattern } from "./excluded-models.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 import type {
 	HttpSidecarToolSourceOptions,
@@ -943,7 +944,7 @@ export class SettingsManager {
 			Array.isArray(value) ? value.filter((v): v is string => typeof v === "string" && v.trim() !== "") : [];
 		return [
 			...strings(this.globalSettings.excludedModels),
-			...(this.projectTrusted ? strings(this.projectSettings.excludedModels).filter((p) => !p.startsWith("!")) : []),
+			...(this.projectTrusted ? strings(this.projectSettings.excludedModels).filter((p) => !isAllowPattern(p)) : []),
 		];
 	}
 

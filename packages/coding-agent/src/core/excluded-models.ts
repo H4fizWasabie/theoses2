@@ -19,10 +19,14 @@ function patternToRegExp(pattern: string): RegExp {
 	return new RegExp(`^${escaped}$`, "i");
 }
 
+export function isAllowPattern(pattern: string): boolean {
+	return pattern.startsWith("!");
+}
+
 export function createModelExcluder(patterns: readonly string[]): (model: ModelRef) => boolean {
-	const exclude = patterns.filter((p) => !p.startsWith("!")).map(patternToRegExp);
-	const allow = patterns.filter((p) => p.startsWith("!")).map((p) => patternToRegExp(p.slice(1)));
-	const matches = (matchers: RegExp[], model: ModelRef) =>
+	const exclude = patterns.filter((p) => !isAllowPattern(p)).map(patternToRegExp);
+	const allow = patterns.filter(isAllowPattern).map((p) => patternToRegExp(p.slice(1)));
+	const matchesAny = (matchers: RegExp[], model: ModelRef) =>
 		matchers.some((m) => m.test(`${model.provider}/${model.id}`) || m.test(model.id));
-	return (model) => matches(exclude, model) && !matches(allow, model);
+	return (model) => matchesAny(exclude, model) && !matchesAny(allow, model);
 }
