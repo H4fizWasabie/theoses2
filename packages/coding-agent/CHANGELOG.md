@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- fix(coding-agent): default models for NVIDIA and the Xiaomi providers exist in the catalog again. The live catalog sources dropped `nvidia/nemotron-3-super-120b-a12b` and `mimo-v2.5-pro`, so those providers defaulted to a model that no longer exists. They now default to `nvidia/nemotron-3.5-super-vl-120b-a12b` and `mimo-v2.6-pro`.
+
 ## [1.0.127] - 2026-10-14
 
 - chore(evals): the eval suite caps DeepSeek v4.1 flash output at 64k tokens, as production now does (#561). Without a cap the request asked for the catalog's maximum output, and OpenRouter's context-length filter dropped every endpoint with a smaller one, DeepInfra (131k) included, so with fallbacks off the pinned fallback could never serve. No coding-agent changes.

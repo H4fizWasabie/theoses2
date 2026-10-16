@@ -345,8 +345,8 @@ Use `modelOverrides` to customize built-in models and matching extension-registe
   "providers": {
     "openrouter": {
       "modelOverrides": {
-        "anthropic/claude-sonnet-4": {
-          "name": "Claude Sonnet 4 (Bedrock Route)",
+        "anthropic/claude-sonnet-4.6": {
+          "name": "Claude Sonnet 4.6 (Bedrock Route)",
           "compat": {
             "openRouterRouting": {
               "only": ["amazon-bedrock"]
