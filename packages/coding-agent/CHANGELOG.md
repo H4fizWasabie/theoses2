@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.129] - 2026-10-17
+
+- feat(coding-agent): `excludedModels` accepts `!` allow patterns (#571). A model is excluded when it matches an exclude pattern and no allow pattern, in any order, so `["*deepseek*", "!openrouter/deepseek/deepseek-v4.1-flash"]` hides every DeepSeek model except that one, including DeepSeek ids added later. A bare-id allow (`!deepseek/deepseek-v4.1-flash`) allows that id on every provider using it. A trusted project's `!` patterns are ignored, so a project cannot lift your exclusions. Entries starting with `!` used to be literals that matched nothing.
+- ci: builds compile against a committed model catalog snapshot (`packages/ai/src/providers/data/`), and a daily workflow opens a refresh PR when the catalog changes (#569). PR CI no longer notices upstream catalog drift; it surfaces in the refresh PR instead. No coding-agent changes.
+- chore(ai): refresh model catalog (#570).
+
 ## [1.0.128] - 2026-10-17
 
 - fix(coding-agent): default models for NVIDIA and the Xiaomi providers exist in the catalog again. The live catalog sources dropped `nvidia/nemotron-3-super-120b-a12b` and `mimo-v2.5-pro`, so those providers defaulted to a model that no longer exists. They now default to `nvidia/nemotron-3.5-super-vl-120b-a12b` and `mimo-v2.6-pro` (#566).
