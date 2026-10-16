@@ -279,7 +279,7 @@ jobs:
 
       - name: Build
         working-directory: ${{ steps.workdir.outputs.name }}
-        run: npm run build
+        run: npm run build:offline
 
       - name: Write auth.json
         id: write_auth

@@ -94,7 +94,13 @@ jobs:
           set -euo pipefail
           git add -A packages/ai/src
           git commit -m "$TITLE"
-          git push --force origin "$BRANCH"
+          # An open PR's branch only moves forward, so a fix pushed there is never overwritten. Without an open PR
+          # the branch is a leftover and is replaced.
+          if [ -n "$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&head=${GITHUB_REPOSITORY_OWNER}:${BRANCH}" --jq '.[0].number // empty')" ]; then
+            git push origin "$BRANCH"
+          else
+            git push --force origin "$BRANCH"
+          fi
 
       - name: Build
         id: build
