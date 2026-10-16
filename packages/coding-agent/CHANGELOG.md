@@ -1,8 +1,9 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.128] - 2026-10-17
 
-- fix(coding-agent): default models for NVIDIA and the Xiaomi providers exist in the catalog again. The live catalog sources dropped `nvidia/nemotron-3-super-120b-a12b` and `mimo-v2.5-pro`, so those providers defaulted to a model that no longer exists. They now default to `nvidia/nemotron-3.5-super-vl-120b-a12b` and `mimo-v2.6-pro`.
+- fix(coding-agent): default models for NVIDIA and the Xiaomi providers exist in the catalog again. The live catalog sources dropped `nvidia/nemotron-3-super-120b-a12b` and `mimo-v2.5-pro`, so those providers defaulted to a model that no longer exists. They now default to `nvidia/nemotron-3.5-super-vl-120b-a12b` and `mimo-v2.6-pro` (#566).
+- chore(evals): the eval suite pins DeepSeek v4.1 flash to DeepInfra, then CoreWeave, then Morph, as production now does (#565). No coding-agent changes.
 
 ## [1.0.127] - 2026-10-14
 
