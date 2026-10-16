@@ -118,8 +118,8 @@ The agent runs with the permissions of the account that launched it. It does not
 
 ```bash
 npm install --ignore-scripts
-npm run build         # Refresh model data, then build all packages
-npm run build:offline # Build with the checked-in model data snapshot
+npm run build         # Refresh model data from live sources, then build all packages
+npm run build:offline # Build with the committed model data snapshot (what CI and releases use)
 npm run check         # Formatting, lint, dependency, import, type, and smoke checks
 ./test.sh             # Repository test runner
 npm run eval -- --provider openai --model <id>  # Model-backed evals, costs tokens

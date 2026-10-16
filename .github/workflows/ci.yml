@@ -32,8 +32,10 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      # Builds from the committed model catalog snapshot, so a provider dropping a model upstream cannot turn an
+      # unrelated PR red. refresh-model-catalog.yml pulls upstream changes in through their own PR.
       - name: Build
-        run: npm run build
+        run: npm run build:offline
 
       - name: Check
         run: npm run check

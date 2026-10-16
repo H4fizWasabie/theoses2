@@ -49,9 +49,6 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Hydrate release model data
-        run: npm run hydrate:model-data
-
       - name: Create source archive
         run: |
           set -euo pipefail
@@ -336,7 +333,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Build
-        run: npm run build
+        run: npm run build:offline
 
       - name: Check
         run: npm run check
