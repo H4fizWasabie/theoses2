@@ -1,0 +1,156 @@
+name: Refresh model catalog
+
+# CI builds from the committed model catalog snapshot (packages/ai/src/providers/data), so upstream catalog changes
+# reach the repo only through the pull request this workflow opens. A provider dropping a model turns that PR red
+# (tsgo and the built-in defaults test), and the fix lands in that PR instead of in unrelated work.
+#
+# Pull requests opened with the default GITHUB_TOKEN do not trigger pull_request workflows, so ci.yml does not run
+# on the refresh PR. The job runs the same build, check and test itself and reports the result in the PR body and
+# as the status of this run.
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: refresh-model-catalog
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      BRANCH: chore/refresh-model-catalog
+      TITLE: "chore(ai): refresh model catalog"
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Merging main into an existing refresh branch needs the shared history.
+          fetch-depth: 0
+
+      # While a refresh PR is open, build on its branch so a fix pushed there (a test or default repointed at a
+      # surviving model) is kept. Otherwise start from main and replace any leftover branch.
+      - name: Choose the branch
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          open_pr="$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&head=${GITHUB_REPOSITORY_OWNER}:${BRANCH}" --jq '.[0].number // empty')"
+          if [ -n "$open_pr" ]; then
+            git fetch origin "$BRANCH"
+            git switch -C "$BRANCH" "origin/$BRANCH"
+            git merge --no-edit origin/main
+          else
+            git switch -C "$BRANCH"
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev fd-find ripgrep
+          sudo ln -s $(which fdfind) /usr/local/bin/fd
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Regenerate the model catalog
+        run: |
+          set -euo pipefail
+          npm run generate:models
+          # The image catalog is committed formatted; the generator's raw output is not.
+          ./node_modules/.bin/biome check --write packages/ai/src/image-models.generated.ts
+
+      # Every run rewrites the manifest timestamp. A diff in that file alone is not a catalog change.
+      - name: Detect catalog changes
+        id: diff
+        run: |
+          set -euo pipefail
+          manifest=packages/ai/src/providers/data/.manifest.json
+          if [ -z "$(git status --porcelain -- packages/ai/src ":(exclude)${manifest}")" ]; then
+            git checkout -- "$manifest"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "The committed model catalog is current."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git add -A packages/ai/src
+          git commit -m "$TITLE"
+          git push --force origin "$BRANCH"
+
+      - name: Build
+        id: build
+        if: steps.diff.outputs.changed == 'true'
+        continue-on-error: true
+        run: npm run build:offline
+
+      - name: Check
+        id: check
+        if: steps.diff.outputs.changed == 'true'
+        continue-on-error: true
+        run: npm run check
+
+      - name: Test
+        id: test
+        if: steps.diff.outputs.changed == 'true'
+        continue-on-error: true
+        run: npm test
+
+      - name: Open or update the pull request
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          BUILD: ${{ steps.build.outcome }}
+          CHECK: ${{ steps.check.outcome }}
+          TEST: ${{ steps.test.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Summary"
+            echo
+            echo "Daily refresh of the committed model catalog snapshot (\`npm run generate:models\`)."
+            echo
+            echo "## Evidence"
+            echo
+            echo "ci.yml does not run on pull requests opened by GitHub Actions, so this run built and tested the refreshed catalog ([run]($RUN_URL))."
+            echo
+            echo "- Build (\`npm run build:offline\`): $BUILD"
+            echo "- Check (\`npm run check\`): $CHECK"
+            echo "- Test (\`npm test\`): $TEST"
+            echo
+            echo "A failure here usually means a provider dropped a model that a test or a default in \`model-resolver.ts\` names. Fix it on this branch, as #566 did."
+            echo
+            echo "## Merge Danger"
+            echo
+            echo "**Door:** two-way"
+            echo
+            echo "**Blast Radius:** catalog"
+          } > "$RUNNER_TEMP/body.md"
+          number="$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&head=${GITHUB_REPOSITORY_OWNER}:${BRANCH}" --jq '.[0].number // empty')"
+          if [ -n "$number" ]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/pulls/${number}" -f title="$TITLE" -F body=@"$RUNNER_TEMP/body.md" --jq .html_url
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/pulls" -f title="$TITLE" -f head="$BRANCH" -f base=main -F body=@"$RUNNER_TEMP/body.md" --jq .html_url
+          fi
+
+      - name: Fail the run when the refreshed catalog does not verify
+        if: steps.build.outcome == 'failure' || steps.check.outcome == 'failure' || steps.test.outcome == 'failure'
+        run: exit 1
