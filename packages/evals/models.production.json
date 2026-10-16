@@ -15,7 +15,7 @@
 				"deepseek/deepseek-v4.1-flash": {
 					"compat": {
 						"openRouterRouting": {
-							"order": ["Morph", "DeepInfra"],
+							"order": ["DeepInfra", "CoreWeave", "Morph"],
 							"allow_fallbacks": false
 						}
 					},
