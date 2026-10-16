@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	assertExactModelIds,
@@ -9,6 +10,7 @@ import {
 	MODEL_DATA_SCHEMA_VERSION,
 	type ModelDataStructure,
 	readModelDataStructure,
+	validateGeneratedModelData,
 	validateModelDataDirectory,
 } from "../scripts/model-data.ts";
 
@@ -173,5 +175,9 @@ describe("generated model data validation", () => {
 			'import { TEST_PROVIDER_MODELS } from "./providers/test-provider.models.ts";\nimport { MISSING_MODELS } from "./providers/missing.models.ts";\n',
 		);
 		expect(() => readModelDataStructure(packageRoot)).toThrow("aggregator and provider shards do not match");
+	});
+
+	it("accepts the committed catalog snapshot that PR builds compile against", () => {
+		expect(() => validateGeneratedModelData(fileURLToPath(new URL("..", import.meta.url)))).not.toThrow();
 	});
 });
