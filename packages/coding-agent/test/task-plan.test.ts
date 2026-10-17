@@ -732,6 +732,25 @@ describe("TaskPlanGuard", () => {
 		expect(reviews).toHaveLength(0);
 	});
 
+	it("keeps the final gate closed and does not push back when the only later write is a /tmp scratch file (#578)", async () => {
+		taskPlan.set(created());
+		const g = guard();
+		g.startOperation();
+		run = [
+			...tool("task_plan", {}, "plan"),
+			...tool("edit", { path: "run.sh" }, "ok"),
+			...tool("bash", { command: "bash run.sh --dry-run" }, "gates passed"),
+		];
+		update({ action: "update", id: 3, status: "done" });
+		run.push(
+			...tool("write", { path: "/tmp/folio/issue-body.md" }, "Wrote 900 bytes"),
+			...tool("bash", { command: "gh issue create --body-file /tmp/folio/issue-body.md 2>&1 | tail -3" }, "#85"),
+			reply("Done and verified, filed as #85."),
+		);
+		expect(await g.beforeStop()).toEqual([]);
+		expect(current().items[2]).toMatchObject({ status: "done", evidence: { output: "gates passed" } });
+	});
+
 	it("keeps the final gate closed and reviews the plan when its check is rerun with no change after it", async () => {
 		taskPlan.set(created());
 		const g = guard();

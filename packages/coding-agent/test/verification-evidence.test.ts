@@ -597,4 +597,25 @@ describe("one reading of a run for every evidence question", () => {
 		expect(evidence.check()?.command).toBe(CHECK);
 		expect(readRunEvidence(tool("read", { path: "a.ts" }), process.cwd()).touchedPlan).toBe(false);
 	});
+
+	it("does not count writes under the temp directory as changes, and still counts the workspace change before them (#578)", () => {
+		const workspace = [
+			"cd /home/theoses/icm-workspaces && set -e",
+			"cat > daily-ai-learning/AGENTS.md <<'EOF'",
+			"# Daily AI learning",
+			"EOF",
+		].join("\n");
+		const scratch = [
+			...tool("write", { path: "/tmp/folio/issue2-body.md" }),
+			...tool("bash", { command: "cd /tmp && python3 restyle_workbook.py && rm -rf lo_out && mkdir lo_out" }),
+			...tool("bash", {
+				command: "cd /tmp/folio && python3 - <<'EOF'\np='/tmp/folio/issue2-body.md'\nopen(p,'w').write('x')\nEOF",
+			}),
+		];
+		const cwd = "/opt/theoses2/releases/current";
+		expect(readRunEvidence(scratch, cwd).changed).toBe(false);
+		const evidence = readRunEvidence([...tool("bash", { command: workspace }), ...scratch], cwd);
+		expect(evidence.changed).toBe(true);
+		expect(evidence.lastChange?.command).toBe(workspace);
+	});
 });
