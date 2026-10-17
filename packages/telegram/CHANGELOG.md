@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- feat(telegram): Claim footer under replies (#586). Citation markers (`⟨tN⟩`) are stripped from delivered text, then one line "Grounded N · Guesses M (guesses named)", a collapsible block of Grounded Claims with their Citations, and a "⚠ Contradiction: said X, tN shows Y" line per surviving Contradiction. Replies with no Claims are unchanged. Delivered copy only: the session log and model context keep the markers. If the rich message falls back to classic HTML, the footer is sent in plain form. The TUI and dashboard still show the markers.
+
 ## [1.0.124] - 2026-10-13
 
 - fix: a turn cut off by a service restart is resumed once when the bot starts again, threaded to the message it was answering, and told to check the change and report (#531). Theoses restarting its own service used to kill the turn before it replied. A resumed turn that is cut off again gets a short notice instead of a second resume. The running turn is recorded in `telegram-running-turn.json` in the agent dir.
