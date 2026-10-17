@@ -51,7 +51,7 @@ describe("lax message content handling", () => {
 
 			const toolResults = harness.session.messages.filter((message) => message.role === "toolResult");
 			expect(toolResults).toHaveLength(1);
-			expect(toolResults[0].content).toEqual([]);
+			expect(toolResults[0].content).toEqual([{ type: "text", text: "⟨t1⟩" }]);
 			// The follow-up turn consumed the normalized tool result without crashing.
 			expect(harness.getPendingResponseCount()).toBe(0);
 		} finally {

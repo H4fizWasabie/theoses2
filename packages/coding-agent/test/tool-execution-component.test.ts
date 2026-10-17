@@ -411,6 +411,26 @@ describe("ToolExecutionComponent parity", () => {
 		expect(rendered).not.toContain("two\n\n");
 	});
 
+	test("shows a result without its tool-output id, which is for the model to cite", () => {
+		const component = new ToolExecutionComponent(
+			"read",
+			"tool-output-id",
+			{ path: "notes.txt" },
+			{},
+			createReadToolDefinition(process.cwd()),
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.updateResult(
+			{ content: [{ type: "text", text: "⟨t12⟩\nfirst line\nsecond line" }], details: undefined, isError: false },
+			false,
+		);
+		component.setExpanded(true);
+		const rendered = stripAnsi(component.render(120).join("\n"));
+		expect(rendered).toContain("first line");
+		expect(rendered).not.toContain("⟨t12⟩");
+	});
+
 	test("does not syntax-highlight read errors based on the requested file path", () => {
 		const component = new ToolExecutionComponent(
 			"read",

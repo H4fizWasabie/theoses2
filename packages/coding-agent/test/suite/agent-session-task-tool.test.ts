@@ -50,7 +50,7 @@ describe("AgentSession task tool", () => {
 		expect(readFileSync(target, "utf8")).toBe("new\n");
 		expect(h.session.messages.map((m) => m.role)).toEqual(["user", "assistant", "toolResult", "assistant"]);
 		const result = h.session.messages.find((m) => m.role === "toolResult");
-		expect(getMessageText(result)).toBe("Changed a.txt line 1 from old to new.");
+		expect(getMessageText(result)).toBe("⟨t1⟩\nChanged a.txt line 1 from old to new.");
 		expect(
 			h.sessionManager
 				.getEntries()

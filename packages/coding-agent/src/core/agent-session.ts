@@ -150,7 +150,7 @@ import { createTaskPlanPort, type TaskPlanPort } from "./task-plan.ts";
 import { TaskPlanGuard } from "./task-plan-guard.ts";
 import { resolveThinkingLevel } from "./thinking-level.ts";
 import { createToolRegistry, initialActiveToolNames, type ToolRegistry } from "./tool-registry.ts";
-import { currentRunMessages, textOf } from "./tool-runs.ts";
+import { currentRunMessages, textOf, toolOutputIdOf, withToolOutputId } from "./tool-runs.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { generateUnifiedPatch } from "./tools/edit-diff.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
@@ -506,6 +506,10 @@ export class AgentSession {
 	private readonly _fileCheckpoints: FileCheckpoints;
 
 	private readonly _tools: ToolRegistry;
+	/** Undefined until this session's first tool result (see _firstUnusedToolOutputId). */
+	private _nextToolOutputId: number | undefined;
+	/** The first id reserved for each assistant message's tool calls (see _toolOutputId). */
+	private readonly _toolOutputIdBase = new WeakMap<AssistantMessage, number>();
 
 	// Base system prompt for the current operation (without extension appends), refreshed once per
 	// prompt()/sendCustomMessage() call from _systemPrompt below.
@@ -776,7 +780,9 @@ export class AgentSession {
 		};
 
 		this.agent.afterToolCall = async (context) => {
-			const result = await this._afterToolCall(context);
+			const result = (await this._afterToolCall(context)) ?? {};
+			// Last, on what the model will see. Only this session's own results: a task sub-agent's are never in its log.
+			result.content = withToolOutputId(result.content ?? context.result.content ?? [], this._toolOutputId(context));
 			// Only this session's own bash: a task sub-agent's commands are work the parent never sees. Whether the
 			// command failed is its own result, not what an extension's tool_result handler rewrote it to.
 			if (context.toolCall.name === "bash") {
@@ -785,6 +791,37 @@ export class AgentSession {
 			}
 			return result;
 		};
+	}
+
+	/**
+	 * The id of a tool result (⟨tN⟩, ADR-0013). Parallel calls finish in any order, so the first result of an assistant
+	 * message reserves one id per tool call in it and each call takes the one at its position: the same text on every
+	 * replay. A call that never runs (blocked, unknown tool) leaves its id unused, a gap like any other.
+	 */
+	private _toolOutputId({ assistantMessage, toolCall }: AfterToolCallContext): number {
+		const calls = assistantMessage.content.filter((block) => block.type === "toolCall");
+		let first = this._toolOutputIdBase.get(assistantMessage);
+		if (first === undefined) {
+			first = this._nextToolOutputId ?? this._firstUnusedToolOutputId();
+			this._nextToolOutputId = first + calls.length;
+			this._toolOutputIdBase.set(assistantMessage, first);
+		}
+		return first + calls.findIndex((call) => call.id === toolCall.id);
+	}
+
+	/**
+	 * Read once per session, at its first tool result, so a reopened log goes on from its highest id. Every branch
+	 * counts, so ids stay unique across the whole log.
+	 * ponytail: a rotated log (#519) whose kept tail holds no tool result starts again at 1; read the parent log's ids
+	 * too if outputs saved under an id ever need to stay unique across rotations.
+	 */
+	private _firstUnusedToolOutputId(): number {
+		let highest = 0;
+		for (const entry of this.sessionManager.getEntries()) {
+			if (entry.type === "message" && entry.message.role === "toolResult")
+				highest = Math.max(highest, toolOutputIdOf(entry.message.content) ?? 0);
+		}
+		return highest + 1;
 	}
 
 	/**

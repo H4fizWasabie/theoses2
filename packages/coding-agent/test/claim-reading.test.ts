@@ -134,6 +134,11 @@ describe("readClaims (scan mode)", () => {
 		]);
 	});
 
+	it("a tool-output id is not part of the output, so it grounds nothing", () => {
+		const claims = readClaims(bash("git status --short", "⟨t130⟩\nnothing to commit"), reply("130 files changed"));
+		expect(statusOf(claims)).toEqual([{ value: "130", status: "guess" }]);
+	});
+
 	it("a reply with no values has no Claims", () => {
 		expect(readClaims([user("hi")], reply("Sure, happy to help."))).toEqual([]);
 	});
