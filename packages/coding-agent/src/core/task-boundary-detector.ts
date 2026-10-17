@@ -91,8 +91,21 @@ export interface JevRelatedSignals {
 	topicSwitch: number;
 }
 
-/** An explicit topic-switch signal at/above this vetoes "related", whatever the other signals say. */
+/** An explicit topic-switch signal at/above this vetoes "related", unless continuesTask ties it (see isRelated). */
 export const JEV_TOPIC_SWITCH_VETO = 0.6;
+
+/**
+ * A continuesTask at/above this midpoint keeps the message related unless topicSwitch beats it by more than
+ * JEV_SWITCH_CLEAR_MARGIN. Incident 2026-10-17 14:56: "File a github issue and post it to portfolio repo", right
+ * after a portfolio review, scored continues=0.53 switch=0.53, combined 0.53 < JEV_RELATED_THRESHOLD, and the
+ * reset dropped the whole review. Below the midpoint Jev says the message does not continue the task, so a low
+ * tie stays a boundary: of the 25 production "unrelated" verdicts up to that day, silent pivots with switch at or
+ * below continues ("i updated you already.. See changelog" 0.49/0.07, "Good morning" 0.13/0.06) are real
+ * switches, and the only two this rule flips (0.53/0.53, and an image follow-up at 0.53/0.15) were false boundaries.
+ */
+const JEV_CONTINUES_MIDPOINT = 0.5;
+// ponytail: margin picked by hand, not swept; no production verdict sits inside it yet. Tune on labelled ties.
+const JEV_SWITCH_CLEAR_MARGIN = 0.1;
 
 /**
  * Folds the atomic signals into one related-probability so the existing threshold and logs keep
@@ -104,6 +117,16 @@ export const JEV_TOPIC_SWITCH_VETO = 0.6;
 export function combineRelatedSignals(signals: JevRelatedSignals): number {
 	if (signals.topicSwitch >= JEV_TOPIC_SWITCH_VETO) return 1 - signals.topicSwitch;
 	return Math.max(signals.continuesTask, signals.reactsToReply ?? 0);
+}
+
+/** The verdict: related when the combined signal clears JEV_RELATED_THRESHOLD, or when Jev leans "continues"
+ * and topicSwitch does not clearly beat it (a tie counts as continuing; see JEV_CONTINUES_MIDPOINT). */
+function isRelated(signals: JevRelatedSignals): boolean {
+	if (combineRelatedSignals(signals) >= JEV_RELATED_THRESHOLD) return true;
+	return (
+		signals.continuesTask >= JEV_CONTINUES_MIDPOINT &&
+		signals.topicSwitch <= signals.continuesTask + JEV_SWITCH_CLEAR_MARGIN
+	);
 }
 
 const JEV_CONTINUES_TASK_QUESTION =
@@ -355,7 +378,7 @@ async function runDetection(options: MaybeDetectTaskBoundaryOptions): Promise<vo
 			signals = await callJevRelated(currentDescriptor, userMessageText, previousReply);
 			if (signals === undefined) return; // failure: write nothing, retried naturally next turn
 			jevNoul = combineRelatedSignals(signals);
-			related = jevNoul >= JEV_RELATED_THRESHOLD;
+			related = isRelated(signals);
 		}
 
 		if (jevNoul !== undefined && process.env.THEOSES_DEBUG_TASK_BOUNDARY) {
