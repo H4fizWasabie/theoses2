@@ -1,0 +1,7 @@
+# Context rewrites happen only at turn start
+
+Everything sent to the model is a cached prefix, so a change to any stored message invalidates the cache from that message on. On deepseek the daily cache ratio is about 90% (eval.db, 2026-10-11 to 10-17), which is most of what keeps a long Telegram session affordable. We decided that no transform touches a stored message except at turn start, on finished turns, and always the same way given the same input (the rule `context-pruning.ts` already follows). Anything that only changes what the owner sees, such as stripping Citation markers or adding the Claim footer, is applied to the delivered text and never written back to history.
+
+The trade-off shows up in the Claim work (2026-10-17): tool-output ids (⟨t7⟩) are fixed when the result is created and are never renumbered, even after pruning or a task reset leaves gaps. Outputs are saved to disk when they leave the context, inside the turn-start pruning step, at a path built from the id rather than a timestamp. Tagging or renumbering outputs lazily would be simpler and would quietly cost the cache on every request.
+
+Revisit if the provider caching model changes (for example, caching that tolerates edits in the middle of the prefix), or if a feature needs to rewrite history mid-turn. In that case, measure the cache ratio before and after, against the daily figure in eval.db.
