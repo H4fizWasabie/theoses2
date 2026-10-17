@@ -13,6 +13,7 @@ import {
 	estimateTokens,
 	prepareCompaction,
 } from "./compaction.ts";
+import { buildResetIndex } from "./reset-index.ts";
 
 /**
  * Compaction Run (GLOSSARY.md): one execution of context compaction from preparation to `compaction_end`,
@@ -174,19 +175,25 @@ export function createCompactionRun(options: CompactionRunOptions): CompactionRu
 				}
 			}
 
-			const { summary, firstKeptEntryId, tokensBefore, usage, details } =
+			const produced =
 				extensionCompaction ??
 				(await summarizer(preparation, { customInstructions, signal: controller.signal, reason }));
 			if (controller.signal.aborted) throw new CompactionCancelled();
+			// A task reset leaves an index of the turns it dropped, written once into the entry (#582).
+			const resetIndex = preparation.chainReset
+				? buildResetIndex(
+						preparation.chainReset.droppedMessages,
+						preparation.chainReset.taskSummary,
+						(name, text) => spillPrunedText(sessionManager, name, text),
+					)
+				: "";
+			const summary = resetIndex ? `${resetIndex}\n\n${produced.summary}` : produced.summary;
+			const { firstKeptEntryId, tokensBefore, usage, details } = produced;
 
 			sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
 			// Tool output this compaction takes out of the context keeps its full text on disk (#581).
 			spillEvictedToolResults(
-				[
-					...(preparation.chainReset?.droppedMessages ?? []),
-					...preparation.messagesToSummarize,
-					...preparation.turnPrefixMessages,
-				],
+				[...preparation.messagesToSummarize, ...preparation.turnPrefixMessages],
 				(name, text) => spillPrunedText(sessionManager, name, text),
 			);
 			const sessionContext = sessionManager.buildSessionContext();
