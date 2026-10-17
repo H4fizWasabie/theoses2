@@ -3,6 +3,25 @@ import { describe, expect, test } from "vitest";
 import { buildSystemPrompt } from "../src/core/system-prompt.ts";
 
 describe("buildSystemPrompt", () => {
+	describe("saved output block", () => {
+		const block = (prompt: string) => /<saved_output>[\s\S]*?<\/saved_output>/.exec(prompt)?.[0];
+
+		test("is present in default and custom prompts", () => {
+			for (const customPrompt of [undefined, "CUSTOM"]) {
+				const prompt = buildSystemPrompt({ customPrompt, cwd: process.cwd() });
+				expect(block(prompt)).toContain("\u27e8tN\u27e9");
+			}
+		});
+
+		test("is byte-identical across sessions and turns", () => {
+			const a = buildSystemPrompt({ cwd: "/a", workingNote: "one", contextFiles: [] });
+			const b = buildSystemPrompt({ cwd: "/b", workingNote: "two", artifactCatalog: "x" });
+			expect(block(a)).toBeDefined();
+			expect(block(a)).toBe(block(b));
+			expect(block(a)).not.toMatch(/\d{4}-\d{2}|\/a|\/b/);
+		});
+	});
+
 	describe("persona and project context", () => {
 		const count = (haystack: string, needle: string) => haystack.split(needle).length - 1;
 
