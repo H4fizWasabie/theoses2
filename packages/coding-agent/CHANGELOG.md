@@ -1,7 +1,18 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.130] - 2026-10-18
 
+- feat(coding-agent): Grounded Claims (spec #576). The reply is read for Claims (numbers, paths, URLs), each Grounded by a tool result from the Task or a Guess. Shipped as the tickets below.
+- feat(coding-agent): Grounded share per model from session logs (#577). Claim reading classifies each Claim as specific or small; the eval's headline Grounded share and Guess count use specific values only, with small integers reported apart as untrusted. Currency-glued amounts (`$15`) are Claims too.
+- fix(coding-agent): scratch-file writes are not changes for the claim check (#578). A write under the system temp dir no longer needs a runtime check afterwards. The claim check and the Task Plan stop guard share the decision.
+- fix(coding-agent): a task-boundary tie continues the task (#579). When the continues and switch scores tie, or switch does not clearly beat continues, the message continues the current Task instead of resetting it.
+- feat(coding-agent): every tool result carries a stable id `⟨tN⟩` (#580). Ids increase per session, continue from the session log after a restart and are never renumbered by pruning or compaction. Forks and branches keep the carried id (#585).
+- feat(coding-agent): evicted tool output is saved to disk on every eviction path (#581): pruning, window drop, compaction and task reset. Nothing evicted is lost; the saved file path stays with the id.
+- feat(coding-agent): a task reset leaves an index of the dropped turns (#582): per turn the request line, the reply's head and tail, and the tool-output ids with the files they were saved to. Built once at the reset, so later requests re-send the same bytes.
+- feat(coding-agent): over-budget bash output keeps a head and a tail with an omitted-middle marker instead of the tail only, within the same byte and line budget (#583). The full-output path is kept.
+- feat(coding-agent): the system prompt has a static saved-output block (#584): a result marked `⟨tN⟩` or noted as truncated has its full text saved, to be re-read with `read` or by re-running the command, never recomputed from memory.
+- feat(coding-agent): cited Claims and Contradiction push-back (#585). The system prompt asks for the result id right after a quoted value ("15 ⟨t7⟩"). A reply whose Citation does not match the cited output is sent back once with the shown value, to be re-read and corrected.
+- chore(ai): refresh model catalog (#575).
 - feat(telegram): Claim footer under replies (#586). Citation markers (`⟨tN⟩`) are stripped from delivered text, then one line "Grounded N · Guesses M (guesses named)", a collapsible block of Grounded Claims with their Citations, and a "⚠ Contradiction: said X, tN shows Y" line per surviving Contradiction. Replies with no Claims are unchanged. Delivered copy only: the session log and model context keep the markers. If the rich message falls back to classic HTML, the footer is sent in plain form. The TUI and dashboard still show the markers.
 
 ## [1.0.129] - 2026-10-17

@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.130] - 2026-10-18
+
+- chore(ai): refresh model catalog (#575).
 
 ## [1.0.126] - 2026-10-14
 
