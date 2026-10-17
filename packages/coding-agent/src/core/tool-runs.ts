@@ -412,6 +412,11 @@ export interface CommandEffect {
 	dirs: string[];
 	/** Changes files in a way whose targets cannot be read off the command (a script, patch, git apply). */
 	unknownChange: boolean;
+	/**
+	 * Changes files outside the system temp directory, or where it cannot tell. Unlike `changesFiles`, a `cd`
+	 * target or an edited file under the temp directory is scratch here; the session cwd never is.
+	 */
+	changesOutsideTemp: boolean;
 }
 
 export function commandEffect(command: string, cwd: string, protectedPaths: readonly string[] = []): CommandEffect {
@@ -421,6 +426,8 @@ export function commandEffect(command: string, cwd: string, protectedPaths: read
 	const dirs = new Set<string>();
 	let readOnly = true;
 	let unknownChange = false;
+	let outsideTemp = false;
+	const inTemp = (path: string) => isScratchPath(path, cwd, [], []);
 	let dir: string | undefined;
 	const segments = lines.flatMap(splitSegments);
 	const sourceDirs: string[] = [];
@@ -447,6 +454,8 @@ export function commandEffect(command: string, cwd: string, protectedPaths: read
 			dirs.add(dir);
 		readOnly &&= effect.readOnly;
 		unknownChange ||= effect.unknownChange;
+		// An untraced write while cd'd into the temp directory is taken to land there.
+		outsideTemp ||= changed.some((p) => !inTemp(p)) || (effect.unknownChange && !(dir !== undefined && inTemp(dir)));
 	}
 	unknownChange ||= unknownDirectory && !readOnly;
 	return {
@@ -455,6 +464,7 @@ export function commandEffect(command: string, cwd: string, protectedPaths: read
 		paths: [...paths],
 		dirs: [...dirs],
 		unknownChange,
+		changesOutsideTemp: outsideTemp || (unknownDirectory && !readOnly),
 	};
 }
 
@@ -488,10 +498,14 @@ export function fileChangesOf(
 	return undefined;
 }
 
-/** True when this tool run changed (or tried to change) files. A failed edit/write changed nothing. */
-export function runChangesFiles(run: ToolRun, cwd: string, protectedPaths: readonly string[] = []): boolean {
-	if (FILE_TOOLS.has(run.name)) return !run.isError;
-	if (COMMAND_TOOLS.has(run.name) && run.command) return commandEffect(run.command, cwd, protectedPaths).changesFiles;
+/**
+ * True when this tool run changed (or tried to change) files outside the system temp directory. A failed
+ * edit/write changed nothing; a script, issue body or output written under the temp directory is scratch.
+ */
+export function runChangesFiles(run: ToolRun, cwd: string): boolean {
+	if (FILE_TOOLS.has(run.name))
+		return !run.isError && !(run.path !== undefined && isScratchPath(run.path, cwd, [], []));
+	if (COMMAND_TOOLS.has(run.name) && run.command) return commandEffect(run.command, cwd).changesOutsideTemp;
 	return false;
 }
 
