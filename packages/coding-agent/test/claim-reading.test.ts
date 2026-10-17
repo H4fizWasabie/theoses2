@@ -103,6 +103,17 @@ describe("readClaims (scan mode)", () => {
 		expect(statusOf(claims)).toEqual([{ value: "579,995.36", status: "grounded" }]);
 	});
 
+	it("a decimal glued to an uppercase currency prefix is a Claim, a lowercase-glued version is not", () => {
+		const claims = readClaims(
+			bash("cat t", "579.20 12.50"),
+			reply("Total RM579.20 and USD12.50, python3.12, node22.1"),
+		);
+		expect(statusOf(claims)).toEqual([
+			{ value: "579.20", status: "grounded" },
+			{ value: "12.50", status: "grounded" },
+		]);
+	});
+
 	it("slash-joined prose words are not paths", () => {
 		expect(readClaims([], reply("About 3 posts/day, pass/fail, A/B"))).toEqual([
 			{ value: "3", status: "guess", specificity: "small" },

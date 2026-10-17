@@ -33,7 +33,7 @@ export interface Claim {
 
 const URL_PATTERN = /https?:\/\/[^\s<>()"'`\]]+/g;
 const PATH_PATTERN = /(?<![\w./:-])(?:\.{1,2}\/|~\/|\/)?[\w.@+-]+(?:\/[\w.@+-]+)+/g;
-// Preceded by a letter is fine ("RM579.20" is 579.20); preceded by a digit, dot or comma it is part of a bigger number.
+// Preceded by an uppercase letter is fine ("RM579.20" is 579.20); preceded by a digit, dot or comma it is part of a bigger number.
 const NUMBER_PATTERN = /(?<![\d.,])\d+(?:[.,]\d+)*(?!\w)/g;
 const TRAILING_PUNCTUATION = /[.,;:!?]+$/;
 const MONTH = "(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*";
@@ -45,7 +45,7 @@ const IGNORED_PATTERNS = [
 	new RegExp(`\\b${MONTH}\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?\\b`, "gi"),
 	new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s+${MONTH}\\b`, "gi"),
 	/(?<![\w.])v?\d+(?:\.\d+){2,}\b/g,
-	/(?<=[A-Za-z-])\d+(?:\.\d+)+\b/g,
+	/(?<=[a-z-])\d+(?:\.\d+)+\b/g,
 	/\b(?:19|20)\d{2}\b/g,
 	/^[ \t]*\d+[.)](?=\s)/gm,
 ];
