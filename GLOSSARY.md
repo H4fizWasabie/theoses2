@@ -77,6 +77,26 @@ _Avoid_: latest verify, final verify item
 The recorded successful execution of a Task Plan criterion's declared runtime check, after declaration and the latest source change, retained with that criterion for review. It establishes what actually ran and returned, not that arbitrary assertions adequately cover the criterion. What counts is decided in one place, `readRunEvidence` in `core/verification-evidence.ts`: one reading of a run (with the session cwd and the files the run edited) that answers what it changed, which check ran after its last change and its declaration, and whether a declared command is a runtime check at all. The Task Plan, its stop guard and the claim check all ask it.
 _Avoid_: green command, verification note
 
+**Claim**:
+A statement in a reply about the system's state or about what a tool showed. Checked in every reply on every channel, whether or not the Task changed anything.
+_Avoid_: finding, assertion, fact
+
+**Citation**:
+The model's pointer from a Claim to the tool output from the current Task that backs it. Removed before the owner sees the reply.
+_Avoid_: reference, source
+
+**Grounded Claim**:
+A cited Claim whose value appears in the full text of the tool output it cites (from the session log, not the pruned Active Context Window).
+_Avoid_: verified claim, confirmed (Verification Evidence is the Task Plan's term)
+
+**Guess**:
+A Claim with no Citation, or a value in a reply that no tool output from the current Task contains. Shown to the owner as such, not blocked.
+_Avoid_: inference (overloaded with model inference), assumption
+
+**Contradiction**:
+A cited Claim whose value does not match the tool output it cites. Gets one push-back; if it survives, the reply goes out flagged.
+_Avoid_: mismatch, error
+
 **Plan Review**:
 One independent review of a finished Task Plan (fixes and multi-item changes), by a sub-agent with fresh context and a different model family (`backgroundModels.reviewer`), which can read the codebase. Must-fix findings go back to the worker once; the result shows in the plan status line.
 _Avoid_: code review (that is the human PR review), second opinion
