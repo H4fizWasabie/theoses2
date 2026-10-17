@@ -86,6 +86,27 @@ function safeFileStem(value: string): string {
 	return value.replace(/[^A-Za-z0-9_-]+/g, "_").slice(0, 80) || "call";
 }
 
+type TextLike = { type: string; text?: string };
+
+function textBlocksOf(content: ReadonlyArray<TextLike>): Array<{ type: "text"; text: string }> {
+	return content.filter(
+		(block): block is { type: "text"; text: string } => block.type === "text" && typeof block.text === "string",
+	);
+}
+
+/** The text a tool result holds without its ⟨tN⟩ id: what its saved file keeps. */
+function fullTextOf(textBlocks: Array<{ type: "text"; text: string }>): string {
+	return withoutToolOutputId(textBlocks)
+		.map((block) => block.text)
+		.join("\n");
+}
+
+/** Named by the tool-output id (#581): the file and the marker both say which output it is. Results from before ids existed fall back to the tool call id. */
+function resultFileName(toolCallId: string, content: ReadonlyArray<TextLike>): string {
+	const id = toolOutputIdOf(content);
+	return `result-${id === undefined ? safeFileStem(toolCallId) : `t${id}`}.txt`;
+}
+
 function pruneToolResult(
 	message: AgentMessage,
 	cap: number,
@@ -93,28 +114,35 @@ function pruneToolResult(
 	stats: ContextPruningStats,
 ): AgentMessage {
 	if (message.role !== "toolResult" || !Array.isArray(message.content)) return message;
-	const textBlocks = message.content.filter(
-		(block): block is { type: "text"; text: string } => block.type === "text" && typeof block.text === "string",
-	);
+	const textBlocks = textBlocksOf(message.content);
 	const total = textBlocks.reduce((sum, block) => sum + block.text.length, 0);
 	if (total <= cap) return message;
 	const raw = textBlocks.map((block) => block.text).join("\n");
 	if (isPrunedText(raw)) return message;
 
-	// Named by the tool-output id (#581): the file and the marker both say which output it is. Results from before
-	// ids existed fall back to the tool call id.
 	const id = toolOutputIdOf(message.content);
-	const name = id === undefined ? safeFileStem(message.toolCallId) : `t${id}`;
-	const original = withoutToolOutputId(textBlocks)
-		.map((block) => block.text)
-		.join("\n");
-	const path = spill?.(`result-${name}.txt`, original);
+	const path = spill?.(resultFileName(message.toolCallId, message.content), fullTextOf(textBlocks));
 	const shrunk = shrinkText(raw, cap, `${message.toolName} output${id === undefined ? "" : ` ⟨t${id}⟩`}`, path);
 	// One text block carrying the excerpt; anything that is not text (images) is left as it was.
 	const rest = message.content.filter((block) => block.type !== "text");
 	stats.toolResults++;
 	stats.charsRemoved += raw.length - shrunk.length;
 	return { ...message, content: [{ type: "text", text: shrunk }, ...rest] };
+}
+
+/**
+ * Saves the full text of tool results that leave the live context uncut: the context-window drop, compaction and a
+ * task reset (#581). Same file and name as turn-start pruning, so a result already cut (its marker names the file) is
+ * skipped, and saving the same result twice changes nothing.
+ */
+export function spillEvictedToolResults(messages: AgentMessage[], spill: ContextPruningOptions["spill"]): void {
+	if (!spill) return;
+	for (const message of messages) {
+		if (message.role !== "toolResult" || !Array.isArray(message.content)) continue;
+		const textBlocks = textBlocksOf(message.content);
+		if (isPrunedText(textBlocks.map((block) => block.text).join("\n"))) continue;
+		spill(resultFileName(message.toolCallId, message.content), fullTextOf(textBlocks));
+	}
 }
 
 /** Cuts long strings anywhere inside an arguments object, keeping its shape and keys. */

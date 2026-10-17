@@ -77,7 +77,7 @@ import {
 	generateBranchSummary,
 } from "./compaction/index.ts";
 import { type CompactionRun, createCompactionRun, type Summarizer } from "./compaction/run.ts";
-import { pruneFinishedTurnOutputs } from "./context-pruning.ts";
+import { pruneFinishedTurnOutputs, spillEvictedToolResults } from "./context-pruning.ts";
 import { THINKING_LEVEL_OPTIONS } from "./defaults.ts";
 import { createExploreToolDefinition } from "./explorer.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
@@ -1476,9 +1476,14 @@ export class AgentSession {
 			}
 
 			const messagesBeforeLimit = this.agent.state.messages.length;
+			const beforeWindow = this.agent.state.messages;
 			this.agent.state.messages = limitActiveContextMessages(
-				this.agent.state.messages,
+				beforeWindow,
 				activeContextWindowTurns(this.settingsManager.getCompactionSettings()),
+			);
+			spillEvictedToolResults(
+				beforeWindow.slice(0, beforeWindow.length - this.agent.state.messages.length),
+				(name, text) => spillPrunedText(this.sessionManager, name, text),
 			);
 			if (process.env.THEOSES_DEBUG_CACHE_PREFIX && this.agent.state.messages.length !== messagesBeforeLimit) {
 				console.error(

@@ -1,9 +1,11 @@
 import type { AgentMessage } from "theoses-agent-core";
 import type { AgentSessionEvent } from "../agent-session.ts";
 import { formatNoModelSelectedMessage } from "../auth-guidance.ts";
+import { spillEvictedToolResults } from "../context-pruning.ts";
 import type { ExtensionRunner, SessionBeforeCompactResult } from "../extensions/index.ts";
 import type { MemoryPromotion } from "../memory-promotion.ts";
 import type { CompactionEntry, SessionManager } from "../session-manager.ts";
+import { spillPrunedText } from "../tools/output-shaping.ts";
 import {
 	type CompactionPreparation,
 	type CompactionResult,
@@ -178,6 +180,15 @@ export function createCompactionRun(options: CompactionRunOptions): CompactionRu
 			if (controller.signal.aborted) throw new CompactionCancelled();
 
 			sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
+			// Tool output this compaction takes out of the context keeps its full text on disk (#581).
+			spillEvictedToolResults(
+				[
+					...(preparation.chainReset?.droppedMessages ?? []),
+					...preparation.messagesToSummarize,
+					...preparation.turnPrefixMessages,
+				],
+				(name, text) => spillPrunedText(sessionManager, name, text),
+			);
 			const sessionContext = sessionManager.buildSessionContext();
 			options.setMessages(sessionContext.messages);
 			const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
