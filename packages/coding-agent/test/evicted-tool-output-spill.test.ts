@@ -136,6 +136,43 @@ describe("rotation keeps tool-output ids (#581 criteria)", () => {
 	});
 });
 
+describe("a fork or branch of a rotated log keeps tool-output ids (#585, deferred from #589)", () => {
+	function rotatedManager(root: string): SessionManager {
+		mkdirSync(join(root, "sessions"), { recursive: true });
+		const manager = SessionManager.create(root, join(root, "sessions"));
+		manager.appendMessage(userText("first"));
+		manager.appendMessage(toolResult("⟨t5⟩\nOLD OUTPUT", "call_5"));
+		manager.appendMessage(assistantText("done"));
+		manager.appendMessage(userText("tail with no tool result"));
+		manager.appendMessage(assistantText("tail answer"));
+		manager.rotate();
+		expect(manager.getHeader()?.carriedToolOutputId).toBe(5);
+		return manager;
+	}
+
+	it("createBranchedSession carries the highest id", () => {
+		const root = join(tmpdir(), `theoses-evicted-branch-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		try {
+			const manager = rotatedManager(root);
+			manager.createBranchedSession(manager.getLeafId() as string);
+			expect(manager.getHeader()?.carriedToolOutputId).toBe(5);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("forkFrom carries the highest id", () => {
+		const root = join(tmpdir(), `theoses-evicted-fork-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		try {
+			const manager = rotatedManager(root);
+			const forked = SessionManager.forkFrom(manager.getSessionFile() as string, root, join(root, "forks"));
+			expect(forked.getHeader()?.carriedToolOutputId).toBe(5);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+});
+
 function messageEntry(id: string, message: AgentMessage): SessionMessageEntry {
 	return { type: "message", id, parentId: null, timestamp: new Date().toISOString(), message } as SessionMessageEntry;
 }

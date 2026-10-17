@@ -131,9 +131,62 @@ describe("grounded share", () => {
 		const rows = aggregate(scores);
 		// The headline counts specific Claims only; the small "15" is counted apart.
 		expect(rows).toEqual([
-			{ model: "m1", day: "2026-10-17", replies: 3, claims: 3, grounded: 1, guesses: 2, small: 1 },
+			{
+				model: "m1",
+				day: "2026-10-17",
+				replies: 3,
+				claims: 3,
+				grounded: 1,
+				guesses: 2,
+				small: 1,
+				cited: 0,
+				citedGrounded: 0,
+				contradictions: 0,
+			},
 		]);
 		expect(aggregate(scores, { to: "2026-10-16" })).toEqual([]);
+	});
+
+	it("reports the cited-mode share and Contradictions apart from the scan-mode counts", () => {
+		const tool = line({
+			type: "message",
+			id: "t1",
+			timestamp: at(2),
+			message: {
+				role: "toolResult",
+				toolCallId: "c9",
+				toolName: "bash",
+				content: [{ type: "text", text: "⟨t1⟩\n150 names.txt\n/srv/a.ts" }],
+				isError: false,
+				timestamp: 0,
+			},
+		});
+		const reply = (id: string, text: string) =>
+			line({
+				type: "message",
+				id,
+				timestamp: at(3),
+				message: { role: "assistant", content: [{ type: "text", text }], model: "m2", timestamp: 0 },
+			});
+		const entries = [tool, reply("r1", "150 ⟨t1⟩ names in /srv/a.ts⟨t1⟩, and 130 ⟨t1⟩, plus 999 here.")].map(
+			(text) => JSON.parse(text) as SessionLine,
+		);
+		const rows = aggregate(scoreSession(entries));
+		expect(rows).toEqual([
+			{
+				model: "m2",
+				day: "2026-10-17",
+				replies: 1,
+				claims: 4,
+				grounded: 2,
+				guesses: 1,
+				small: 0,
+				cited: 3,
+				citedGrounded: 2,
+				contradictions: 1,
+			},
+		]);
+		expect(formatTable(rows)).toContain("contradictions");
 	});
 
 	it("reads the daily cache ratio from eval.db", () => {

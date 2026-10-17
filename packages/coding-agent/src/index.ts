@@ -34,7 +34,14 @@ export {
 	describeFinalError,
 	type RewindPoint,
 } from "./core/channel-session.ts";
-export { type Claim, type ClaimSpecificity, type ClaimStatus, readClaims } from "./core/claim-reading.ts";
+export {
+	type Claim,
+	type ClaimSpecificity,
+	type ClaimStatus,
+	type ClaimSummary,
+	readClaims,
+	summarizeClaims,
+} from "./core/claim-reading.ts";
 // Compaction
 export {
 	type BranchPreparation,

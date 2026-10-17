@@ -246,3 +246,40 @@ describe("claimCheck", () => {
 		expect(claimCheck([...run, first as AgentMessage, reply("Done.")], { cwd: process.cwd() })).toBeUndefined();
 	});
 });
+
+describe("D: Contradiction", () => {
+	const t7 = (): AgentMessage[] => tool("bash", { command: "wc -l untracked.txt" }, "⟨t7⟩\n15 untracked.txt");
+
+	it("pushes back on a value that contradicts the output it cites, naming value, id and what the output shows", () => {
+		const problem = findClaimProblem([user("count them"), ...t7(), reply("13 ⟨t7⟩ names are untracked.")], {
+			cwd: process.cwd(),
+		});
+		expect(problem).toContain("13");
+		expect(problem).toContain("⟨t7⟩");
+		expect(problem).toContain("15 untracked.txt");
+	});
+
+	it("is quiet for a Grounded Claim and for a Guess", () => {
+		expect(
+			findClaimProblem([user("count them"), ...t7(), reply("15 ⟨t7⟩ names.")], { cwd: process.cwd() }),
+		).toBeUndefined();
+		expect(
+			findClaimProblem([user("count them"), ...t7(), reply("13 names.")], { cwd: process.cwd() }),
+		).toBeUndefined();
+	});
+
+	it("checks against the Task's messages when given, so an output from before this run counts", () => {
+		const run = [user("and now?"), reply("13 ⟨t7⟩ names.")];
+		expect(findClaimProblem(run, { cwd: process.cwd() })).toBeUndefined();
+		expect(findClaimProblem(run, { cwd: process.cwd(), task: [user("count"), ...t7(), ...run] })).toContain("15");
+	});
+
+	it("shares the one push per run with the other rules, and the push carries the final-reply note", () => {
+		const run = [user("count them"), ...t7(), reply("13 ⟨t7⟩ names.")];
+		const first = claimCheck(run, { cwd: process.cwd() });
+		expect(first?.content).toContain(FINAL_REPLY_NOTE);
+		expect(
+			claimCheck([...run, first as AgentMessage, reply("13 ⟨t7⟩ names.")], { cwd: process.cwd() }),
+		).toBeUndefined();
+	});
+});

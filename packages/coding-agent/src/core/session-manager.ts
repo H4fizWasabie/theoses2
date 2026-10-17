@@ -1710,6 +1710,8 @@ export class SessionManager {
 			timestamp,
 			cwd: this.cwd,
 			parentSession: persistBranch ? previousSessionFile : undefined,
+			// Ids that a rotation dropped must stay taken, or a branch reuses them (#581).
+			carriedToolOutputId: this.getHeader()?.carriedToolOutputId,
 		};
 
 		// Collect labels for entries in the path
@@ -1950,6 +1952,7 @@ export class SessionManager {
 			timestamp,
 			cwd: resolvedTargetCwd,
 			parentSession: resolvedSourcePath,
+			carriedToolOutputId: sourceHeader.carriedToolOutputId,
 		};
 		writeFileSync(newSessionFile, `${JSON.stringify(newHeader)}\n`, { flag: "wx" });
 

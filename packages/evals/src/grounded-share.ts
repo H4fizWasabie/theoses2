@@ -6,6 +6,10 @@
 // The headline counts specific Claims only (3+ digits, decimals, paths, URLs). Small integers (1-2 digits) turn up by
 // coincidence in long tool output ("15" in "Oct 15 23:43"), so they are counted apart and reported as untrusted.
 //
+// Cited mode (#585): a Claim followed by a ⟨tN⟩ Citation is checked against output tN. It counts in the totals as before
+// (Grounded if shown), a mismatch is a Contradiction (counted apart, never a Guess), and the "cited grounded" column
+// is its share of cited Claims. Logs from before Citations shipped have none, so their rows are unchanged.
+//
 // A Task runs from one `task_boundary` entry to the next (its `beforeEntryId` is the first entry of the new Task). Only
 // the Task's messages up to a reply can ground it, so a result from an earlier Task or a later one never counts.
 
@@ -42,6 +46,12 @@ export interface DayRow {
 	guesses: number;
 	/** Small Claims (1-2 digit integers), grounded or not. Untrusted, excluded from the three counts above. */
 	small: number;
+	/** Specific Claims with a Citation to an output of the Task (#585), a subset of `claims`. */
+	cited: number;
+	/** Cited Claims that the output shows, a subset of `grounded`. Cited share = citedGrounded / cited. */
+	citedGrounded: number;
+	/** Cited Claims that the output does not show, a subset of `claims`. Not counted as Guesses. */
+	contradictions: number;
 }
 
 export interface SessionCorpus {
@@ -167,6 +177,9 @@ export function aggregate(scores: ReplyScore[], range: { from?: string; to?: str
 			grounded: 0,
 			guesses: 0,
 			small: 0,
+			cited: 0,
+			citedGrounded: 0,
+			contradictions: 0,
 		};
 		const specific = score.claims.filter((c) => c.specificity === "specific");
 		row.replies++;
@@ -174,6 +187,10 @@ export function aggregate(scores: ReplyScore[], range: { from?: string; to?: str
 		row.grounded += specific.filter((c) => c.status === "grounded").length;
 		row.guesses += specific.filter((c) => c.status === "guess").length;
 		row.small += score.claims.length - specific.length;
+		const cited = specific.filter((c) => c.cited !== undefined);
+		row.cited += cited.length;
+		row.citedGrounded += cited.filter((c) => c.status === "grounded").length;
+		row.contradictions += specific.filter((c) => c.status === "contradiction").length;
 		rows.set(key, row);
 	}
 	return [...rows.values()].sort((a, b) => a.model.localeCompare(b.model) || a.day.localeCompare(b.day));
@@ -205,7 +222,18 @@ const percent = (part: number, whole: number): string => (whole === 0 ? "-" : `$
 
 /** Fixed-width table: one row per model per day, then a total row per model. */
 export function formatTable(rows: DayRow[], cache?: Map<string, number>): string {
-	const header = ["model", "day", "replies", "specific", "grounded", "guesses", "small (untrusted)", "cache"];
+	const header = [
+		"model",
+		"day",
+		"replies",
+		"specific",
+		"grounded",
+		"guesses",
+		"small (untrusted)",
+		"cited grounded",
+		"contradictions",
+		"cache",
+	];
 	const body: string[][] = [];
 	const models = [...new Set(rows.map((r) => r.model))];
 	for (const model of models) {
@@ -220,6 +248,8 @@ export function formatTable(rows: DayRow[], cache?: Map<string, number>): string
 				percent(row.grounded, row.claims),
 				String(row.guesses),
 				String(row.small),
+				percent(row.citedGrounded, row.cited),
+				String(row.contradictions),
 				ratio === undefined ? "-" : `${(100 * ratio).toFixed(1)}%`,
 			]);
 		}
@@ -230,8 +260,11 @@ export function formatTable(rows: DayRow[], cache?: Map<string, number>): string
 				grounded: sum.grounded + r.grounded,
 				guesses: sum.guesses + r.guesses,
 				small: sum.small + r.small,
+				cited: sum.cited + r.cited,
+				citedGrounded: sum.citedGrounded + r.citedGrounded,
+				contradictions: sum.contradictions + r.contradictions,
 			}),
-			{ replies: 0, claims: 0, grounded: 0, guesses: 0, small: 0 },
+			{ replies: 0, claims: 0, grounded: 0, guesses: 0, small: 0, cited: 0, citedGrounded: 0, contradictions: 0 },
 		);
 		body.push([
 			model,
@@ -241,6 +274,8 @@ export function formatTable(rows: DayRow[], cache?: Map<string, number>): string
 			percent(total.grounded, total.claims),
 			String(total.guesses),
 			String(total.small),
+			percent(total.citedGrounded, total.cited),
+			String(total.contradictions),
 			"",
 		]);
 	}

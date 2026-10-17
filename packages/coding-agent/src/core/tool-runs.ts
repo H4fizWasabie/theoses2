@@ -19,7 +19,10 @@ export interface ToolRun {
 	path: string | undefined;
 	command: string | undefined;
 	isError: boolean;
+	/** The output with its `⟨tN⟩` id removed. */
 	output: string;
+	/** The `N` of that id, when the result carries one (#580). */
+	outputId?: number;
 }
 
 export function textOf(content: string | ReadonlyArray<{ type: string; text?: string }>): string {
@@ -77,6 +80,7 @@ export function toolRuns(messages: AgentMessage[]): ToolRun[] {
 				command: typeof args.command === "string" ? args.command : undefined,
 				isError: result.isError === true,
 				output: textOf(withoutToolOutputId(result.content)),
+				outputId: toolOutputIdOf(result.content),
 			});
 		}
 	}

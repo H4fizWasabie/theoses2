@@ -1,6 +1,9 @@
 /**
- * Claim reading, scan mode: the values a reply states, each Grounded if a tool result of the same Task shows it
- * literally, otherwise a Guess. One pure function, no model call. The stop-time checker, the reply footer and the
+ * Claim reading: the values a reply states. Two modes over one reading.
+ *   cited: a value followed by a `⟨tN⟩` Citation is matched literally against the full text of output tN, which must
+ *     be in the Task: Grounded if it shows the value, a Contradiction if not.
+ *   scan: every other value is Grounded if any tool result of the same Task shows it literally, otherwise a Guess.
+ *     A Citation to an id outside the Task is no Citation, so its value is read in scan mode. One pure function, no model call. The stop-time checker, the reply footer and the
  * offline eval all call it, so none of them can disagree about what counts as Grounded.
  *
  * A value is a number, path or URL in the reply. Literal matching is intentional: a count the model did in its head
@@ -14,7 +17,7 @@ import type { AgentMessage } from "theoses-agent-core";
 import type { AssistantMessage } from "theoses-ai";
 import { textOf, toolRuns } from "./tool-runs.ts";
 
-export type ClaimStatus = "grounded" | "guess";
+export type ClaimStatus = "grounded" | "guess" | "contradiction";
 
 /**
  * `small` is an integer of one or two digits: such a value shows up by coincidence in almost any long tool output
@@ -29,7 +32,17 @@ export interface Claim {
 	readonly specificity: ClaimSpecificity;
 	/** Id of the first tool result of the Task that shows the value (Grounded only). */
 	readonly source?: string;
+	/** The `N` of the `⟨tN⟩` Citation the Claim was checked against (Grounded or Contradiction). */
+	readonly cited?: number;
+	/** What the cited output shows, abridged (Contradiction only). */
+	readonly shown?: string;
 }
+
+/** Marker after a claimed value. Blanked before values are read so its own digit is not one. */
+const CITATION = /⟨t(\d+)⟩/g;
+const CITED_VALUE = /([^\s⟨]+)[ \t]*⟨t(\d+)⟩/g;
+const SHOWN_LINES = 3;
+const SHOWN_CHARS = 240;
 
 const URL_PATTERN = /https?:\/\/[^\s<>()"'`\]]+/g;
 const PATH_PATTERN = /(?<![\w./:-])(?:\.{1,2}\/|~\/|\/)?[\w.@+-]+(?:\/[\w.@+-]+)+/g;
@@ -97,13 +110,50 @@ function appearsIn(output: string, value: string): boolean {
 export function readClaims(taskMessages: AgentMessage[], reply: AssistantMessage, ownerText = ""): Claim[] {
 	const owned = new Set(valuesIn(ownerText));
 	const outputs = toolRuns(taskMessages);
-	return valuesIn(textOf(reply.content))
+	const text = textOf(reply.content);
+	const citations = new Map<string, number[]>();
+	for (const [, token, id] of text.matchAll(CITED_VALUE)) {
+		const value = valuesIn(token).at(-1);
+		if (value !== undefined) citations.set(value, [...(citations.get(value) ?? []), Number(id)]);
+	}
+	return valuesIn(text.replace(CITATION, blankOut))
 		.filter((value) => !owned.has(value))
 		.map((value): Claim => {
-			const source = outputs.find((run) => appearsIn(run.output, value));
 			const specificity: ClaimSpecificity = /^\d{1,2}$/.test(value) ? "small" : "specific";
+			const cited = (citations.get(value) ?? []).flatMap((id) => {
+				const run = outputs.find((candidate) => candidate.outputId === id);
+				return run ? [{ id, run }] : [];
+			});
+			if (cited.length > 0) {
+				const match = cited.find(({ run }) => appearsIn(run.output, value)) ?? cited[0];
+				if (appearsIn(match.run.output, value)) {
+					return { value, status: "grounded", specificity, source: match.run.id, cited: match.id };
+				}
+				return { value, status: "contradiction", specificity, cited: match.id, shown: abridge(match.run.output) };
+			}
+			const source = outputs.find((run) => appearsIn(run.output, value));
 			return source
 				? { value, status: "grounded", specificity, source: source.id }
 				: { value, status: "guess", specificity };
 		});
+}
+
+function abridge(output: string): string {
+	const head = output.trim().split("\n").slice(0, SHOWN_LINES).join(" | ");
+	return head.length > SHOWN_CHARS ? `${head.slice(0, SHOWN_CHARS)}…` : head;
+}
+
+/** A run's final reply, by status. */
+export interface ClaimSummary {
+	grounded: Claim[];
+	guesses: Claim[];
+	/** Contradictions that survived the push-back. */
+	contradictions: Claim[];
+}
+
+/** Undefined for a reply with no Claims, so channels render nothing. */
+export function summarizeClaims(claims: Claim[]): ClaimSummary | undefined {
+	if (claims.length === 0) return undefined;
+	const by = (status: ClaimStatus) => claims.filter((claim) => claim.status === status);
+	return { grounded: by("grounded"), guesses: by("guess"), contradictions: by("contradiction") };
 }
