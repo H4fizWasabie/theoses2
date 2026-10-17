@@ -18,6 +18,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
+import { activeContextWindowTurns } from "../src/core/compaction/compaction.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { type Settings, SettingsManager } from "../src/core/settings-manager.ts";
 import { createTestResourceLoader } from "./utilities.ts";
@@ -231,6 +232,37 @@ describe("AgentSession prunes finished-turn tool output before a new turn", () =
 		expect(savedPath).toContain("pruned-result-call_old.txt");
 		expect(readFileSync(savedPath, "utf8")).toBe(BIG_OUTPUT);
 		expect(sessionManager.getArtifactCatalog()).not.toContain("pruned-");
+	});
+
+	it("saves the full text of a tool result that the context window drops, under its tool-output id (#581)", async () => {
+		const window = activeContextWindowTurns(SettingsManager.inMemory({}).getCompactionSettings());
+		const evicted: AgentMessage[] = [
+			{ role: "user", content: [{ type: "text", text: "old question" }], timestamp: 1 },
+			assistant([{ type: "toolCall", id: "call_evicted", name: "bash", arguments: { command: "ls" } }], "toolUse"),
+			{
+				role: "toolResult",
+				toolCallId: "call_evicted",
+				toolName: "bash",
+				content: [{ type: "text", text: `⟨t1⟩\n${BIG_OUTPUT}` }],
+				isError: false,
+				timestamp: 2,
+			},
+			assistant([{ type: "text", text: "listed" }]),
+		];
+		const recent = Array.from({ length: window }, (_, i) => [
+			{ role: "user", content: [{ type: "text", text: `question ${i}` }], timestamp: 3 } as AgentMessage,
+			assistant([{ type: "text", text: `answer ${i}` }]),
+		]).flat();
+		const { session: s, sessionManager } = await createSession({
+			persist: true,
+			messages: [...evicted, ...recent],
+		});
+
+		await s.prompt("next question");
+
+		expect(readFileSync(join(sessionManager.getArtifactDirectory(), "pruned-result-t1.txt"), "utf8")).toBe(
+			BIG_OUTPUT,
+		);
 	});
 
 	describe("images", () => {

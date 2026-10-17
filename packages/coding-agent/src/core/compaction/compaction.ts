@@ -886,6 +886,8 @@ export interface CompactionPreparation {
 		/** Index into the pathEntries this preparation was built from, resolved from the
 		 * marker's beforeEntryId — this became the new boundaryStart. */
 		resetAtIndex: number;
+		/** Messages between the old boundary and the reset: dropped without a summary, so their tool output is saved by the caller. */
+		droppedMessages: AgentMessage[];
 	};
 	/**
 	 * Issue #204: set when a chainReset left nothing to summarize (the new task's own turns
@@ -941,7 +943,13 @@ export function prepareCompaction(
 		if (!data) continue;
 		const resetAtIndex = pathEntries.findIndex((e) => e.id === data.beforeEntryId);
 		if (resetAtIndex <= boundaryStart) continue; // anchor pruned, or already at/before the boundary — no-op
-		chainReset = { taskSummary: data.taskSummary, resetAtIndex };
+		// The span the reset leaves behind: no summary, but its tool output must still be saved (#581).
+		const droppedMessages: AgentMessage[] = [];
+		for (let j = boundaryStart; j < resetAtIndex; j++) {
+			const msg = getMessageFromEntryForCompaction(pathEntries[j]);
+			if (msg) droppedMessages.push(msg);
+		}
+		chainReset = { taskSummary: data.taskSummary, resetAtIndex, droppedMessages };
 		boundaryStart = resetAtIndex;
 		previousSummary = undefined;
 		fileOpsPrevCompactionIndex = -1;
