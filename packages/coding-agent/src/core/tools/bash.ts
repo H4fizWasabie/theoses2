@@ -18,7 +18,7 @@ import {
 } from "../../utils/shell.ts";
 import { getExperimentalToolSampling } from "../experimental.ts";
 import type { ExtensionContext, ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
-import { DEFAULT_HEAD_BYTES, OutputAccumulator } from "./output-accumulator.ts";
+import { OutputAccumulator } from "./output-accumulator.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import {
@@ -409,7 +409,7 @@ export function createShellToolDefinition(
 	return {
 		name: config.name,
 		label: config.label,
-		description: `Execute a ${config.shellName} command in the current working directory. Returns stdout and stderr. Output is truncated to the first ${DEFAULT_HEAD_BYTES} bytes plus the last ${TOOL_OUTPUT_MAX_LINES} lines or ${TOOL_OUTPUT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved as a session artifact. Optionally provide a timeout in seconds.`,
+		description: `Execute a ${config.shellName} command in the current working directory. Returns stdout and stderr. Output over ${TOOL_OUTPUT_MAX_LINES} lines or ${TOOL_OUTPUT_MAX_BYTES / 1024}KB (whichever is hit first) is cut in the middle: its start and end are kept. If truncated, full output is saved as a session artifact. Optionally provide a timeout in seconds.`,
 		promptSnippet: config.promptSnippet,
 		promptGuidelines: exposeSessionEnvironment && config.promptGuidelines ? [...config.promptGuidelines] : undefined,
 		parameters: bashSchema,
@@ -432,7 +432,6 @@ export function createShellToolDefinition(
 				tempFilePrefix: config.tempFilePrefix,
 				maxLines: TOOL_OUTPUT_MAX_LINES,
 				maxBytes: TOOL_OUTPUT_MAX_BYTES,
-				maxHeadBytes: DEFAULT_HEAD_BYTES,
 				spillDir: ctx?.sessionManager?.getArtifactDirectory(),
 			});
 			let acceptingOutput = true;
@@ -509,15 +508,18 @@ export function createShellToolDefinition(
 				let details: BashToolDetails | undefined;
 				if (truncation.truncated) {
 					details = { truncation, fullOutputPath: snapshot.fullOutputPath };
-					const startLine = truncation.totalLines - truncation.outputLines + 1;
+					const headLines = truncation.headLines ?? 0;
+					const startLine = truncation.totalLines - (truncation.outputLines - headLines) + 1;
 					const endLine = truncation.totalLines;
+					const head = headLines > 0 ? `1-${headLines}, ` : "";
 					if (truncation.lastLinePartial) {
 						const lastLineSize = formatSize(output.getLastLineBytes());
-						text += `\n\n[Showing last ${formatSize(truncation.outputBytes)} of line ${endLine} (line is ${lastLineSize}). Full output: ${snapshot.fullOutputPath}]`;
+						const headPart = headLines > 0 ? `lines 1-${headLines} and ` : "";
+						text += `\n\n[Showing ${headPart}the end of line ${endLine} (line is ${lastLineSize}). Full output: ${snapshot.fullOutputPath}]`;
 					} else if (truncation.truncatedBy === "lines") {
-						text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines}. Full output: ${snapshot.fullOutputPath}]`;
+						text += `\n\n[Showing lines ${head}${startLine}-${endLine} of ${truncation.totalLines}. Full output: ${snapshot.fullOutputPath}]`;
 					} else {
-						text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(TOOL_OUTPUT_MAX_BYTES)} limit). Full output: ${snapshot.fullOutputPath}]`;
+						text += `\n\n[Showing lines ${head}${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(TOOL_OUTPUT_MAX_BYTES)} limit). Full output: ${snapshot.fullOutputPath}]`;
 					}
 				}
 				return { text, details };
