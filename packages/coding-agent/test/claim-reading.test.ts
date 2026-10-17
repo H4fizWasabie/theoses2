@@ -154,3 +154,60 @@ describe("readClaims (scan mode)", () => {
 		expect(readClaims([user("hi")], reply("Sure, happy to help."))).toEqual([]);
 	});
 });
+
+/** A bash run whose result carries a ⟨tN⟩ id, as AgentSession writes it. */
+function bashT(n: number, command: string, output: string): AgentMessage[] {
+	return bash(command, `⟨t${n}⟩\n${output}`);
+}
+
+describe("readClaims (cited mode)", () => {
+	const taskOf = () => [user("count the untracked names"), ...bashT(7, "wc -l untracked.txt", "15 untracked.txt")];
+
+	it("a value matching the output it cites is Grounded", () => {
+		const claims = readClaims(taskOf(), reply("15 ⟨t7⟩ names are untracked."));
+		expect(claims).toEqual([
+			{ value: "15", status: "grounded", specificity: "small", source: expect.any(String), cited: 7 },
+		]);
+	});
+
+	it("a value that differs from the output it cites is a Contradiction naming what the output shows", () => {
+		const claims = readClaims(taskOf(), reply("13⟨t7⟩ names are untracked."));
+		expect(claims).toEqual([
+			{ value: "13", status: "contradiction", specificity: "small", cited: 7, shown: "15 untracked.txt" },
+		]);
+	});
+
+	it("the same value without a Citation is a Guess", () => {
+		expect(statusOf(readClaims(taskOf(), reply("13 names are untracked.")))).toEqual([
+			{ value: "13", status: "guess" },
+		]);
+	});
+
+	it("the marker's own digit is not a Claim", () => {
+		expect(readClaims(taskOf(), reply("see ⟨t7⟩"))).toEqual([]);
+	});
+
+	it("a Citation is checked against the cited output only, not any output of the Task", () => {
+		const messages = [...taskOf(), ...bashT(8, "echo", "13 other")];
+		expect(statusOf(readClaims(messages, reply("13 ⟨t7⟩")))).toEqual([{ value: "13", status: "contradiction" }]);
+		expect(statusOf(readClaims(messages, reply("13 ⟨t8⟩")))).toEqual([{ value: "13", status: "grounded" }]);
+	});
+
+	it("a Citation to an id outside this Task falls back to scan mode, so a value no output shows is a Guess", () => {
+		expect(statusOf(readClaims(taskOf(), reply("13 ⟨t3⟩")))).toEqual([{ value: "13", status: "guess" }]);
+	});
+
+	it("a cited path is matched literally", () => {
+		const messages = bashT(9, "ls", "packages/a/b.ts");
+		expect(statusOf(readClaims(messages, reply("Edited packages/a/b.ts⟨t9⟩ and packages/c/d.ts⟨t9⟩.")))).toEqual([
+			{ value: "packages/a/b.ts", status: "grounded" },
+			{ value: "packages/c/d.ts", status: "contradiction" },
+		]);
+	});
+
+	it("reads the full output the caller passes, whatever the live context pruned", () => {
+		const full = `⟨t7⟩\n${"x\n".repeat(5000)}15 untracked.txt`;
+		const claims = readClaims([...bash("wc", full)], reply("15 ⟨t7⟩"));
+		expect(statusOf(claims)).toEqual([{ value: "15", status: "grounded" }]);
+	});
+});

@@ -13,6 +13,10 @@ describe("buildSystemPrompt", () => {
 			}
 		});
 
+		test("tells the model how to cite", () => {
+			expect(block(buildSystemPrompt({ cwd: process.cwd() }))).toContain('"15 \u27e8t7\u27e9"');
+		});
+
 		test("is byte-identical across sessions and turns", () => {
 			const a = buildSystemPrompt({ cwd: "/a", workingNote: "one", contextFiles: [] });
 			const b = buildSystemPrompt({ cwd: "/b", workingNote: "two", artifactCatalog: "x" });

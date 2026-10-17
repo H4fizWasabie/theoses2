@@ -54,6 +54,7 @@ import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { markBusy } from "./busy-marker.ts";
 import { FINAL_REPLY_NOTE } from "./claim-check.ts";
+import { type ClaimSummary, readClaims, summarizeClaims } from "./claim-reading.ts";
 import { formatClockAnnotation, stripClockAnnotation } from "./clock.ts";
 import {
 	type HookRunContext,
@@ -327,6 +328,8 @@ export interface PromptResult {
 	finalError?: { message: string; provider: string; model: string };
 	/** One-line Task Plan status when this operation created or changed the plan (issue #382). */
 	planStatus?: string;
+	/** The final reply's Claims by status; absent when it has none (#585). Delivery-only, never written to history. */
+	claims?: ClaimSummary;
 }
 
 const REPLY_CONTEXT_CAP = 2000;
@@ -1363,6 +1366,19 @@ export class AgentSession {
 		}
 	}
 
+	/** The Claims of the run's final reply, read against the whole current Task from the session log (#585). */
+	private _claimSummary(): ClaimSummary | undefined {
+		const task = this._taskPlan.taskMessages();
+		const at = task.findLastIndex((m) => m.role === "assistant");
+		const reply = task[at];
+		if (reply?.role !== "assistant") return undefined;
+		const owner = task
+			.filter((m) => m.role === "user")
+			.map((m) => textOf(m.content))
+			.join("\n");
+		return summarizeClaims(readClaims(task.slice(0, at), reply, owner));
+	}
+
 	/**
 	 * Records the one outcome of an operation; called by the Operation Loop, which decides when. Retries and
 	 * overflow recovery happen inside an operation, never after it.
@@ -1373,7 +1389,12 @@ export class AgentSession {
 			outcome === "failed" && msg?.errorMessage
 				? { message: msg.errorMessage, provider: msg.provider, model: msg.model }
 				: undefined;
-		this._lastOperationResult = { outcome, finalError, planStatus: this._taskPlanGuard.planStatus() };
+		this._lastOperationResult = {
+			outcome,
+			finalError,
+			planStatus: this._taskPlanGuard.planStatus(),
+			claims: outcome === "completed" ? this._claimSummary() : undefined,
+		};
 		finishWorkingNoteOperation(this.sessionManager, outcome);
 		if (outcome !== "completed") return;
 		// Turn Settlement: only a completed operation of a non-CLI Channel Session (every header defaults

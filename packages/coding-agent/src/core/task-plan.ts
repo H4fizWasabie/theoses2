@@ -101,12 +101,34 @@ export function currentTaskPlan(branch: readonly SessionEntry[]): CustomEntry<Ta
 	return undefined;
 }
 
+/**
+ * The messages of the current Task on a branch, in full as the session log holds them (the live context may have
+ * pruned them): from the latest task boundary's anchor message, or the branch start, to the end. What a Citation is
+ * checked against, so an output from an earlier Task cannot ground a Claim.
+ */
+export function currentTaskMessages(branch: readonly SessionEntry[]): AgentMessage[] {
+	let start = 0;
+	for (let index = branch.length - 1; index >= 0; index--) {
+		const entry = branch[index];
+		if (entry.type === "custom" && entry.customType === TASK_BOUNDARY_CUSTOM_TYPE) {
+			const anchor = branch.findIndex(
+				(candidate) => candidate.id === (entry.data as TaskBoundaryData).beforeEntryId,
+			);
+			if (anchor >= 0) start = anchor;
+			break;
+		}
+	}
+	return branch.slice(start).flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
+}
+
 /** What the `task_plan` tool and the stop guard read and write the current Task Plan through. */
 export interface TaskPlanPort {
 	get: () => TaskPlan | undefined;
 	set: (plan: TaskPlan) => void;
 	/** Messages of the current run (since the last user message). */
 	runMessages: () => AgentMessage[];
+	/** Messages of the whole current Task, in full from the session log. */
+	taskMessages: () => AgentMessage[];
 	cwd: string;
 }
 
@@ -123,6 +145,7 @@ export function createTaskPlanPort(store: TaskPlanStore, runMessages: () => Agen
 			store.appendCustomEntry(TASK_PLAN_ENTRY_TYPE, plan);
 		},
 		runMessages,
+		taskMessages: () => currentTaskMessages(store.getBranch()),
 		cwd,
 	};
 }

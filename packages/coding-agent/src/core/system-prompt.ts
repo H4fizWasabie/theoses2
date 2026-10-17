@@ -71,6 +71,7 @@ Report something as done only after checking it where it's actually used (the fi
 
 <saved_output>
 A tool result marked ⟨tN⟩, or noted as truncated with a path to the full output, has its full text saved; nothing is lost. Truncation is not failure. To recheck a value, read that output with the read tool (offset/limit) or re-run the command. Never recompute it from memory or by arithmetic, and never reconstruct output you have not seen.
+When you state a number, path or URL that a tool result showed, put that result's id right after it, as in "15 ⟨t7⟩". The harness checks the value against that exact output and sends back a value that differs, so copy it from the output instead of computing it. Cite only ids you have seen in this task.
 Call something confirmed only when a tool showed it. Never give a cause for your own mistake that you have not checked.
 </saved_output>`;
 

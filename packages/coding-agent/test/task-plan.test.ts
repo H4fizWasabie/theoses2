@@ -11,6 +11,7 @@ import { TASK_BOUNDARY_CUSTOM_TYPE } from "../src/core/task-boundary-detector.ts
 import {
 	applyPlanAction,
 	createTaskPlanPort,
+	currentTaskMessages,
 	currentTaskPlan,
 	formatPlanStatus,
 	needsReview,
@@ -412,6 +413,23 @@ describe("currentTaskPlan", () => {
 		// The detector writes the boundary after the turn's reply (turn-settlement.ts).
 		session.appendCustomEntry(TASK_BOUNDARY_CUSTOM_TYPE, { taskSummary: "psychology", beforeEntryId: anchor });
 		expect(currentTaskPlan(session.getBranch())?.data?.goal).toBe("new");
+	});
+});
+
+describe("currentTaskMessages", () => {
+	const say = (text: string) => ({ role: "user" as const, content: text, timestamp: 0 });
+
+	it("is the whole branch without a boundary, and starts at the latest boundary's anchor message with one", () => {
+		const session = SessionManager.inMemory();
+		session.appendMessage(say("first task"));
+		expect(currentTaskMessages(session.getBranch())).toHaveLength(1);
+		const anchor = session.appendMessage(say("second task"));
+		session.appendMessage(say("follow-up"));
+		session.appendCustomEntry(TASK_BOUNDARY_CUSTOM_TYPE, { taskSummary: "second", beforeEntryId: anchor });
+		expect(currentTaskMessages(session.getBranch()).map((m) => ("content" in m ? m.content : undefined))).toEqual([
+			"second task",
+			"follow-up",
+		]);
 	});
 });
 

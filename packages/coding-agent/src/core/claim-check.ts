@@ -12,12 +12,14 @@
  *   B. The reply claims verification, but no check command ran after the last file change, or the
  *      last one failed. Skipped when a task plan's final verification criterion already holds that evidence.
  *   C. The user asked for a change, the reply claims it is done, and the run made no tool calls.
+ *   D. A Citation in the reply contradicts the tool output it cites (claim-reading.ts), read from the whole Task.
  *
  * Read-only commands (grep, cat, ls, git status...) are never evidence either way: self-diagnostic's
  * earlier completion-claim check was removed after 45 false flags, mostly grep's exit 1 on no match.
  */
 import type { AgentMessage } from "theoses-agent-core";
 import type { AssistantMessage } from "theoses-ai";
+import { readClaims } from "./claim-reading.ts";
 import { type CustomMessage, createCustomMessage } from "./messages.ts";
 import { FILE_TOOLS, firstLine, textOf } from "./tool-runs.ts";
 import { type RunEvidence, readRunEvidence } from "./verification-evidence.ts";
@@ -38,7 +40,11 @@ const DONE_CLAIM = /\b(done|fixed|updated|changed|added|removed|deleted|renamed|
  */
 export type PlanVerification = { covered: true } | { command?: string; after?: string };
 
-export type ClaimCheckOptions = { plan?: PlanVerification } & (
+export type ClaimCheckOptions = {
+	plan?: PlanVerification;
+	/** The messages of the whole current Task, in full, from the session log. Default: the run. */
+	task?: AgentMessage[];
+} & (
 	| {
 			/** The caller's reading of this run, so both judge it the same way. */
 			evidence: RunEvidence;
@@ -103,6 +109,22 @@ export function findClaimProblem(runMessages: AgentMessage[], options: ClaimChec
 		const request = runMessages.find((m) => m.role === "user");
 		if (request && CHANGE_REQUEST_VERB.test(textOf(request.content))) {
 			return "Your reply says the requested change is done, but you made no tool calls this turn, so nothing was changed. Make the change, or tell the user it has not been done.";
+		}
+	}
+
+	// D: a Citation whose output does not show the claimed value.
+	if (replyText.includes("⟨t")) {
+		const task = options.task ?? runMessages;
+		const owner = task
+			.filter((m) => m.role === "user")
+			.map((m) => textOf(m.content))
+			.join("\n");
+		const contradictions = readClaims(task, reply, owner).filter((claim) => claim.status === "contradiction");
+		if (contradictions.length > 0) {
+			const list = contradictions
+				.map((claim) => `- you wrote ${claim.value} ⟨t${claim.cited}⟩, but t${claim.cited} shows: ${claim.shown}`)
+				.join("\n");
+			return `Your reply cites tool outputs that do not show the values you cited them for:\n${list}\nRead the cited output again (read with offset/limit, or re-run the command) and correct the value or the Citation. Do not recompute it.`;
 		}
 	}
 	return undefined;

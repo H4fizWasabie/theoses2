@@ -157,7 +157,7 @@ export class TaskPlanGuard {
 			verification = atStop.verification;
 		}
 
-		const claim = claimCheck(run, { plan: verification, evidence });
+		const claim = claimCheck(run, { plan: verification, evidence, task: this.deps.taskPlan.taskMessages() });
 		if (claim) return [claim];
 		if (!enabled) return [];
 
