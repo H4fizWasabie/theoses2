@@ -124,6 +124,20 @@ describe("pruneFinishedTurnOutputs: tool results", () => {
 		);
 	});
 
+	it("saves a result under its tool-output id, without the id in the saved text, and names the id in the marker", () => {
+		const spill = vi.fn((_name: string, _text: string) => "/session/artifacts/pruned-result-t7.txt");
+
+		const cut = text(
+			pruneFinishedTurnOutputs([toolResult(`⟨t7⟩\n${long(5000, "z")}`)], { ...CAPS, spill }).messages[0],
+		);
+
+		expect(spill).toHaveBeenCalledWith("result-t7.txt", long(5000, "z"));
+		expect(cut.startsWith("⟨t7⟩\nzzz")).toBe(true);
+		expect(cut).toContain(
+			"omitted from this earlier bash output ⟨t7⟩; full text saved at /session/artifacts/pruned-result-t7.txt, read it with the read tool",
+		);
+	});
+
 	it("still cuts, without a path, when the text cannot be saved", () => {
 		const cut = text(
 			pruneFinishedTurnOutputs([toolResult(long(5000))], { ...CAPS, spill: () => undefined }).messages[0],

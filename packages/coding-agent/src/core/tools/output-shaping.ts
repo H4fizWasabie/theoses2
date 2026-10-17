@@ -1,4 +1,5 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ReadonlySessionManager } from "../session-manager.ts";
 
@@ -41,7 +42,7 @@ export function spillTruncatedOutput(options: SpillOutputOptions): string | unde
  * Persist text that context pruning cut out of the live messages, at a path the model can `read`.
  * Unlike `spillTruncatedOutput` this does not register a catalog entry: a long loop cuts hundreds of
  * results, and listing them would crowd real document attachments out of the system prompt's artifact
- * catalog (and change that prompt). The file name is derived from the tool call id, so pruning the
+ * catalog (and change that prompt). The file name is derived from the tool-output id, so pruning the
  * same result again, or after a restart, maps to the same file and the prompt text stays identical.
  * Fails open like `spillTruncatedOutput`: returns undefined when there is nowhere to write.
  */
@@ -52,9 +53,19 @@ export function spillPrunedText(
 ): string | undefined {
 	if (!sessionManager) return undefined;
 	try {
-		const path = join(sessionManager.getArtifactDirectory(), `pruned-${name}`);
-		if (!existsSync(path)) writeFileSync(path, text, { mode: 0o600 });
-		return path;
+		const directory = sessionManager.getArtifactDirectory();
+		const path = join(directory, `pruned-${name}`);
+		if (!existsSync(path)) {
+			writeFileSync(path, text, { mode: 0o600 });
+			return path;
+		}
+		if (readFileSync(path, "utf8") === text) return path;
+		// The name is taken by a different output (a tool-output id restarted, #581). Keep both: the other one gets a
+		// name the text decides, so the same text still maps to the same file.
+		const digest = createHash("sha256").update(text).digest("hex").slice(0, 12);
+		const other = join(directory, `pruned-${name}.${digest}`);
+		if (!existsSync(other)) writeFileSync(other, text, { mode: 0o600 });
+		return other;
 	} catch {
 		return undefined;
 	}

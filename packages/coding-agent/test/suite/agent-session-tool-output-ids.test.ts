@@ -2,12 +2,15 @@
  * Tool-output ids (#580, ADR-0013): every tool result starts with ⟨tN⟩ from the moment it is created, the session
  * log stores the same text the model is sent, and an id never changes once given.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AgentTool } from "theoses-agent-core";
 import { type Context, fauxAssistantMessage, fauxToolCall, type ToolResultMessage } from "theoses-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import { TASK_BOUNDARY_CUSTOM_TYPE, type TaskBoundaryData } from "../../src/core/task-boundary-detector.ts";
+import { createReadTool } from "../../src/core/tools/read.ts";
 import { createHarness, type Harness, type HarnessOptions } from "./harness.ts";
 
 function echoTool(name = "echo", delayMs = 0): AgentTool {
@@ -136,6 +139,71 @@ describe("AgentSession tool-output ids", () => {
 
 		const [pruned] = toolResults(sent[2]);
 		expect(firstText(pruned)).toMatch(/^⟨t1⟩\necho:x+\n\n\[\.\.\. \d+ chars omitted from this earlier echo output/);
+	});
+
+	it("saves an evicted result under its id, and the marker names the id, the path and the head and tail", async () => {
+		const harness = await harnessWith({ persist: true });
+		harness.setResponses([...toolTurn("x".repeat(5000)), respond(fauxAssistantMessage("ok"))]);
+
+		await harness.session.prompt("print a lot");
+		await harness.session.prompt("and now?");
+
+		const marker = firstText(toolResults(sent[2])[0]);
+		const saved = join(harness.sessionManager.getArtifactDirectory(), "pruned-result-t1.txt");
+		expect(marker).toMatch(
+			/^⟨t1⟩\necho:x+\n\n\[\.\.\. \d+ chars omitted from this earlier echo output ⟨t1⟩; full text saved at /,
+		);
+		expect(marker).toContain(`full text saved at ${saved}, read it with the read tool`);
+		expect(marker).toMatch(/x\n\n\[\.\.\. [^\n]*\]\n\nx+$/);
+		expect(readFileSync(saved, "utf8")).toBe(`echo:${"x".repeat(5000)}`);
+	});
+
+	it("lets the model read a saved result back with offset and limit, as the original text", async () => {
+		const value = `${"a".repeat(3000)}\nSECOND LINE\n${"b".repeat(3000)}`;
+		const harness = await harnessWith({ persist: true });
+		harness.setResponses([...toolTurn(value), respond(fauxAssistantMessage("ok"))]);
+
+		await harness.session.prompt("print two lines");
+		await harness.session.prompt("and now?");
+
+		const saved = join(harness.sessionManager.getArtifactDirectory(), "pruned-result-t1.txt");
+		const read = await createReadTool(harness.sessionManager.getArtifactDirectory()).execute("read-back", {
+			path: saved,
+			offset: 2,
+			limit: 1,
+		});
+		expect(read.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("SECOND LINE") });
+	});
+
+	it("keeps numbering after a log rotation whose kept tail holds no tool result, and keeps the saved files", async () => {
+		const first = await harnessWith({ persist: true });
+		const oldArtifacts = first.sessionManager.getArtifactDirectory();
+		first.setResponses([...toolTurn("x".repeat(5000), "b"), respond(fauxAssistantMessage("ok"))]);
+		await first.session.prompt("print a lot");
+		await first.session.prompt("and now?");
+		const oldSaved = join(oldArtifacts, "pruned-result-t1.txt");
+		// The first turn is promoted and the compaction keeps from the last user message: the tail starts there.
+		const branch = first.sessionManager.getBranch();
+		const isUser = (entry: (typeof branch)[number]) => entry.type === "message" && entry.message.role === "user";
+		const lastUser = branch.findLastIndex(isUser);
+		first.sessionManager.appendPromotedRange(branch[0].id, branch[lastUser - 1].id);
+		first.sessionManager.appendCompaction("summary", branch[lastUser].id, 1000);
+		const newFile = first.sessionManager.rotate() as string;
+		const kept = first.sessionManager
+			.getEntries()
+			.flatMap((entry) => (entry.type === "message" && entry.message.role === "toolResult" ? [entry.message] : []));
+		expect(kept).toEqual([]); // precondition: the tail the rotation keeps has no tool result
+
+		const reopened = await harnessWith({ sessionManager: SessionManager.open(newFile) });
+		reopened.session.agent.state.messages = reopened.sessionManager.buildSessionContext().messages;
+		reopened.setResponses([...toolTurn("y".repeat(5000)), respond(fauxAssistantMessage("ok"))]);
+		await reopened.session.prompt("again");
+		await reopened.session.prompt("and then?");
+
+		expect(firstText(toolResults(sent[4])[0])).toMatch(/^⟨t3⟩\necho:y/);
+		const newSaved = join(reopened.sessionManager.getArtifactDirectory(), "pruned-result-t3.txt");
+		expect(readFileSync(newSaved, "utf8")).toBe(`echo:${"y".repeat(5000)}`);
+		expect(readFileSync(oldSaved, "utf8")).toBe(`echo:${"x".repeat(5000)}`);
 	});
 
 	it("leaves surviving results their ids after a task reset, and does not reuse the dropped ones", async () => {

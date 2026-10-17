@@ -48,6 +48,7 @@ import {
 import { copySessionImages, externalizeImages, hydrateImages } from "./session-images.ts";
 import { TASK_BOUNDARY_CUSTOM_TYPE, type TaskBoundaryData } from "./task-boundary-detector.ts";
 import { currentTaskPlan, TASK_PLAN_ENTRY_TYPE } from "./task-plan.ts";
+import { toolOutputIdOf } from "./tool-runs.ts";
 import { type SessionTotals, sumSessionTotals } from "./usage-totals.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
@@ -78,6 +79,11 @@ export interface SessionHeader {
 	channelSessionId?: string;
 	/** Set by Log Rotation: the totals of everything earlier logs held that this one does not (`sumSessionTotals`). */
 	carriedTotals?: SessionTotals;
+	/**
+	 * Set by Log Rotation: the highest tool-output id earlier logs held (#581), so numbering goes on from it even when
+	 * the kept tail holds no tool result.
+	 */
+	carriedToolOutputId?: number;
 }
 
 export interface NewSessionOptions {
@@ -1284,6 +1290,11 @@ export class SessionManager {
 		}
 
 		const oldHeader = this.getHeader();
+		// The ids of what this rotation drops live on only here, so the new log carries the highest one (#581).
+		const carriedToolOutputId = all.reduce((highest, entry) => {
+			if (entry.type !== "message" || entry.message.role !== "toolResult") return highest;
+			return Math.max(highest, toolOutputIdOf(entry.message.content) ?? 0);
+		}, oldHeader?.carriedToolOutputId ?? 0);
 		const sessionId = createSessionId();
 		const sessionFile = join(dirname(previous.sessionFile), `${timestamp.replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
 		const header: SessionHeader = {
@@ -1299,6 +1310,7 @@ export class SessionManager {
 				all.filter((entry) => !keptIds.has(entry.id)),
 				oldHeader?.carriedTotals,
 			),
+			carriedToolOutputId,
 		};
 		const marker: CustomEntry<SessionRotatedData> = {
 			type: "custom",
