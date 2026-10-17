@@ -6,6 +6,7 @@ import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { activeContextWindowTurns } from "./compaction/index.ts";
+import { spillEvictedToolResults } from "./context-pruning.ts";
 import type {
 	ExtensionRunner,
 	LoadExtensionsResult,
@@ -39,6 +40,7 @@ import {
 	createWriteTool,
 	withFileMutationQueue,
 } from "./tools/index.ts";
+import { spillPrunedText } from "./tools/output-shaping.ts";
 
 // Preserve the pre-0.81 fallback for extensions that construct Agent instances
 // or invoke low-level agent loops without supplying streamFn. Agent core remains
@@ -410,6 +412,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		agent.state.messages = limitActiveContextMessages(
 			existingSession.messages,
 			activeContextWindowTurns(settingsManager.getCompactionSettings()),
+		);
+		// A restore can drop results the window no longer shows; keep their text on disk too (#581).
+		spillEvictedToolResults(
+			existingSession.messages.slice(0, existingSession.messages.length - agent.state.messages.length),
+			(name, text) => spillPrunedText(sessionManager, name, text),
 		);
 		if (!hasThinkingEntry) {
 			sessionManager.appendThinkingLevelChange(thinkingLevel);

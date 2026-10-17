@@ -539,7 +539,7 @@ describe("Coding Agent Tools", () => {
 				expect(error).toBeInstanceOf(Error);
 				const message = (error as Error).message;
 				expect(message).toContain(testCase.expected);
-				expect(message).toMatch(/\[Showing lines \d+-\d+ of \d+\. Full output: /);
+				expect(message).toMatch(/\[Showing lines 1-\d+, \d+-\d+ of \d+\. Full output: /);
 				expect(message).not.toContain("Full output: undefined");
 				const fullOutputPath = message.match(/Full output: ([^\]\n]+)/)?.[1];
 				expect(fullOutputPath).toBeDefined();
@@ -703,11 +703,41 @@ describe("Coding Agent Tools", () => {
 			const output = getTextOutput(result);
 
 			expect(result.details?.truncation?.totalLines).toBe(4000);
-			expect(result.details?.truncation?.outputLines).toBe(250);
-			expect(output).toContain("line-3751");
+			expect(result.details?.truncation?.outputLines).toBe(249);
+			expect(output).toContain("line-3877");
 			expect(output).toContain("line-4000");
-			expect(output).toMatch(/\[Showing lines 3751-4000 of 4000\. Full output: /);
+			expect(output).toMatch(/\[Showing lines 1-125, 3877-4000 of 4000\. Full output: /);
 			expect(output).not.toContain("4001");
+		});
+
+		it("shows the head and tail of large output with an omitted-middle marker, within the budget", async () => {
+			const operations: BashOperations = {
+				exec: async (_command, _cwd, { onData }) => {
+					for (let i = 1; i <= 4000; i++) {
+						onData(Buffer.from(`line-${String(i).padStart(4, "0")}\n`, "utf-8"));
+					}
+					return { exitCode: 0 };
+				},
+			};
+			const bash = createBashTool(testDir, { operations });
+
+			const result = await bash.execute("test-call-head-tail", { command: "many-lines" });
+			const output = getTextOutput(result);
+			const fullOutputPath = result.details?.fullOutputPath;
+			const [shown, footer] = output.split("\n\n[Showing");
+
+			expect(fullOutputPath).toBeDefined();
+			expect(shown.startsWith("line-0001\nline-0002\n")).toBe(true);
+			expect(shown).toContain(
+				`line-0125\n[... 3751 lines omitted (lines 126-3876); full output: ${fullOutputPath} ...]\nline-3877\n`,
+			);
+			expect(shown.endsWith("line-4000")).toBe(true);
+			expect(shown).not.toContain("line-0126");
+			expect(shown).not.toContain("line-3876");
+			expect(shown.split("\n").length).toBeLessThanOrEqual(250);
+			expect(Buffer.byteLength(shown, "utf-8")).toBeLessThanOrEqual(6 * 1024);
+			expect(footer).toBe(` lines 1-125, 3877-4000 of 4000. Full output: ${fullOutputPath}]`);
+			expect(readFileSync(fullOutputPath!, "utf-8").split("\n").length).toBe(4001);
 		});
 
 		it("should decode UTF-8 characters split across output chunks", async () => {
@@ -759,7 +789,7 @@ describe("Coding Agent Tools", () => {
 			expect(result.details?.truncation?.truncated).toBe(true);
 			expect(result.details?.truncation?.truncatedBy).toBe("lines");
 			expect(fullOutputPath).toBeDefined();
-			expect(output).toMatch(/\[Showing lines \d+-\d+ of \d+\. Full output: /);
+			expect(output).toMatch(/\[Showing lines 1-\d+, \d+-\d+ of \d+\. Full output: /);
 			expect(output).not.toContain("Full output: undefined");
 
 			for (let i = 0; i < 20 && (!fullOutputPath || !existsSync(fullOutputPath)); i++) {
@@ -771,6 +801,20 @@ describe("Coding Agent Tools", () => {
 			const fullOutput = readFileSync(fullOutputPath!, "utf-8");
 			expect(fullOutput).toContain("1\n2\n3");
 			expect(fullOutput).toContain("2998\n2999\n3000");
+		});
+
+		it("executeBash shows the head and tail of large output with an omitted-middle marker, within the budget", async () => {
+			const result = await executeBashWithOperations("seq 3000", process.cwd(), createLocalBashOperations());
+
+			expect(result.truncated).toBe(true);
+			expect(result.fullOutputPath).toBeDefined();
+			expect(result.output.startsWith("1\n2\n3\n")).toBe(true);
+			expect(result.output).toContain(
+				`\n250\n[... 2501 lines omitted (lines 251-2751); full output: ${result.fullOutputPath} ...]\n2752\n`,
+			);
+			expect(result.output.endsWith("\n3000")).toBe(true);
+			expect(result.output.split("\n").length).toBeLessThanOrEqual(500);
+			expect(Buffer.byteLength(result.output, "utf-8")).toBeLessThanOrEqual(12 * 1024);
 		});
 
 		it("executeBash should persist full output when truncation happens by line count only", async () => {

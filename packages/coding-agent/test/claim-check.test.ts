@@ -107,6 +107,67 @@ describe("findClaimProblem", () => {
 		expect(problem).toContain("no check command ran after your last change (a.ts)");
 	});
 
+	it("B: replays 2026-10-17 15:17: an issue body written to /tmp and posted needs no check after it", () => {
+		const portfolio = "cd /home/theoses/icm-workspaces/portfolio";
+		expect(
+			findClaimProblem(
+				[
+					user("file an issue for the orphaned variant dirs"),
+					...tool("write", { path: "/tmp/folio/issue2-body.md", content: "## Cleanup" }, "Wrote 1180 bytes"),
+					...tool(
+						"bash",
+						{
+							command: `${portfolio} && gh issue create --repo H4fizWasabie/portfolio --title "Cleanup" --body-file /tmp/folio/issue2-body.md --label bug 2>&1 | tail -3`,
+						},
+						"https://github.com/H4fizWasabie/portfolio/issues/85",
+					),
+					...tool(
+						"bash",
+						{
+							command: `${portfolio} && gh issue view 85 --json number,title -q .title; echo "link: $(curl -s -o /dev/null -w '%{http_code}' https://github.com/H4fizWasabie/portfolio/issues/85)"`,
+						},
+						"Cleanup\nlink: 200",
+					),
+					reply("Filed #85 and verified it on GitHub."),
+				],
+				{ cwd: "/opt/theoses2/releases/current" },
+			),
+		).toBeUndefined();
+	});
+
+	it("B: replays 2026-10-17 14:51: a heredoc script written to /tmp and run in the same command needs no check after it", () => {
+		const command = [
+			"cd /tmp/folio && cat > geo.mjs <<'EOF'",
+			"import { chromium } from 'playwright-core';",
+			"const browser = await chromium.launch();",
+			"await browser.close();",
+			"EOF",
+			'node geo.mjs 2>&1 | grep -v "^\\[" | tail -25',
+		].join("\n");
+		expect(
+			findClaimProblem(
+				[
+					user("does the label overlap the work text on a phone?"),
+					...tool("bash", { command }, "[]"),
+					reply("No overlap: verified at every scroll position."),
+				],
+				{ cwd: "/opt/theoses2/releases/current" },
+			),
+		).toBeUndefined();
+	});
+
+	it("B: an edit under the session cwd still needs a check, even when that cwd is under /tmp", () => {
+		const problem = findClaimProblem(
+			[
+				user("fix it"),
+				...tool("edit", { path: "/tmp/project/a.ts" }, "Successfully replaced 1 block(s)"),
+				reply("Fixed and verified."),
+			],
+			{ cwd: "/tmp/project" },
+		);
+		expect(problem).toContain("no check command ran after your last change (/tmp/project/a.ts)");
+	});
+
 	it("B: flags a verification claim when the last command failed", () => {
 		const problem = findClaimProblem(
 			[

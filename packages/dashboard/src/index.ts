@@ -17,6 +17,7 @@ import {
 	type SessionInfo,
 	SessionManager,
 	stripClockAnnotation,
+	withoutToolOutputId,
 } from "theoses-coding-agent";
 import { deletePath, FileConflictError, listDirectory, readTextFile, renamePath, writeTextFile } from "./files.ts";
 import { readMemoryGraph } from "./memory-graph.ts";
@@ -229,7 +230,9 @@ function sessionHistory(manager: SessionManager): HistoryTurn[] {
 				type: "tool_result",
 				id: message.toolCallId,
 				name: message.toolName,
-				result: message.content.map((part) => (part.type === "text" ? part.text : "[image]")).join(""),
+				result: withoutToolOutputId(message.content)
+					.map((part) => (part.type === "text" ? part.text : "[image]"))
+					.join(""),
 				isError: message.isError,
 			};
 			const last = turns.at(-1);
@@ -304,7 +307,7 @@ function sseSend(response: ServerResponse, event: string, data: unknown): void {
 function toolResultText(result: unknown): string {
 	if (typeof result === "string") return result;
 	if (result && typeof result === "object" && Array.isArray((result as { content?: unknown }).content)) {
-		return (result as { content: Array<{ type: string; text?: string }> }).content
+		return withoutToolOutputId((result as { content: Array<{ type: string; text?: string }> }).content)
 			.map((part) => (part.type === "text" ? (part.text ?? "") : "[image]"))
 			.join("");
 	}

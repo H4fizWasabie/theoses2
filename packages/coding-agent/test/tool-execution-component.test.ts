@@ -187,8 +187,8 @@ describe("ToolExecutionComponent parity", () => {
 		expect(rendered.match(/Full output:/g)?.length ?? 0).toBe(1);
 		expect(rendered).toMatch(/line-4000[^\n]*\n[^\S\n]*\n \[Full output:/);
 		expect(rendered).not.toMatch(/line-4000[^\n]*\n[^\S\n]*\n[^\S\n]*\n \[Full output:/);
-		expect(rendered).toContain("Truncated: showing 250 of 4000 lines");
-		expect(rendered).not.toContain("[Showing lines 3751-4000 of 4000. Full output:");
+		expect(rendered).toContain("Truncated: showing 249 of 4000 lines");
+		expect(rendered).not.toContain("[Showing lines 1-125, 3877-4000 of 4000. Full output:");
 	});
 
 	test("does not duplicate built-in headers when passed the active built-in definition", () => {
@@ -409,6 +409,26 @@ describe("ToolExecutionComponent parity", () => {
 		expect(rendered).toContain("one");
 		expect(rendered).toContain("two");
 		expect(rendered).not.toContain("two\n\n");
+	});
+
+	test("shows a result without its tool-output id, which is for the model to cite", () => {
+		const component = new ToolExecutionComponent(
+			"read",
+			"tool-output-id",
+			{ path: "notes.txt" },
+			{},
+			createReadToolDefinition(process.cwd()),
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.updateResult(
+			{ content: [{ type: "text", text: "⟨t12⟩\nfirst line\nsecond line" }], details: undefined, isError: false },
+			false,
+		);
+		component.setExpanded(true);
+		const rendered = stripAnsi(component.render(120).join("\n"));
+		expect(rendered).toContain("first line");
+		expect(rendered).not.toContain("⟨t12⟩");
 	});
 
 	test("does not syntax-highlight read errors based on the requested file path", () => {

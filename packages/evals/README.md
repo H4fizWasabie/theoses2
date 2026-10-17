@@ -202,6 +202,15 @@ the `OPENROUTER_API_KEY` Actions secret, which should have a hard credit limit o
 The job summary shows the per-task table, the run records are uploaded as the `eval-runs` artifact, and the job fails when the
 easy set drops below 85%, the hard set below 70%, the recovery set below 70% or the replay set below 50%. Those floors sit under the first baseline and should rise as the agent improves.
 
+## Grounded share from recorded sessions
+
+Offline, no model call: `node scripts/grounded-share.ts <sessions-dir> --db <eval.db> [--from YYYY-MM-DD] [--to YYYY-MM-DD]`
+scores copied session logs with the coding agent's Claim reading and prints, per model per day, replies, Claims, the
+Grounded share, Guesses and the prompt-cache ratio from eval.db. The headline counts specific Claims only (3+ digits,
+decimals, paths, URLs); 1-2 digit integers match tool output by coincidence ("15" in `Oct 15 23:43`), so they get their
+own untrusted `small` column. Copies of a session are deduped by entry id. Run it on a copy (`rsync` from the VPS), never
+on the live directory. The script imports `theoses-coding-agent`, so build the workspace first (`npm run build`).
+
 ## Writing evals
 
 Follow [`vitest-evals`](https://github.com/getsentry/vitest-evals) for general suite, judge, assertion, and normalized

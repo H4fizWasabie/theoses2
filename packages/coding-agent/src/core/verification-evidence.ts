@@ -3,7 +3,7 @@
  * is satisfied only by its declared check command, run after the last source change (and after the item was
  * declared); a "tested/verified" claim needs the same. The Task Plan, its guard and the claim check all ask
  * here, so they judge one run with the same cwd and the same protected paths (files the run edited, which a
- * write never counts as scratch for).
+ * check never counts as scratch for). A write under the system temp directory is not a change to verify.
  *
  * `tool-runs.ts` is the shell-command parser behind this: what one command reads, changes and executes.
  */
@@ -14,7 +14,7 @@ import { FILE_TOOLS, isCheckCommand, runChangesFiles, type ToolRun, toolRuns } f
 export interface RunEvidence {
 	/** Tool results in execution order. */
 	readonly runs: readonly ToolRun[];
-	/** The run changed files (or tried to, through a shell command). */
+	/** The run changed files (or tried to, through a shell command) outside the system temp directory. */
 	readonly changed: boolean;
 	readonly lastChange: ToolRun | undefined;
 	/** The run called `task_plan`. */
@@ -41,7 +41,11 @@ function sameCommand(a: string, b: string): boolean {
 export function readRunEvidence(runMessages: AgentMessage[], cwd: string): RunEvidence {
 	const runs = toolRuns(runMessages);
 	const protectedPaths = runs.filter((run) => FILE_TOOLS.has(run.name) && run.path).map((run) => run.path as string);
-	const changes = runs.map((run) => runChangesFiles(run, cwd, protectedPaths));
+	// A write under the system temp directory (outside cwd) needs no check after it, even to a file this run edited:
+	// a throwaway script or an issue body is not a change to verify (#578). Protected paths still keep a check from
+	// rewriting such a file.
+	// ponytail: a real worktree under /tmp reached by `cd` counts as scratch too; recognize repos there if that shows up.
+	const changes = runs.map((run) => runChangesFiles(run, cwd));
 	const lastChangeIndex = changes.lastIndexOf(true);
 	const isCheck = (run: ToolRun) => isCheckCommand(run, cwd, protectedPaths);
 	const usedPlanTool = runs.some((run) => run.name === "task_plan");

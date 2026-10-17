@@ -34,6 +34,7 @@ export {
 	describeFinalError,
 	type RewindPoint,
 } from "./core/channel-session.ts";
+export { type Claim, type ClaimSpecificity, type ClaimStatus, readClaims } from "./core/claim-reading.ts";
 // Compaction
 export {
 	type BranchPreparation,
@@ -306,6 +307,7 @@ export {
 	type SkillFrontmatter,
 } from "./core/skills.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
+export { withoutToolOutputId } from "./core/tool-runs.ts";
 export {
 	HttpSidecarToolSource,
 	type HttpSidecarToolSourceOptions,

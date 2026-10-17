@@ -4,15 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, type TruncationResult, truncateHead, truncateTail } from "./truncate.ts";
 
-/** Bytes of the very start of the output kept alongside the tail, so truncated
- * output (e.g. build/install setup lines) isn't lost to only-the-end truncation. */
-export const DEFAULT_HEAD_BYTES = 1000;
+/**
+ * Share of the line and byte budget given to the start of truncated output; the rest goes to the
+ * omitted-middle marker and the end. Even, because the start of a listing and the errors and exit
+ * summary at the end of a build are both what the reader came for.
+ */
+const HEAD_SHARE = 0.5;
 
 export interface OutputAccumulatorOptions {
 	maxLines?: number;
 	maxBytes?: number;
-	/** Bytes of head to retain alongside the tail when truncated. Set to 0 to disable (tail-only). */
-	maxHeadBytes?: number;
 	tempFilePrefix?: string;
 	/** Directory to spill the full output into when truncated. Defaults to the OS temp dir. */
 	spillDir?: string;
@@ -37,13 +38,14 @@ function byteLength(text: string): number {
  * Incrementally tracks streaming output with bounded memory.
  *
  * Appends decode chunks with a streaming UTF-8 decoder, keeps only a decoded
- * tail for display snapshots, and opens a temp file when the full output needs
- * to be preserved.
+ * head and tail for display snapshots, and opens a temp file when the full
+ * output needs to be preserved.
  */
 export class OutputAccumulator {
 	private readonly maxLines: number;
 	private readonly maxBytes: number;
-	private readonly maxHeadBytes: number;
+	private readonly headMaxLines: number;
+	private readonly headMaxBytes: number;
 	private readonly maxRollingBytes: number;
 	private readonly tempFilePrefix: string;
 	private readonly spillDir: string;
@@ -69,7 +71,8 @@ export class OutputAccumulator {
 	constructor(options: OutputAccumulatorOptions = {}) {
 		this.maxLines = options.maxLines ?? DEFAULT_MAX_LINES;
 		this.maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
-		this.maxHeadBytes = options.maxHeadBytes ?? 0;
+		this.headMaxLines = Math.floor(this.maxLines * HEAD_SHARE);
+		this.headMaxBytes = Math.floor(this.maxBytes * HEAD_SHARE);
 		this.maxRollingBytes = Math.max(this.maxBytes * 2, 1);
 		this.tempFilePrefix = options.tempFilePrefix ?? "pi-output";
 		this.spillDir = options.spillDir ?? tmpdir();
@@ -102,45 +105,51 @@ export class OutputAccumulator {
 		}
 	}
 
+	/**
+	 * Under the budget: the output as it is. Over it: the head, a marker naming the omitted lines and
+	 * the full-output path, and the tail, all within maxLines and maxBytes.
+	 */
 	snapshot(options: { persistIfTruncated?: boolean } = {}): OutputSnapshot {
-		const tailTruncation = truncateTail(this.getSnapshotText(), {
-			maxLines: this.maxLines,
-			maxBytes: this.maxBytes,
-		});
 		const truncated = this.totalLines > this.maxLines || this.totalDecodedBytes > this.maxBytes;
-		const truncatedBy = truncated
-			? (tailTruncation.truncatedBy ?? (this.totalDecodedBytes > this.maxBytes ? "bytes" : "lines"))
-			: null;
-		const truncation: TruncationResult = {
-			...tailTruncation,
-			truncated,
-			truncatedBy,
-			totalLines: this.totalLines,
-			totalBytes: this.totalDecodedBytes,
-			maxLines: this.maxLines,
-			maxBytes: this.maxBytes,
-		};
-
-		if (options.persistIfTruncated && truncation.truncated) {
+		if (!truncated) {
+			const truncation = truncateTail(this.getSnapshotText(), { maxLines: this.maxLines, maxBytes: this.maxBytes });
+			return { content: truncation.content, truncation, fullOutputPath: this.tempFilePath };
+		}
+		if (options.persistIfTruncated) {
 			this.ensureTempFile();
 		}
 
-		let content = truncation.content;
-		if (truncation.truncated && this.maxHeadBytes > 0 && this.headRaw.length > 0) {
-			const headTruncation = truncateHead(this.headRaw, {
-				maxBytes: this.maxHeadBytes,
-				maxLines: Number.MAX_SAFE_INTEGER,
-			});
-			if (headTruncation.content.length > 0) {
-				content = `${headTruncation.content}\n...\n${content}`;
-			}
-		}
+		const totalLines = this.totalLines;
+		const head = truncateHead(this.headRaw, { maxLines: this.headMaxLines, maxBytes: this.headMaxBytes });
+		const headLines = head.outputLines;
+		const where = this.tempFilePath ? `; full output: ${this.tempFilePath}` : "";
+		const marker = (omitted: number, tailStart: number) =>
+			omitted > 0
+				? `[... ${omitted} lines omitted (lines ${headLines + 1}-${tailStart - 1})${where} ...]`
+				: `[... start of line ${tailStart} omitted${where} ...]`;
+		// Widest marker this output can need, plus the two newlines around it.
+		const reserve = byteLength(marker(totalLines, totalLines + 1)) + 2;
+		const tail = truncateTail(this.getSnapshotText(), {
+			maxLines: this.maxLines - headLines - 1,
+			maxBytes: this.maxBytes - head.outputBytes - reserve,
+		});
+		const tailStart = totalLines - tail.outputLines + 1;
+		const middle = marker(tailStart - headLines - 1, tailStart);
+		const content = headLines > 0 ? `${head.content}\n${middle}\n${tail.content}` : `${middle}\n${tail.content}`;
 
-		return {
-			content,
-			truncation,
-			fullOutputPath: this.tempFilePath,
+		const truncation: TruncationResult = {
+			...tail,
+			truncated: true,
+			truncatedBy: tail.truncatedBy ?? (this.totalDecodedBytes > this.maxBytes ? "bytes" : "lines"),
+			totalLines,
+			totalBytes: this.totalDecodedBytes,
+			outputLines: headLines + tail.outputLines,
+			outputBytes: byteLength(content),
+			headLines,
+			maxLines: this.maxLines,
+			maxBytes: this.maxBytes,
 		};
+		return { content, truncation, fullOutputPath: this.tempFilePath };
 	}
 
 	async closeTempFile(): Promise<void> {
@@ -182,10 +191,10 @@ export class OutputAccumulator {
 		if (this.tailBytes > this.maxRollingBytes * 2) {
 			this.trimTail();
 		}
-		if (this.maxHeadBytes > 0 && !this.headFrozen) {
+		if (!this.headFrozen) {
 			this.headRaw += text;
-			// Small margin over maxHeadBytes so the later byte-safe cut always has enough to work with.
-			if (byteLength(this.headRaw) >= this.maxHeadBytes * 2) {
+			// Small margin over headMaxBytes so the later byte-safe cut always has enough to work with.
+			if (byteLength(this.headRaw) >= this.headMaxBytes * 2) {
 				this.headFrozen = true;
 			}
 		}

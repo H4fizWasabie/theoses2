@@ -54,6 +54,19 @@ describe("measureToolUse", () => {
 		expect(stats).toMatchObject({ duplicateCalls: 0, noNewEvidenceCalls: 1 });
 	});
 
+	it("compares results without their tool-output ids, which always differ", () => {
+		const whole = call("read", { path: "a.mjs" });
+		const ranged = call("read", { path: "a.mjs", offset: 1 });
+		const stats = measureToolUse([
+			assistant("toolUse", whole),
+			result(whole, `⟨t1⟩\n${LONG}`),
+			assistant("toolUse", ranged),
+			result(ranged, `⟨t2⟩\n${LONG}`),
+			assistant("stop"),
+		]);
+		expect(stats).toMatchObject({ noNewEvidenceCalls: 1 });
+	});
+
 	it("does not count a re-read after an edit, or any repeat of a bash command", () => {
 		const first = call("read", { path: "a.mjs" });
 		const edit = call("edit", { path: "a.mjs" });

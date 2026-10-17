@@ -1,11 +1,13 @@
-import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getModel } from "theoses-ai/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { activeContextWindowTurns } from "../src/core/compaction/compaction.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { getDefaultSessionDir } from "../src/core/session-discovery.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
+import { SettingsManager } from "../src/core/settings-manager.ts";
 
 describe("createAgentSession session manager defaults", () => {
 	let tempDir: string;
@@ -91,6 +93,40 @@ describe("createAgentSession session manager defaults", () => {
 		expect(session.sessionManager).toBe(sessionManager);
 		expect(session.sessionManager.isPersisted()).toBe(false);
 
+		session.dispose();
+	});
+
+	it("saves the full text of a tool result the window drops when a session is restored (#581)", async () => {
+		const model = getModel("anthropic", "claude-sonnet-4-5");
+		const window = activeContextWindowTurns(SettingsManager.inMemory({}).getCompactionSettings());
+		const sessionManager = SessionManager.create(cwd, join(tempDir, "sessions"));
+		sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "old question" }],
+			timestamp: 1,
+		} as Parameters<SessionManager["appendMessage"]>[0]);
+		sessionManager.appendMessage({
+			role: "toolResult",
+			toolCallId: "call_old",
+			toolName: "bash",
+			content: [{ type: "text", text: "⟨t1⟩\nRESTORED OUTPUT" }],
+			isError: false,
+			timestamp: 2,
+		} as Parameters<SessionManager["appendMessage"]>[0]);
+		for (let i = 0; i < window; i++) {
+			sessionManager.appendMessage({
+				role: "user",
+				content: [{ type: "text", text: `question ${i}` }],
+				timestamp: 3,
+			} as Parameters<SessionManager["appendMessage"]>[0]);
+		}
+
+		const { session } = await createAgentSession({ cwd, agentDir, model: model!, sessionManager });
+
+		expect(session.agent.state.messages.some((message) => message.role === "toolResult")).toBe(false);
+		expect(readFileSync(join(sessionManager.getArtifactDirectory(), "pruned-result-t1.txt"), "utf8")).toBe(
+			"RESTORED OUTPUT",
+		);
 		session.dispose();
 	});
 
