@@ -1,6 +1,7 @@
 import type { AgentMessage } from "theoses-agent-core";
 import type { AssistantMessage } from "theoses-ai";
 import { describe, expect, it, vi } from "vitest";
+import { askJevNouls } from "../src/core/jev-client.ts";
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
 import {
 	type CustomEntry,
@@ -10,6 +11,7 @@ import {
 } from "../src/core/session-manager.ts";
 
 vi.mock("../src/core/background-models.ts", () => ({ resolveBackgroundModel: () => ({ maxTokens: 100 }) }));
+vi.mock("../src/core/jev-client.ts", () => ({ askJevNouls: vi.fn() }));
 
 import {
 	combineRelatedSignals,
@@ -278,5 +280,54 @@ describe("maybeDetectTaskBoundary", () => {
 		answer("Fixing the auth bug");
 		await new Promise((resolve) => setTimeout(resolve, 20));
 		expect(descriptors(manager)).toHaveLength(0);
+	});
+});
+
+describe("maybeDetectTaskBoundary with Jev signals (incidents of 2026-10-17)", () => {
+	// A task_boundary marker is what makes compaction reset the summary chain.
+	async function boundariesAfter(signals: Record<string, number>) {
+		vi.mocked(askJevNouls).mockResolvedValueOnce(signals);
+		const manager = SessionManager.inMemory("/tmp/task-boundary-test", {
+			channel: "telegram",
+			channelSessionId: "1",
+		});
+		manager.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "The adjustment worth discussing: should the room be the homepage?" }],
+			timestamp: Date.now(),
+		} as AssistantMessage);
+		const userMessageText = "File a github issue and post it to portfolio repo.";
+		const userEntryId = manager.appendMessage({ role: "user", content: userMessageText, timestamp: Date.now() });
+		const modelRuntime = {
+			completeSimple: vi.fn(async () => ({
+				role: "assistant",
+				content: [{ type: "text", text: "File a GitHub issue for the portfolio review findings." }],
+				stopReason: "stop",
+			})),
+		} as unknown as ModelRuntime;
+		maybeDetectTaskBoundary({
+			channel: "telegram",
+			channelSessionId: "1",
+			userMessageText,
+			userMessageEntryId: userEntryId,
+			mainSessionManager: manager,
+			modelRuntime,
+		});
+		const customOf = (type: string) =>
+			manager.getBranch().filter((entry) => entry.type === "custom" && entry.customType === type);
+		await vi.waitFor(() => expect(customOf(TASK_DESCRIPTOR_CUSTOM_TYPE)).toHaveLength(1));
+		return customOf(TASK_BOUNDARY_CUSTOM_TYPE).length;
+	}
+
+	it("treats a continue/switch tie as continuing the task (14:56, review dropped)", async () => {
+		expect(await boundariesAfter({ continuesTask: 0.53, reactsToReply: 0.26, topicSwitch: 0.53 })).toBe(0);
+	});
+
+	it("still resets on a clear switch (14:20)", async () => {
+		expect(await boundariesAfter({ continuesTask: 0.08, reactsToReply: 0.12, topicSwitch: 0.73 })).toBe(1);
+	});
+
+	it("keeps a clear continue related (15:06)", async () => {
+		expect(await boundariesAfter({ continuesTask: 0.96, reactsToReply: 0.95, topicSwitch: 0.05 })).toBe(0);
 	});
 });
