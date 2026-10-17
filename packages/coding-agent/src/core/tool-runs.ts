@@ -7,7 +7,7 @@
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { AgentMessage } from "theoses-agent-core";
-import type { ToolCall, ToolResultMessage } from "theoses-ai";
+import type { ImageContent, TextContent, ToolCall, ToolResultMessage } from "theoses-ai";
 
 export const FILE_TOOLS = new Set(["edit", "write"]);
 export const COMMAND_TOOLS = new Set(["bash", "powershell"]);
@@ -25,6 +25,34 @@ export interface ToolRun {
 export function textOf(content: string | ReadonlyArray<{ type: string; text?: string }>): string {
 	if (typeof content === "string") return content;
 	return content.map((c) => (c.type === "text" ? (c.text ?? "") : "")).join("\n");
+}
+
+/**
+ * A tool result's id as the model sees it (#580, ADR-0013): `⟨t7⟩` and a newline at the very start of its first text
+ * block, put there once by AgentSession when the result is created and never changed after.
+ */
+const TOOL_OUTPUT_ID = /^⟨t(\d+)⟩\n?/;
+
+/** The content with `⟨t<id>⟩` in front; content that does not start with text gets the id as its own block. */
+export function withToolOutputId(content: (TextContent | ImageContent)[], id: number): (TextContent | ImageContent)[] {
+	const marker = `⟨t${id}⟩`;
+	const [first, ...rest] = content;
+	if (first?.type === "text") return [{ ...first, text: `${marker}\n${first.text}` }, ...rest];
+	return [{ type: "text", text: marker }, ...content];
+}
+
+export function toolOutputIdOf(content: ReadonlyArray<{ type: string; text?: string }>): number | undefined {
+	const first = content[0];
+	const match = first?.type === "text" ? first.text?.match(TOOL_OUTPUT_ID) : undefined;
+	return match ? Number(match[1]) : undefined;
+}
+
+/** The content as the tool returned it, for readers that show or compare the output rather than cite it. */
+export function withoutToolOutputId<T extends { type: string; text?: string }>(content: T[]): T[] {
+	const [first, ...rest] = content;
+	if (first?.type !== "text" || !first.text || !TOOL_OUTPUT_ID.test(first.text)) return content;
+	const text = first.text.replace(TOOL_OUTPUT_ID, "");
+	return text === "" && rest.length > 0 ? rest : [{ ...first, text }, ...rest];
 }
 
 export function firstLine(text: string, max = 200): string {
@@ -48,7 +76,7 @@ export function toolRuns(messages: AgentMessage[]): ToolRun[] {
 				path: typeof args.path === "string" ? args.path : undefined,
 				command: typeof args.command === "string" ? args.command : undefined,
 				isError: result.isError === true,
-				output: textOf(result.content),
+				output: textOf(withoutToolOutputId(result.content)),
 			});
 		}
 	}

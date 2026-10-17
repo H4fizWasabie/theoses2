@@ -141,7 +141,7 @@ describe("AgentSession command hooks", () => {
 
 			await h.session.prompt("go");
 
-			expect(toolResultText(h)).toBe("echo:hi[Hook] lint ok");
+			expect(toolResultText(h)).toBe("⟨t1⟩\necho:hi[Hook] lint ok");
 		});
 	});
 

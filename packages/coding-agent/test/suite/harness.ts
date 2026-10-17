@@ -73,6 +73,8 @@ export interface HarnessOptions {
 	sessionOptions?: NewSessionOptions;
 	/** Back the session with a log file under `<tempDir>/sessions` instead of memory. */
 	persist?: boolean;
+	/** An already opened session log, e.g. `SessionManager.open(file)` to reopen one; overrides `persist`. */
+	sessionManager?: SessionManager;
 }
 
 export interface Harness {
@@ -110,9 +112,11 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 	const withConfiguredAuth = options.withConfiguredAuth ?? true;
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};
 
-	const sessionManager = options.persist
-		? SessionManager.create(tempDir, join(tempDir, "sessions"), options.sessionOptions)
-		: SessionManager.inMemory(undefined, options.sessionOptions);
+	const sessionManager =
+		options.sessionManager ??
+		(options.persist
+			? SessionManager.create(tempDir, join(tempDir, "sessions"), options.sessionOptions)
+			: SessionManager.inMemory(undefined, options.sessionOptions));
 	const settingsManager = SettingsManager.inMemory(options.settings);
 
 	const authStorage = AuthStorage.inMemory();

@@ -338,7 +338,7 @@ describe("AgentSession model and extension characterization", () => {
 
 		await harness.session.prompt("hi");
 
-		expect(getAssistantTexts(harness)).toContain("patched result");
+		expect(getAssistantTexts(harness)).toContain("⟨t1⟩\npatched result");
 		const toolResult = harness.session.messages.find(
 			(message) => message.role === "toolResult" && message.details?.patched === true,
 		);

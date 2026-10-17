@@ -1,5 +1,6 @@
 import { Box, type Component, Container, getCapabilities, Image, Spacer, Text, type TUI } from "theoses-tui";
 import type { ToolDefinition, ToolRenderContext } from "../../../core/extensions/types.ts";
+import { withoutToolOutputId } from "../../../core/tool-runs.ts";
 import { createAllToolDefinitions, type ToolName } from "../../../core/tools/index.ts";
 import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.ts";
 import { convertToPng } from "../../../utils/image-convert.ts";
@@ -180,7 +181,7 @@ export class ToolExecutionComponent extends Container {
 		},
 		isPartial = false,
 	): void {
-		this.result = result;
+		this.result = { ...result, content: withoutToolOutputId(result.content) };
 		this.isPartial = isPartial;
 		this.updateDisplay();
 		this.maybeConvertImagesForKitty();

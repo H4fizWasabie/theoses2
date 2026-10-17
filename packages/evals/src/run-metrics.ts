@@ -1,5 +1,5 @@
 import { contentText } from "theoses-ai";
-import type { AgentSession } from "theoses-coding-agent";
+import { type AgentSession, withoutToolOutputId } from "theoses-coding-agent";
 
 // How a run used its tools, measured from the session's messages. This never decides whether a run was correct; the
 // grader does. It only describes how the agent got there, so runs and models can be compared on cost of the same answer.
@@ -83,7 +83,7 @@ export function measureToolUse(messages: readonly Message[]): ToolUse {
 				continue;
 			}
 			if (key === undefined || duplicateIds.has(message.toolCallId)) continue;
-			const text = contentText(message.content);
+			const text = contentText(withoutToolOutputId(message.content));
 			if (text.length < MIN_EVIDENCE_CHARS) continue;
 			if (seenResults.has(text)) use.noNewEvidenceCalls += 1;
 			seenResults.add(text);
