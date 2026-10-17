@@ -17,6 +17,7 @@
  * session's artifact directory and its path is left in the marker, so the model can `read` it.
  */
 import type { AgentMessage } from "theoses-agent-core";
+import { toolOutputIdOf, withoutToolOutputId } from "./tool-runs.ts";
 
 /** Below this the marker itself would not fit inside the cap, so pruning would not shrink anything. */
 export const MIN_PRUNING_CAP_CHARS = 400;
@@ -100,8 +101,15 @@ function pruneToolResult(
 	const raw = textBlocks.map((block) => block.text).join("\n");
 	if (isPrunedText(raw)) return message;
 
-	const path = spill?.(`result-${safeFileStem(message.toolCallId)}.txt`, raw);
-	const shrunk = shrinkText(raw, cap, `${message.toolName} output`, path);
+	// Named by the tool-output id (#581): the file and the marker both say which output it is. Results from before
+	// ids existed fall back to the tool call id.
+	const id = toolOutputIdOf(message.content);
+	const name = id === undefined ? safeFileStem(message.toolCallId) : `t${id}`;
+	const original = withoutToolOutputId(textBlocks)
+		.map((block) => block.text)
+		.join("\n");
+	const path = spill?.(`result-${name}.txt`, original);
+	const shrunk = shrinkText(raw, cap, `${message.toolName} output${id === undefined ? "" : ` ⟨t${id}⟩`}`, path);
 	// One text block carrying the excerpt; anything that is not text (images) is left as it was.
 	const rest = message.content.filter((block) => block.type !== "text");
 	stats.toolResults++;

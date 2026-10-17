@@ -811,12 +811,11 @@ export class AgentSession {
 
 	/**
 	 * Read once per session, at its first tool result, so a reopened log goes on from its highest id. Every branch
-	 * counts, so ids stay unique across the whole log.
-	 * ponytail: a rotated log (#519) whose kept tail holds no tool result starts again at 1; read the parent log's ids
-	 * too if outputs saved under an id ever need to stay unique across rotations.
+	 * counts, so ids stay unique across the whole log. A rotated log (#519) also carries the highest id its dropped
+	 * entries held (#581), so its kept tail need not hold a tool result for numbering to go on.
 	 */
 	private _firstUnusedToolOutputId(): number {
-		let highest = 0;
+		let highest = this.sessionManager.getHeader()?.carriedToolOutputId ?? 0;
 		for (const entry of this.sessionManager.getEntries()) {
 			if (entry.type === "message" && entry.message.role === "toolResult")
 				highest = Math.max(highest, toolOutputIdOf(entry.message.content) ?? 0);
