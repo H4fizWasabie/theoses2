@@ -1,5 +1,14 @@
 import { type AgentSessionEvent, describeFinalError, type PromptResult } from "theoses-coding-agent";
-import { chunkHtml, formatTelegramHtml, renderToolCallBlocks, splitSections, type ToolCallEntry } from "./format.ts";
+import {
+	type ClaimFooter,
+	chunkHtml,
+	formatTelegramHtml,
+	renderClaimFooter,
+	renderToolCallBlocks,
+	splitSections,
+	stripCitations,
+	type ToolCallEntry,
+} from "./format.ts";
 import { createToolCallLogger } from "./tool-call-log.ts";
 
 const TELEGRAM_MESSAGE_LIMIT = 4000;
@@ -75,7 +84,7 @@ export function createTurnView(outbox: Outbox, options: TurnViewOptions) {
 				const to = answerTo;
 				answerTo = undefined;
 				response = undefined;
-				statusPending = statusPending.then(() => sendReply(outbox, text, [], to, undefined));
+				statusPending = statusPending.then(() => sendReply(outbox, stripCitations(text), [], to, undefined));
 			} else {
 				response = text ?? response;
 			}
@@ -127,9 +136,18 @@ export function createTurnView(outbox: Outbox, options: TurnViewOptions) {
 				// Narration from before the failure must not hide it (2026-09-24: the owner saw only "Now
 				// proving it works..." and assumed the model stopped without calling a tool).
 				// Issue #382: the Task Plan status, so the owner sees what was done, deferred and reviewed.
-				const withStatus = result?.planStatus ? `${response}\n\n${result.planStatus}` : response;
+				// Citation markers and the Claim footer exist only in the delivered copy (ADR-0013).
+				const text = stripCitations(response);
+				const withStatus = result?.planStatus ? `${text}\n\n${result.planStatus}` : text;
 				const reply = errorText ? `${withStatus}\n\n${errorText}` : withStatus;
-				await sendReply(outbox, reply, toolCallDetail ? [] : toolNames, replyTo, editTarget);
+				await sendReply(
+					outbox,
+					reply,
+					toolCallDetail ? [] : toolNames,
+					replyTo,
+					editTarget,
+					renderClaimFooter(result?.claims),
+				);
 			} else if (errorText) {
 				if (editTarget !== undefined) await outbox.edit(editTarget, errorText, "plain").catch(() => {});
 				else await outbox.send(errorText, "plain", replyTo).catch(() => {});
@@ -180,11 +198,16 @@ async function sendReply(
 	toolNames: string[],
 	replyTo: number,
 	statusMessageId: number | undefined,
+	footer?: ClaimFooter,
 ): Promise<void> {
 	const sections = splitSections(reply);
 	let lastId: number | undefined = replyTo;
 	let pendingEditId = statusMessageId;
-	for (const [index, section] of sections.entries()) {
+	for (const [index, body] of sections.entries()) {
+		// The footer rides on the last section: rich form for the rich path, plain form once it falls back.
+		const last = index === sections.length - 1 && footer !== undefined;
+		const section = last ? `${body}\n\n${footer.rich}` : body;
+		const classicSection = last ? `${body}\n\n${footer.plain}` : body;
 		// Rich messages (Bot API 10.1) render tables, headings, collapsible blocks, footnotes and quotes
 		// natively. Attempted unconditionally for every section under the rich limit (issue #194: rich
 		// markdown is a strict superset of what classic HTML handles, so a content-based gate only adds
@@ -215,7 +238,7 @@ async function sendReply(
 		const names = index === sections.length - 1 ? toolNames : [];
 		// A chunk Telegram rejects as HTML (malformed markup -> 400) is resent as plain text: stray tags
 		// beat a lost message.
-		for (const chunk of chunkHtml(formatTelegramHtml(section, names), TELEGRAM_MESSAGE_LIMIT)) {
+		for (const chunk of chunkHtml(formatTelegramHtml(classicSection, names), TELEGRAM_MESSAGE_LIMIT)) {
 			const editId = pendingEditId;
 			pendingEditId = undefined; // only the very first chunk overall replaces the status message
 			if (editId !== undefined) {

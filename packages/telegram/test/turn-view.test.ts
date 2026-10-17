@@ -1,4 +1,4 @@
-import type { AgentSessionEvent } from "theoses-coding-agent";
+import type { AgentSessionEvent, ClaimSummary } from "theoses-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { createTurnView, extractGeneratedImages, type MessageFormat, type Outbox } from "../src/turn-view.ts";
 
@@ -47,6 +47,11 @@ const answer = (text: string) =>
 		type: "message_end",
 		message: { role: "assistant", content: [{ type: "text", text }] },
 	}) as unknown as AgentSessionEvent;
+const summary: ClaimSummary = {
+	grounded: [{ value: "15", status: "grounded", specificity: "small", source: "call-1", cited: 3 }],
+	guesses: [{ value: "13", status: "guess", specificity: "small" }],
+	contradictions: [],
+};
 const failure = {
 	outcome: "failed" as const,
 	finalError: { provider: "openrouter", model: "x/y", message: "timed out" },
@@ -69,6 +74,74 @@ describe("Turn View", () => {
 		view.onEvent(answer("done"));
 		await view.finish({ outcome: "completed", planStatus: "✓ run.sh · reviewed by luna: no gaps" });
 		expect(calls).toEqual(["send rich #100 ->7: done\n\n✓ run.sh · reviewed by luna: no gaps"]);
+	});
+
+	it("strips citation markers and adds the Claim footer to delivered text only", async () => {
+		const { outbox, calls } = recordingOutbox();
+		const view = createTurnView(outbox, { replyTo: 7, toolCallDetail: false });
+		view.onEvent(answer("There are 15 ⟨t3⟩ dirs and 13 files."));
+		await view.finish({ outcome: "completed", claims: summary });
+		expect(calls).toHaveLength(1);
+		const sent = calls[0];
+		expect(sent).not.toContain("⟨");
+		expect(sent).toContain("There are 15 dirs and 13 files.");
+		expect(sent).toContain("Grounded 1 · Guesses 1 (`13`)");
+		expect(sent).toContain("<details><summary>Grounded claims</summary>");
+		expect(sent).toContain("`15` t3");
+		expect(sent).not.toContain("Contradiction");
+	});
+
+	it("warns for a surviving Contradiction", async () => {
+		const { outbox, calls } = recordingOutbox();
+		const view = createTurnView(outbox, { replyTo: 7, toolCallDetail: false });
+		view.onEvent(answer("13 ⟨t3⟩ dirs"));
+		await view.finish({
+			outcome: "completed",
+			claims: {
+				grounded: [],
+				guesses: [],
+				contradictions: [
+					{ value: "13", status: "contradiction", specificity: "small", cited: 3, shown: "15 a | b" },
+				],
+			},
+		});
+		expect(calls[0]).toContain("⚠ Contradiction: said `13`, t3 shows `15 a | b`");
+	});
+
+	it("sends a reply without Claims exactly as before", async () => {
+		const { outbox, calls } = recordingOutbox();
+		const view = createTurnView(outbox, { replyTo: 7, toolCallDetail: false });
+		view.onEvent(answer("done"));
+		await view.finish({ outcome: "completed" });
+		expect(calls).toEqual(["send rich #100 ->7: done"]);
+	});
+
+	it("keeps the footer in plain form when the rich message falls back to HTML", async () => {
+		const { outbox, calls } = recordingOutbox(["send:rich"]);
+		const view = createTurnView(outbox, { replyTo: 7, toolCallDetail: false });
+		view.onEvent(answer("15 ⟨t3⟩ dirs"));
+		await view.finish({ outcome: "completed", claims: summary });
+		const sent = calls.at(-1) ?? "";
+		expect(sent).toMatch(/^send html /);
+		expect(sent).not.toContain("⟨");
+		expect(sent).not.toContain("details");
+		expect(sent).toContain("Grounded 1 · Guesses 1");
+		expect(sent).toContain("<code>13</code>");
+		expect(sent).toContain("<code>15</code> t3");
+	});
+
+	it("puts the footer on the last chunk of a reply that splits", async () => {
+		const { outbox, calls } = recordingOutbox(["send:rich"]);
+		const view = createTurnView(outbox, { replyTo: 7, toolCallDetail: false });
+		const long = Array.from({ length: 200 }, (_, i) => `line ${i} ${"x".repeat(40)}`).join("\n");
+		view.onEvent(answer(`${long} 15 ⟨t3⟩`));
+		await view.finish({ outcome: "completed", claims: summary });
+		const html = calls.filter((call) => call.startsWith("send html"));
+		expect(html.length).toBeGreaterThan(1);
+		for (const call of html) expect(call.length).toBeLessThan(4200);
+		expect(html.at(-1)).toContain("Grounded 1 · Guesses 1");
+		expect(html.slice(0, -1).some((call) => call.includes("Grounded 1"))).toBe(false);
+		expect(html.some((call) => call.includes("⟨"))).toBe(false);
 	});
 
 	it("falls back from rich to HTML to plain when editing the status, then to a fresh threaded send", async () => {

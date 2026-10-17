@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+- feat(telegram): Claim footer under replies (#586). Citation markers (`⟨tN⟩`) are stripped from delivered text, then one line "Grounded N · Guesses M (guesses named)", a collapsible block of Grounded Claims with their Citations, and a "⚠ Contradiction: said X, tN shows Y" line per surviving Contradiction. Replies with no Claims are unchanged. Delivered copy only: the session log and model context keep the markers. If the rich message falls back to classic HTML, the footer is sent in plain form. The TUI and dashboard still show the markers.
+
 ## [1.0.129] - 2026-10-17
 
 - feat(coding-agent): `excludedModels` accepts `!` allow patterns (#571). A model is excluded when it matches an exclude pattern and no allow pattern, in any order, so `["*deepseek*", "!openrouter/deepseek/deepseek-v4.1-flash"]` hides every DeepSeek model except that one, including DeepSeek ids added later. A bare-id allow (`!deepseek/deepseek-v4.1-flash`) allows that id on every provider using it. A trusted project's `!` patterns are ignored, so a project cannot lift your exclusions. Entries starting with `!` used to be literals that matched nothing.

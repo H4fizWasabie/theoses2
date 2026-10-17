@@ -4,6 +4,7 @@
  * <tg-spoiler> - no tables or lists, so pipe tables render as aligned <pre>
  * and list items as bullet lines. Ported from Mino's telegram_format.go.
  */
+import type { ClaimSummary } from "theoses-coding-agent";
 
 const RE_FENCE = /```(\w*)\n([\s\S]*?)```/g;
 const RE_HEADING = /^#{1,3}\s+(.+)$/;
@@ -29,6 +30,37 @@ const STASH_PATTERN = /\x00STASH(\d+)\x00/;
 
 function escapeHtml(text: string): string {
 	return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+/** The Claim footer in both renderings: rich (collapsible block) and plain (classic HTML fallback). */
+export interface ClaimFooter {
+	rich: string;
+	plain: string;
+}
+
+/** Delivery-only: removes the model's `⟨tN⟩` Citation markers (and the space before them) from reply text. */
+export function stripCitations(text: string): string {
+	return text.replace(/[ \t]*⟨t\d+⟩/g, "");
+}
+
+/** Values are model text: no backticks, one line, so a value cannot break out of its code span. */
+const code = (value: string) => `\`${value.replaceAll("`", "'").replace(/\s+/g, " ")}\``;
+
+/** Undefined for a reply with no Claims, so nothing is added. */
+export function renderClaimFooter(summary: ClaimSummary | undefined): ClaimFooter | undefined {
+	if (!summary) return undefined;
+	const guesses = summary.guesses.length > 0 ? ` (${summary.guesses.map((g) => code(g.value)).join(", ")})` : "";
+	const count = `Grounded ${summary.grounded.length} · Guesses ${summary.guesses.length}${guesses}`;
+	const warnings = summary.contradictions.map(
+		(c) => `⚠ Contradiction: said ${code(c.value)}, t${c.cited} shows ${code(c.shown ?? "")}`,
+	);
+	const items = summary.grounded.map((c) => `- ${code(c.value)}${c.cited === undefined ? "" : ` t${c.cited}`}`);
+	const list = items.join("\n");
+	const head = [count, ...warnings].join("\n");
+	return {
+		rich: items.length > 0 ? `${head}\n\n<details><summary>Grounded claims</summary>\n${list}\n</details>` : head,
+		plain: items.length > 0 ? `${head}\n\nGrounded claims:\n${list}` : head,
+	};
 }
 
 /** Splits a reply on lines that are exactly "---" into separate messages. */
