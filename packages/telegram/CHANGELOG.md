@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.130] - 2026-10-18
 
 - feat(telegram): Claim footer under replies (#586). Citation markers (`⟨tN⟩`) are stripped from delivered text, then one line "Grounded N · Guesses M (guesses named)", a collapsible block of Grounded Claims with their Citations, and a "⚠ Contradiction: said X, tN shows Y" line per surviving Contradiction. Replies with no Claims are unchanged. Delivered copy only: the session log and model context keep the markers. If the rich message falls back to classic HTML, the footer is sent in plain form. The TUI and dashboard still show the markers.
