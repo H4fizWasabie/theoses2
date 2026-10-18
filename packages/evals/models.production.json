@@ -21,6 +21,15 @@
 					},
 					"maxTokens": 65536
 				},
+				"deepseek/deepseek-v4.1-flash-1017": {
+					"compat": {
+						"openRouterRouting": {
+							"order": ["DeepInfra"],
+							"allow_fallbacks": false
+						}
+					},
+					"maxTokens": 65536
+				},
 				"openai/gpt-6-luna": {
 					"compat": {
 						"openRouterRouting": {

@@ -175,6 +175,7 @@ DeepSeek missed `misleading-error-shallow-merge` every pass (so did GLM). Luna a
 CI pins each model to the providers production routes it to, from `models.production.json`, with no fallback outside the list:
 - GLM 5.3 flash: GMICloud, then Novita, at fp8.
 - DeepSeek v4.1 flash: DeepInfra, then CoreWeave, then Morph.
+- DeepSeek v4.1 flash 1017: DeepInfra only (eval candidate, not in production).
 - GPT-6 Luna: OpenAI's flex tier, then its standard tier.
 
 The workflow's `providers: open` input lets OpenRouter choose instead. Runs before 2026-10-04 were not pinned. Update the file when production's pin changes.
