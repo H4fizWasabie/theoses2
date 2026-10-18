@@ -904,11 +904,15 @@ function applyThinkingLevelMetadata(model: Model<any>): void {
 	if (model.api === "anthropic-messages" && isAnthropicTemperatureUnsupportedModel(model.id)) {
 		mergeAnthropicMessagesCompat(model, { supportsTemperature: false });
 	}
-	if (model.api === "openai-completions" && model.id.includes("deepseek-v4")) {
+	const isOpenRouterDeepSeekAlias = model.provider === "openrouter" && model.id.startsWith("~deepseek/");
+	if (model.api === "openai-completions" && (model.id.includes("deepseek-v4") || isOpenRouterDeepSeekAlias)) {
 		mergeThinkingLevelMap(
 			model,
 			model.provider === "openrouter"
-				? { ...DEEPSEEK_V4_THINKING_LEVEL_MAP, xhigh: "xhigh", max: null }
+				? // OpenRouter lists xhigh only for the original v4 releases; newer v4 variants and ~deepseek aliases list max.
+					model.id === "deepseek/deepseek-v4-flash" || model.id === "deepseek/deepseek-v4-pro"
+					? { ...DEEPSEEK_V4_THINKING_LEVEL_MAP, xhigh: "xhigh", max: null }
+					: { ...DEEPSEEK_V4_THINKING_LEVEL_MAP, xhigh: null, max: "max" }
 				: (model.provider === "deepseek" || model.provider === "opencode" || model.provider === "opencode-go") &&
 					model.id.includes("deepseek-v4-flash")
 					? DEEPSEEK_V4_FLASH_THINKING_LEVEL_MAP
