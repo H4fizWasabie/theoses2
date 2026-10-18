@@ -127,6 +127,32 @@ describe("getSupportedThinkingLevels", () => {
 		expect(getSupportedThinkingLevels(model!)).toEqual(["off", "high", "xhigh"]);
 	});
 
+	it.each([
+		"deepseek/deepseek-v4.1-flash",
+		"deepseek/deepseek-v4.1-flash-1017",
+		"deepseek/deepseek-v4.1-flash:batch",
+		"deepseek/deepseek-v4-flash-0731",
+		"deepseek/deepseek-v4-pro-0813",
+		"deepseek/deepseek-v4-flash-vision-exp",
+		"~deepseek/deepseek-flash-latest",
+		"~deepseek/deepseek-pro-latest",
+	] as const)("includes max but not xhigh for OpenRouter %s", (modelId) => {
+		const model = getModel("openrouter", modelId);
+		expect(model).toBeDefined();
+		expect(getSupportedThinkingLevels(model!)).toContain("max");
+		expect(getSupportedThinkingLevels(model!)).not.toContain("xhigh");
+	});
+
+	it.each(["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"] as const)(
+		"keeps xhigh but not max for original OpenRouter %s",
+		(modelId) => {
+			const model = getModel("openrouter", modelId);
+			expect(model).toBeDefined();
+			expect(getSupportedThinkingLevels(model!)).toContain("xhigh");
+			expect(getSupportedThinkingLevels(model!)).not.toContain("max");
+		},
+	);
+
 	it("includes max but not xhigh for OpenRouter Opus 4.6 (openai-completions API)", () => {
 		const model = getModel("openrouter", "anthropic/claude-opus-4.6");
 		expect(model).toBeDefined();
