@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+## [1.0.131] - 2026-10-18
+
+- fix: thinking `max` works for the newer OpenRouter DeepSeek v4 models (#596). v4.1-flash, v4.1-flash-1017, v4.1-flash:batch, v4-flash-0731, v4-pro-0813, v4-flash-vision-exp and the `~deepseek/*` aliases now offer `max` and send it as effort `max`; before, `max` was clamped to `xhigh`, a level OpenRouter does not list for them, and the two non-v4 aliases stopped at `high`. The original v4-flash and v4-pro keep `xhigh`. On the coding eval at `max`, v4.1-flash-1017 scored 68/75 against v4.1-flash's 60/75.
+
 ## [1.0.130] - 2026-10-18
 
 - feat(coding-agent): Grounded Claims (spec #576). The reply is read for Claims (numbers, paths, URLs), each Grounded by a tool result from the Task or a Guess. Shipped as the tickets below.

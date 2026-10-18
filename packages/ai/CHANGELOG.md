@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+## [1.0.131] - 2026-10-18
+
+- fix(ai): OpenRouter DeepSeek v4 thinking `max` is sent as effort `max` (#596). OpenRouter lists `max`/`high`/`low`/`none` for v4.1-flash, v4.1-flash-1017, v4.1-flash:batch, v4-flash-0731, v4-pro-0813, v4-flash-vision-exp and the `~deepseek/*` aliases, but the generator mapped every OpenRouter v4 model to `xhigh`, so `max` was clamped and sent as a level those models do not list. The two aliases outside `deepseek-v4` had no map and topped out at `high`. The original v4-flash and v4-pro keep `xhigh`. Catalog prices for these models are refreshed.
+
 ## [1.0.130] - 2026-10-18
 
 - chore(ai): refresh model catalog (#575).
