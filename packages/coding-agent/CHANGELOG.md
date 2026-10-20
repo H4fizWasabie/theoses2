@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.132] - 2026-10-20
 
 - chore(ai): refresh model catalog (#599). The OpenRouter catalogue now lists `minimax/minimax-m3.1-flash:free`, so the model is selectable in the agent without a `models.json` override. The free variant has no provider pin, so OpenRouter serves it from its own first-party provider.

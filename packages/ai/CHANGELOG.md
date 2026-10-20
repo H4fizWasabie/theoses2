@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [1.0.132] - 2026-10-20
 
 - chore(ai): refresh model catalog (#599). The OpenRouter catalogue now lists `minimax/minimax-m3.1-flash:free`, so the model is selectable without a `models.json` override. The same refresh carries the upstream adds and removals: OpenRouter gained `inception/mercury-3`, `unbiased/pareto-26.10` and the free MiniMax M3.1 Flash, and dropped `deepseek/deepseek-r1`.
