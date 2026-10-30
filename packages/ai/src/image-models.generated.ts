@@ -905,6 +905,21 @@ export const IMAGE_MODELS = {
 				cacheWrite: 0,
 			},
 		} satisfies ImagesModel<"openrouter-images">,
+		"sourceful/riverflow-v2.6-pro": {
+			id: "sourceful/riverflow-v2.6-pro",
+			name: "Sourceful: Riverflow V2.6 Pro",
+			api: "openrouter-images",
+			provider: "openrouter",
+			baseUrl: "https://openrouter.ai/api/v1",
+			input: ["text", "image"],
+			output: ["image"],
+			cost: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+			},
+		} satisfies ImagesModel<"openrouter-images">,
 		"tencent/hy-image-v3.5-preview": {
 			id: "tencent/hy-image-v3.5-preview",
 			name: "Tencent: Hy Image 3.5 Preview",
